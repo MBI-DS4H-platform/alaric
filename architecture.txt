@@ -1,0 +1,348 @@
+The very highest level is the task level. Parameters to reflect the user intention. 
+For normal users. Can be converted into web server.
+Status: Delay for the last.
+
+Conversion between very highest and high level: Straightforward-ish, but low priority.
+
+The high level is the model level. Model parameters with sufficient detail to arrive at unique chains 
+(but not in a unique way; e.g. the merge point is not defined)
+For power users. 
+Status: Delay until later.
+
+
+
+The middle level is the command level. The command list reflects the concrete actions to be taken.
+For example, where to merge the chains, and which filter to apply in which order.
+Status: Write by hand for the time being. Conversion between high and middle level is extremely difficult.
+
+Conversion between middle and low level: high-ish priority. Requires dependency tracking: 
+what can be executed right now, but also correct re-use of folders upon change of parameters.
+Seamless-like semantics of checksums-define-the-computation, without forcing the use of Seamless.
+
+
+The low level is a set of concrete bash script invocations that are to be executed. They closely mirror
+the actions.
+For now, the user executes them manually. 
+Scripts are tied to a folder ("action directory"), 
+that contains links to *all* dependencies (including all code files) and parameter
+files. A special JSON file contains all checksums (for reuse/deps tracking).
+Execution can be: 
+    - local mode (direct execution on a workstation or on an interactive shell of a compute node), 
+    - Slurm mode (prepend with sbatch depending on generic slurm config) 
+    - Seamless mode (preprend with seamless-run depending on seamless.yaml config),
+A special --scratch mode indicates that the folder is not to be kept (for long). 
+    Local mode: write to /tmp or /scratch and softlink
+    Slurm mode: refuse to execute (don't write to network file sys; need to run from compute node)
+    Seamless mode: seamless-run --scratch 
+
+Conversion between the high and middle level
+============================================
+
+The first step is to understand the whole process as a graph of pose pools where *constraints must be propagated*. *How* exactly the constraints are propagated  is a matter of tactics. The end result is always the same: a graph where *each* contraint has been propagated to *each* pose pool.
+
+The simplest way to demonstrate this is by a series of examples. 
+
+## Example 1
+
+The simplest non-trivial example is a single fragment with double stacking. This graph has three constraints (filters): 
+
+- S1: the stacking with anchor1
+- S2: the stacking with anchor2
+- A: the scoring with ATTRACT.
+
+The first steps are then as follows 
+    - stack S1 => pool P1
+    - stack S2 => pool P2. 
+The following equivalent tactics are then possible:
+1. score P2 => pool AP1 ; score P2 => pool AP2; identity-merge AP1 AP2 => pool P
+2. identity-merge P1 P2 => pool MP; score MP => pool P
+In both cases, the final pool P is the same, and takes into account all filters.
+All constraints have been propagated into it.
+
+## Example 2
+
+A trinucleotide with stacking on nucleotide 1 and nucleotide 3.
+
+Constraints:
+- S1: the stacking on fragment 1 nucleotide 1
+- S2: the stacking on fragmet 2 nucleotide 2
+- A1: the scoring with ATTRACT of fragment 1
+- A2: the scoring with ATTRACT of fragment 2
+- O12: the allowed overlap RMSD between fragment1 poses and fragment2 poses
+- C12: the allowed conformer pairs of fragment1 + fragment2. 
+(These allowed conformer pairs can come from cRMSD, from common trinucleotide pairs, or from conformer rarity analysis).
+
+The first steps are then as follows 
+    - stack S1 => score A1 => pool F1
+    - stack S2 => score A2 => pool F2
+
+Then, a number of strategies can be followed:
+
+Strategy A.
+
+1. F1 => bond0 => F1B; grow fwd --C12 --O12 F1B => F2Bfwd
+2. identity-merge F2 F2Bfwd => F2P
+3. grow bwd --C12 --O12 F2P => F1bwd; identity-merge F1bwd F1B => F1P
+    or: 3a. bond0 F2P => ... (as above)
+    or: 3b. connect bwd F2P --C12 --O12 --to F1bwd => F1P
+    or: 3c. propagate F1B --from F2P => F1P
+
+Explanations:
+
+- "grow" is the standard growing script. For each pose P in fragment n, find all poses Q for the next fragment m (n+1 for fwd, n-1 for bwd) that is compatible in terms of Cnm and Onm.
+The output pose pool "originates" from the input pose pool: each pose QQ in Q has as origin the pose P. This is a one-to-many (tree) relationship: duplicate QQ (originating from different P) are NOT deduplicated.
+ 
+- "connect" is a modified grow. Cnm is further pre-reduced by filtering out all conformers that are not in the "--to" pose pool. Likewise, rotaconformers are filtered out. At the end, for each rotamer+conformer in "--to", the translations are enumerated, and only those translations are considered.
+Note that this is semantically equivalent to "grow + identity-filter", it's just a tactical optimization.
+
+- "bond0" is a zero-length bond filter. This means: keep the poses of P1 whose center-of-mass of the common nucleotide (or several such centers, e.g. base + sugar + phosphate) is compatible with the center-of-mass of at least one pose in P2. 
+This is a *temporary* constraint, because (unless O12 is pathologically weak) it is universally weaker than the growing constraint, so it will be overwritten upon growing.
+
+- "propagate" propagates constraints. It takes an "input" pool 1 and a "from" pool 2.
+It is necessary that pool 2 has pool 1 as its origin. In the current example, this is the case but indirectly: the "from" pool F2P is a filtered version of F2Bfwd which indeed originates from input pool F1B.
+
+Strategy B.
+
+1. F2 => bond0 => F2B; grow bwd --C12 --O12 F2B => F1Bbwd
+2. identity-merge F1 F1Bbwd => F1P
+3. propagate F2B --from F1P => F2P
+
+Note that all strategies and sub-strategies result in the same pose pools. For each pose pool, all six constraints have been taken into account. This is because "identity-merge", 
+"grow" and "propagate" all propagate the constraints from their input pool(s) to their output pool. Taking strategy B as an example:
+- The initial pool F1 has constraints S1 and A1; pool F2 has S2 and A2.
+- In step 1, pool F1Bbwd inherits constraints S2 and A2 from pool F2B (propagated by "grow"). "grow" also applies O12 and C12, overwriting the weaker bond0 constraint on F2B.
+- In step 2., F1P inherits the constraints from both its input pools: 2 constraints from F1B and the 4 other constraints from F1Bbwd. F1P now has all six constraints.
+- In step 3., F2P inherits all six constraints from its input pools. 
+As a result, there is now for each fragment a pose pool with all six constraints. Therefore, we are done. 
+
+To get the byte-identical same results between all strategies, two more things needs to be done: the pose pools need to be deduplicated and then sorted, all the time keeping track of their origin; then, the origin must also be be written in reverse format inside the other pose pool. But these are technical details.
+
+## Example 3
+
+A 7-nucleotide with stacking on nucleotide 2 and nucleotide 7.
+
+Constraints (total: 19 + 9 bond restraints):
+- S1: the stacking on fragment 1 nucleotide 2
+- S2: the stacking on fragment 2 nucleotide 1
+- S7: the stacking on fragment 7 nucleotide 2
+- A1-A6: the scoring with ATTRACT of fragment 1-6
+- O12, O23, ..., O56: the allowed overlap RMSD between fragmentN poses and fragment(N+1) poses  (5 constraints)
+- C12, C23, ..., C56: the allowed conformer pairs of fragmentN + fragment(N+1). (5 constraints) 
+- bond1-1-3, ..., bond1-X-Y: bond1 restraints between fragmentX and fragmentY (X+2). (4 constraints)
+This means essentially that the each pose in X must be close enough to at least one pose in Y (and vice versa) form a bond.
+- bond2-1-4, bond2-2-5, bond2-2-6. Same, but between X and X+3. The distance
+can be maximally the length of the longest nucleotide (plus a bond length) in the entire library.
+- bond3-1-5, bond3-2-6. Same, but between X and X+4. The distance
+can be maximally the length of the longest dinucleotide (plus a bond length) in the library for fragment X+2.
+
+Common strategy:
+
+stack S2 => score => F2a (2 constraints)
+grow bwd F2a => score => F1a (5 constraints)
+filter-for-stack F1a S1 => F1b (6 constraints)
+propagate F2a --from F1b => F2b (6 constraints) 
+grow fwd F2b => score => F3a (9 constraints)
+propagate F2b --from F3a => F2c (9 constraints)
+propagate F1a --from F2c => F1b (9 constraints)
+retro-bond1 F3a --from F1b => F3b (9 constraints) (the bond constraint is only partial, see below)
+  (if necessary, propagate this back to F2 and F1)
+stack S7 => score => F6a (2 constraints)
+bond3 F3b --from F6a => F3c (9 constraints, new partial bond constraint)
+bond3 F6a --from F3b => F6b (2 constraints, new partial bond constraint)
+grow bwd F6b => score => F5a (5 constraints)
+bond2 F5a --from F3c => F5b (5 constraints, new partial bond constraint)
+bond2 F3c --from F5a => F3d (9 constraints, new partial bond constraint)
+
+Strategy A: merge at fragment 4
+
+grow bwd F5b => score => F4a (8 constraints)
+retro-bond1 F4a --from F6b => F4b (8 constraints, new partial bond constraint)
+grow fwd F3d => score => F4c (12 constraints) => identity-merge F4b => F4d 
+
+The last step gives F4d with 19 constraints. The constraints of the input pools is 12 and 8, but the F4 scoring constraint was already in both pools. 
+In practice, instead of grow fwd + identity-merge, what will be done is: "connect F3d --to F4b => F4d"
+
+Strategy B: merge at fragment 5
+grow fwd F3d => score => F4a (12 constraints)
+bond1 F4a --from F5b => F4b (12 constraints, new partial bond constraint)
+retro-bond2 F4b F1b => F4c (12 constraints, new partial bond constraint)
+retro-bond1 F4c F2c => F4d (12 constraints, new partial bond constraint)
+connect F4d --to F5b => F5c (12 + 2 + 5 = 19 constraints, adding the input pools plus C45 and O45)
+
+Explanations: 
+
+- "filter-for-stacking" is to filter all poses in the input pool for compatibility with stacking. Much faster than "stack", which generates billions of poses.
+
+- "retro-bond" is to retroactively filter connected poses against the bond constraint. Since this constraint is not very strong compared to the connecting O constraints already applied, this should typically keep all poses (which is as it should be)
+
+- After the merging: all constraints are propagated to the extremities. Then, the bond 
+constraints are re-applied in retro mode, removing their "partial" status. They were "partial because they were applied against "all" being a superset of the final poses, i.e. a weaker constraint. 
+
+## Limitations
+
+What this scheme does not capture is rarity analysis of higher-order, i.e beyond C12.
+
+## Technical feature: rebase and obsoletion
+
+In this scheme, there are two kind of pose pools: concrete and indexed. "stack" and "grow" (and "connect") generate concrete poses. All other actions take existing poses and filter them. The result is indices into a concrete pose pool. This is theoretically fine, but since generated poses are billions, this is terrible in terms of disk access. Therefore, "rebase" takes a indexed pose pool and changes it into a concrete one. If this is done for all pose pools for a fragment, the original concrete pose pool (billions of poses) is now obsolete and can be deleted.
+
+## Automatization
+
+An automatizer software is needed. This is both easy and hard.
+
+On the one hand, choosing the appropriate tactics for a given docking run is not particularly hard. 
+Propagations and bond filters are cheap, they must be applied to "tip" pools asap so that the next grow (which is an expensive operation) becomes faster. Obsoletions are to be done to save disk space whenever reasonable. Growing small pools should be done before big pools, but sometimes they can be launched in parallel if it is clear that both will happen anyway (without much more prefiltering to come) in the near future. Same about "stack".
+
+On the other hand, the automatizer must think beyond the current run. First, multiple runs may be considered simultaneously, either in the context of sequence design or in the context of using words of conformer rarity. In addition, run parameters may be changed: it must be recognized that a sharper threshold (e.g. a stricter ovRMSD) can reuse the poses of the weaker threshold and just filter them.
+
+Finally, there is the HADDOCK factor. The obvious use of HADDOCK is at the very end when there are chains and then simply score them, taking the top chains or chain clusters. However, there is also the use case of HADDOCK on subchains. To be used ad hoc when the number of subchains spirals out of control, with relative (top X) threshold. Or, systematic HADDOCK use with absolute thresholds can also be investigated, i.e. always run HADDOCK on all tetramers and keep an HADDOCK score better than H, where H has been derived from nearest-native tetramers. Finally, there is also the application of HADDOCK at low precision level, i.e. cluster a few million poses at an RMSD threshold that is "good enough" that HADDOCK still "works" while reducing the number of poses to something "reasonable".
+
+Therefore, considering all, creating an automatizer is more hard than easy. Because of this, the automatizer software will be called either Alaric or Amaury: both contain A-I and both are kings of the Goths.
+
+
+Helpers
+=======
+
+Helpers are modules (preferably a single file) that can be imported to perform a single function as 
+part of an action.
+
+- library.py . Requires configuration to load a fragment library / rotaconformers from files, and to
+eliminate/replace conformers based on the PDB code that is being modeled.
+Convert the rotations from rotvec to 3x3/quaternion when needed. DONE
+
+- parse_pdb.py. DONE
+
+- rna_pdb.py. Converts a parsed PDB into a list of nucleotides. DONE
+
+- mutate.py. Mutate nucleotide coordinates between A and G, and between C and U. DONE
+
+- offsets.py . Add offsets for each rotaconformer that was generated by the primary grow or connect algo. DONE
+
+- pose reader/writer: See "pose format".
+
+Actions
+=======
+
+- A. Anchor
+- B. Determine conformer pairs
+- C. Grow
+- D. Connect
+- E. Score poses with ATTRACT
+- F. Build (sub)chains
+- H. Score subchains with HADDOCK
+- I. Apply filter mask
+- J. Identity filter
+- K. Same-conformer filter (if rel ori unknown)
+- L. Propagate
+- M. Bond filter
+- N. Long-bond filter
+- O. Basepairing filter
+- P. Intra-RNA stacking filter
+- Q. Dedup
+
+Utils
+=====
+
+Command-line tools that perform a function unrelated to actions.
+
+- A. Add missing atoms (ATTRACT aareduce using pdb2pqr or mononuc lib)
+- B. Calculate RMSD towards a reference structure (with trace math!)
+- C. Modify a model (highest level) or command list (mid level) based on a reference structure
+- D. Average out chain overlapping nucleotides.
+- E. Visualize as PDB file
+
+
+Actions overview
+================
+
+## A. Anchor
+
+Create initial fragment poses from stacking interaction.
+Prototype for 2 stackings, using "provisional" classifiier (from nucleotide-stacking-interaction): 
+crocodile-OLD/util/pseudo-crocodile-2stack.py
+
+## B. Determine conformer pairs
+
+Determine which conformers the next fragment to grow can have.
+Simplest way is by cRMSD. Generates a one-to-many conformer-conformer pairing. Same for common trinucleotides.
+Statistical analysis (e.g. Louise's project, or nucleotide-library-fit/generate-words.py) would also be possible. 
+In that case, you may get sub-conformer mapping: map each pose to a sub-conformer, which has its own sub-conformer-conformer pairing.
+This way, you can restrict the fragN+1 conformers of fragN conformer X differently depending on by which fragN-1 conformer X is preceded.
+
+## C. Grow
+
+Build poses for fragment N+1 (or N-1) based on poses of fragment N. 
+Requires ovRMSD threshold, and conformer pairs.
+... (trace math!!) ...
+
+## D. Connect
+
+Build poses for fragment N+1 (or N-1) based on poses of fragment N and existing poses of fragment N+1.
+Achieves the same as a grow followed by a identity-filter.
+However, much more efficient since only the existing rotaconformers of each conformer of fragment N+1
+need be considered.
+
+## E. Score poses with ATTRACT
+
+Creates a filter mask based on ATTRACT score (attract-jax, to be modified)
+Requires:
+- A protein PDB file with no missing heavy atoms
+- Dinucleotide template PDB file 
+- Pose files, fragment libraries as usual.
+Steps:
+- Reduce both PDB files to ATTRACT atom types
+- On-the-fly compute potential and neighbor list grids
+- Convert poses to 4x4 matrices
+- Run attract-jax routines
+
+
+## L. Propagate (rebase)
+See "Pose connection and provenance"
+
+## M. Bond filter
+For poses in fragN, filter out those whose phosphate is not within bond distance of any pose in fragN+1 (or N-1).
+Probably use KDTrees or flat neighbor list grid.
+Note that this is an efficiency filter, it won't affect the outcome.
+
+## N. Long-bond filter
+As for bond, but between fragN and fragN+X (and much larger distance)
+
+## Q. Dedup
+See "Pose connection and provenance"
+
+Concepts
+
+========
+
+## Config
+Config for SLURM mode or seamless mode must be present (~/.crocodile)
+Fragment libraries are defined as checksum files. On the machine where the action is executed,
+  there must be config where to find the files (unless seamless mode, which has its own mechanism).
+
+## General action directory outline
+... (checksums, crocodile-init to create RUNNING status)
+Pose filtering creates indices (uint32) into original directory, not poses!
+Action is nearly always "input dir" => "output dir", by name.
+Caching: input directories are inspected for checksum hits, beyond the input dir whose name is specified.
+Output dir if exists must have the correct checksum signature, else error.
+(in other words, after running, changing an input parameter requires an output dir rename)
+
+### Pose format
+"poses.npy": 3 uint16 per pose: conformer, rotamer, offset index.
+"offsets.dat". First 6 bytes (3 x int16) is the mean to be added to each offset.
+Then, for each offset, 3 int8 values.
+If the offset spread in x or y or z is beyond 127 
+    OR there are more than 2**16 different offsets 
+    OR there are more than 2**32 poses,
+ then multiple poses.npy + offsets.dat must be created. (poses-N.npy + offsets-N.dat)
+
+### Pose connection and provenance
+The pose list has either an origin list (fragN-1 pose it was grown from)
+ or a connection list (many-to-many pose-pose connection edge list)
+Dedup is that identical poses are collapsed onto one, this also changes any origin list
+into a connection list.
+
+## Init and stats directories
+Init dir contains the input data (PDB file, RNA sequence)
+Stats directory contains stats about the action directories: number of poses, score distribution, RMSD distribution, etc.
+
