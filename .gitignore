@@ -1,0 +1,18 @@
+/crocodile
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Generated pose-pool outputs from local stack/grow runs.
+frag4-bwd/
+frag4-fwd/
+poses-*.npy
+poses-*.npy.zst
+offsets-*.dat
