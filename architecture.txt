@@ -310,6 +310,9 @@ As for bond, but between fragN and fragN+X (and much larger distance)
 ## Q. Dedup
 See "Pose connection and provenance"
 
+## R. Organize
+See "Pose format"
+
 Concepts
 
 ========
@@ -328,13 +331,68 @@ Output dir if exists must have the correct checksum signature, else error.
 (in other words, after running, changing an input parameter requires an output dir rename)
 
 ### Pose format
-"poses.npy": 3 uint16 per pose: conformer, rotamer, offset index.
-"offsets.dat". First 6 bytes (3 x int16) is the mean to be added to each offset.
-Then, for each offset, 3 int8 values.
-If the offset spread in x or y or z is beyond 127 
-    OR there are more than 2**16 different offsets 
-    OR there are more than 2**32 poses,
- then multiple poses.npy + offsets.dat must be created. (poses-N.npy + offsets-N.dat)
+first 7 bytes: alaric1
+3x uint8 : the mean M to be added to each offset x256
+uint16: the number of offsets nO 
+uint32: number of poses nP
+nO x 3 x int8: the offset array O
+nO x uint32: the offset count array C
+nP x 3 x uint16: the pose array P. 
+    conformer, rotamer, offset index into O
+
+The offset count array C contains for every element in O
+ the number of poses that belong to it.
+The sum of C is nP.
+
+To unpack a pose offset into grid coordinates:
+- Take the element of O at the offset index
+- Add 256 * M
+
+To pack a grid coordinate offset G into a pose offset
+- Calculate M0 as G rounded to the nearest multiple of 256.
+  ERROR if any element does not fit in a int8 .
+- Calculate M as M0 / 256
+- Calculate O0 as G - 256 * M
+- In the bucket M, in its O array, look up the index of O0. If it doesn't exist, append it to O
+- The pose offset is the index of O0 
+
+Pose writing is bucket-based and massively parallel.
+Each pose writer has its own cache size, by default 50 million poses (300 MB + offsets)
+Whenever the cache is full, the largest bucket is flushed to disk, using a random file name "unorganized-XXXXXXXX.arc"
+(adding .zst compression by default).
+A pose dir with such files can be *organized* (the "organize" action)
+Organization does the following.
+- It scans all unorganized pose files.
+- It looks for an .ORGANIZED-DONE marker. If it finds one, delete all unorganized pose files, delete the marker, and exit. If there is no such marker, and there are both organized (poses-*.arc) and unorganized files, exit with an error.  
+- Only M and nP are read from each pose file. All pose files are sorted into buckets based on M
+- Buckets are reorganized independently and in parallel.
+  The size of a bucket is the sum of its nP.
+  A global "organization capacity" command line parameter can be provided. Default: 2 billion.
+  Buckets are reorganized such that the total size of the reorganized buckets does not exceed this capacity.
+  For a single bucket, there is a sequential phase (assumes that the sequential phase of all previous buckets has ended)
+  and a parallel phase (independent of other buckets)
+Organization of a single bucket, sequential phase:
+- First, from all pose files, a single global O array and C array is built.
+  If any element in C would not fit in a uint32, give an error (to be implemented when this occurs in practice)
+  This O+C array is then sorted (for example, do a sort by O[2] then a stable sort by O[1] then a stable sort by O[0])
+  If the sum of C (i.e. nP) does not fit in a uint32, split the bucket into sub-buckets.
+  Each sub-bucket gets a chunk of O+C so that the sum of C stays a minimum amount under the maximum of uint32, for all sub-buckets except the last.
+  Each sub-bucket gets then organized as a single bucket.
+- There is a global pose file max, by default 100 million. It can't be larger than the maximum of uint32.
+  Based on this value, subdivide the bucket into files using the same approach as for the sub-buckets (but with a much smaller threshold of course).
+  The filename of each file is poses-X.arc, where X increases monotonically.
+  The offset of X is the cumsum of the number of files up to the pre
+  Write the header of each file (including the O and C for that file). 
+Organization of a single bucket, parallel phase:
+- After the sequential phase, each element in O corresponds to a mini-bucket, of which the size is given by the element in C.
+  It is also known to which file each mini-bucket belongs.
+  Sort each mini-bucket by conformer+rotamer (e.g first sort by rotamer, then stable sort by conformer).
+  Obviously, the offset index is 0 for the first mini-bucket for a particular file, and increases monotonically.
+  After sorting, append the mini-bucket poses to the file
+  (get the buffer of the numpy array).
+  Since the mini-buckets are sorted in order, there will only ever be one open file per bucket.
+After the parallel part has completed, the organizing is complete. Create the marker file, delete all unorganized pose files, then delete the marker.
+Organized poses are guaranteed to have each mini-bucket in only one file. Tools such as the identity filter can (must!) exploit this.
 
 ### Pose connection and provenance
 The pose list has either an origin list (fragN-1 pose it was grown from)
