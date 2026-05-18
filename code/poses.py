@@ -113,8 +113,22 @@ def _open_arc_bytes(path: str | Path) -> bytes:
     return path.read_bytes()
 
 
-def read_arc_header(path: str | Path) -> tuple[np.ndarray, int, int]:
-    raw = _open_arc_bytes(path)
+def _read_arc_prefix(path: str | Path, size: int) -> bytes:
+    path = Path(path)
+    if path.name.endswith(ARC_ZSTD_SUFFIX):
+        zstd = _require_zstandard("read")
+        with path.open("rb") as compressed:
+            with zstd.ZstdDecompressor().stream_reader(compressed) as reader:
+                data = reader.read(size)
+    else:
+        with path.open("rb") as handle:
+            data = handle.read(size)
+    if len(data) != size:
+        raise ValueError(f".arc file is too small: {path}")
+    return data
+
+
+def _parse_arc_header(raw: bytes, path: str | Path) -> tuple[np.ndarray, int, int]:
     if len(raw) < HEADER_SIZE:
         raise ValueError(f".arc file is too small: {path}")
     if raw[:7] != MAGIC:
@@ -124,6 +138,22 @@ def read_arc_header(path: str | Path) -> tuple[np.ndarray, int, int]:
     nO = MAX_NO if nO_raw == 0 else nO_raw
     nP = int(np.frombuffer(raw[12:16], dtype="<u4")[0])
     return M, nO, nP
+
+
+def read_arc_header(path: str | Path) -> tuple[np.ndarray, int, int]:
+    return _parse_arc_header(_read_arc_prefix(path, HEADER_SIZE), path)
+
+
+def read_arc_offsets(path: str | Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+    M, nO, nP = read_arc_header(path)
+    raw = _read_arc_prefix(path, HEADER_SIZE + nO * 3 + nO * 4)
+    pos = HEADER_SIZE
+    O = np.frombuffer(raw[pos : pos + nO * 3], dtype=np.int8).copy().reshape(nO, 3)
+    pos += nO * 3
+    C = np.frombuffer(raw[pos : pos + nO * 4], dtype="<u4").copy()
+    if int(C.sum(dtype=np.uint64)) != nP:
+        raise ValueError(f"sum(C) must equal nP in {path}")
+    return M, O, C, nP
 
 
 def read_arc_file(path: str | Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -254,6 +284,9 @@ def discover_unorganized(directory: str | Path) -> list[Path]:
 
 
 def _pose_index_from_arc_name(name: str) -> int | None:
+    if name.startswith("poses-") and name.endswith(ARC_ZSTD_SUFFIX):
+        text = name[len("poses-") : -len(ARC_ZSTD_SUFFIX)]
+        return int(text) if text.isdigit() else None
     if not name.startswith("poses-") or not name.endswith(ARC_SUFFIX):
         return None
     text = name[len("poses-") : -len(ARC_SUFFIX)]
@@ -265,7 +298,9 @@ def discover_organized(directory: str | Path) -> list[Path]:
     if not directory.exists():
         return []
     indexed = []
-    for path in directory.glob("poses-*.arc"):
+    for path in list(directory.glob("poses-*.arc")) + list(
+        directory.glob("poses-*.arc.zst")
+    ):
         index = _pose_index_from_arc_name(path.name)
         if index is not None:
             indexed.append((index, path))
