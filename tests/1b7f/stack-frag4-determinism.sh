@@ -20,10 +20,10 @@ run() {  # <outdir> <cache-size> <nprocs>
     --pdb-exclude 1b7f \
     --resid 214 --first \
     --angle 30 --dihedral 45 -45 \
-    --test-conformers 100 --test-rotamers 1000 \
+    --conformer-range 1 100 --rotamer-range 1 1000 \
     --cache-size "$2" --nprocs "$3" \
     --output "$1/"
-  python3 code/organize.py "$1/" --nprocs "$3"
+  python3 code/organize.py "$1/" --nprocs "$3" --compress
 }
 
 status=0

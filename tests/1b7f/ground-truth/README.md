@@ -41,8 +41,8 @@ read-only reference) before being recorded:
 5. Recorded the sha256 of the blessed organized `.arc` here.
 
 Blessed on 2026-05-18 against crocodile at `crocodile/tests/1b7f`
-(`stack-frag4-fwd.sh` / `stack-frag4-bwd.sh`, `--test-conformers 100
---test-rotamers 1000`).
+(`stack-frag4-fwd.sh` / `stack-frag4-bwd.sh`, now expressed as
+`--conformer-range 1 100 --rotamer-range 1 1000`).
 
 Equality means identical sorted physical pose rows -- independent of `.arc`
 file boundaries -- which is then frozen as the binary `.arc` checksum.

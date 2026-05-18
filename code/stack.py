@@ -207,19 +207,14 @@ and the values in between are eliminated.""",
             "worker processes (default: no limit)."
         ),
     )
-    parser.add_argument(
-        "--test-seed",
-        type=int,
-        default=0,
-        help="Random seed for test options (default: 0).",
-    )
     conformer_group = parser.add_mutually_exclusive_group()
     conformer_group.add_argument(
-        "--test-conformers",
+        "--conformer-range",
+        nargs=2,
         type=int,
         default=None,
-        metavar="N",
-        help="If set, reduce the conformer library to N elements selected at random.",
+        metavar=("FIRST", "LAST"),
+        help="Restrict the search to available conformers with 1-based indices FIRST..LAST inclusive.",
     )
     conformer_group.add_argument(
         "--conformer",
@@ -229,14 +224,15 @@ and the values in between are eliminated.""",
         help="Restrict the search to a single 0-based conformer index.",
     )
     parser.add_argument(
-        "--test-rotamers",
+        "--rotamer-range",
+        nargs=2,
         type=int,
         default=None,
-        metavar="M",
+        metavar=("FIRST", "LAST"),
         help=(
-            "If set, reduce the rotamer library to M elements selected at random. "
-            "The same rotamers are selected for all conformers from among the first R rotamers, "
-            "where R is the smallest rotamer list among all conformers."
+            "Restrict every selected conformer to local rotamer positions FIRST..LAST inclusive. "
+            "Indices are 1-based. "
+            "LAST must fit within the smallest selected rotamer list."
         ),
     )
     parser.add_argument(
@@ -342,8 +338,7 @@ def _rotamers_to_matrices(rotamers: np.ndarray) -> np.ndarray:
 
 def _select_conformers(
     conformer_mask: np.ndarray,
-    count: int | None,
-    seed: int,
+    index_range: Sequence[int] | None,
     specific_index: int | None,
 ) -> np.ndarray:
     available_indices = np.nonzero(conformer_mask)[0]
@@ -361,12 +356,47 @@ def _select_conformers(
                 f"--conformer index {specific_index} is not available after exclusions"
             )
         return np.array([specific_index], dtype=available_indices.dtype)
-    if count is None or count >= len(available_indices):
+    if index_range is None:
         return available_indices.copy()
-    if count <= 0:
-        raise ValueError("--test-conformers must be positive")
-    rng = np.random.default_rng(seed)
-    return rng.choice(available_indices, size=count, replace=False)
+
+    first, last = index_range
+    if first <= 0:
+        raise ValueError("--conformer-range FIRST must be positive")
+    if last < first:
+        raise ValueError("--conformer-range LAST must be greater than or equal to FIRST")
+    if last > len(conformer_mask):
+        raise ValueError(
+            f"--conformer-range LAST index {last} out of range for library of size {len(conformer_mask)}"
+        )
+
+    requested = np.arange(first - 1, last, dtype=available_indices.dtype)
+    selected = requested[conformer_mask[requested]]
+    if len(selected) == 0:
+        raise ValueError("No conformers available in --conformer-range after exclusions")
+    return selected
+
+
+def _select_rotamer_positions(
+    index_range: Sequence[int] | None,
+    selected_conformers: np.ndarray,
+    rotaconformers_index: np.ndarray,
+) -> np.ndarray | None:
+    if index_range is None:
+        return None
+
+    first, last = index_range
+    if first <= 0:
+        raise ValueError("--rotamer-range FIRST must be positive")
+    if last < first:
+        raise ValueError("--rotamer-range LAST must be greater than or equal to FIRST")
+
+    rotamer_counts = np.diff(rotaconformers_index, prepend=0)
+    smallest_count = int(rotamer_counts[selected_conformers].min())
+    if last > smallest_count:
+        raise ValueError(
+            f"--rotamer-range LAST={last} is larger than the smallest selected rotamer list ({smallest_count})"
+        )
+    return np.arange(first - 1, last, dtype=np.int64)
 
 
 def _dihedral_filter(
@@ -476,7 +506,7 @@ def _process_conformer(
         and passing_rotamers_raw.max() > np.iinfo(np.uint16).max
     ):
         raise ValueError(
-            "Rotamer index exceeds uint16 range; use --test-rotamers to constrain per-conformer rotamers"
+            "Rotamer index exceeds uint16 range; use --rotamer-range to constrain per-conformer rotamers"
         )
     if conformer_index > np.iinfo(np.uint16).max:
         raise ValueError("Conformer index exceeds uint16 range")
@@ -738,8 +768,7 @@ def _run(args: argparse.Namespace) -> int:
 
     selected_conformers = _select_conformers(
         conformer_mask,
-        args.test_conformers,
-        args.test_seed,
+        args.conformer_range,
         args.conformer,
     )
     print(
@@ -747,26 +776,15 @@ def _run(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
 
-    rng = np.random.default_rng(args.test_seed)
-    selected_rotamer_positions: np.ndarray | None = None
-    if args.test_rotamers is not None:
-        if args.test_rotamers <= 0:
-            raise ValueError("--test-rotamers must be positive")
-        rotamer_counts = np.diff(rotaconformers_index, prepend=0)
-        smallest_count = int(rotamer_counts[selected_conformers].min())
-        if args.test_rotamers > smallest_count:
-            raise ValueError(
-                f"--test-rotamers={args.test_rotamers} is larger than the smallest selected rotamer list ({smallest_count})"
-            )
-        selected_rotamer_positions = rng.choice(
-            smallest_count,
-            size=args.test_rotamers,
-            replace=False,
-        )
+    selected_rotamer_positions = _select_rotamer_positions(
+        args.rotamer_range,
+        selected_conformers,
+        rotaconformers_index,
+    )
 
     print("[4/7] Generating offset candidates...", file=sys.stderr)
     print("[5/7] Applying distance-vector filter...", file=sys.stderr)
-    center_batch_size = 512 if args.test_rotamers is not None else 256
+    center_batch_size = 512 if args.rotamer_range is not None else 256
     offset_chunk_size = 2_000_000
     total_candidates = 0
     total_surviving = 0
