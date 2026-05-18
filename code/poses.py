@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import os
 from collections import defaultdict
+from contextlib import nullcontext
 from pathlib import Path
 import tempfile
 from typing import Iterable
@@ -274,16 +275,37 @@ def discover_organized(directory: str | Path) -> list[Path]:
 class PoseWriter:
     """Process-local unorganized .arc.zst shard writer."""
 
-    def __init__(self, outdir: str | Path, *, cache_poses: int = 50_000_000) -> None:
+    def __init__(
+        self,
+        outdir: str | Path,
+        *,
+        cache_poses: int = 50_000_000,
+        memory_lock=None,
+    ) -> None:
         self.outdir = Path(outdir)
         self.cache_poses = int(cache_poses)
         if self.cache_poses <= 0:
             raise ValueError("cache_poses must be positive")
-        self._buckets: dict[tuple[int, int, int], list[tuple[np.ndarray, np.ndarray, np.ndarray]]] = defaultdict(list)
+        self._memory_lock = memory_lock
+        self._unsorted_chunks: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+        self._buckets: dict[
+            tuple[int, int, int],
+            list[tuple[np.ndarray, np.ndarray, np.ndarray]],
+        ] = defaultdict(list)
         self._bucket_counts: dict[tuple[int, int, int], int] = defaultdict(int)
         self.total_poses = 0
-        self._cached_poses = 0
+        self._unsorted_poses = 0
+        self._sorted_poses = 0
         self._written: list[Path] = []
+
+    @property
+    def _cached_poses(self) -> int:
+        return 7 * self._unsorted_poses + self._sorted_poses
+
+    def _memory_guard(self):
+        if self._memory_lock is None:
+            return nullcontext()
+        return self._memory_lock
 
     def add_chunk(
         self,
@@ -301,24 +323,21 @@ class PoseWriter:
         if len(grid) == 0:
             return
 
-        Ms, Os = split_M_O(grid)
-        unique_M = np.unique(Ms, axis=0)
-        for M in unique_M:
-            mask = np.all(Ms == M, axis=1)
-            key = tuple(int(x) for x in M)
-            self._buckets[key].append(
-                (
-                    conf[mask].copy(),
-                    rot[mask].copy(),
-                    Os[mask].astype(np.int8, copy=True),
-                )
+        self._unsorted_chunks.append(
+            (
+                conf.copy(),
+                rot.copy(),
+                grid.astype(np.int16, copy=True),
             )
-            n = int(mask.sum())
-            self._bucket_counts[key] += n
-            self._cached_poses += n
-            self.total_poses += n
+        )
+        n = len(grid)
+        self._unsorted_poses += n
+        self.total_poses += n
 
         while self._cached_poses >= self.cache_poses:
+            self._sort_unsorted_chunks()
+            if self._cached_poses < self.cache_poses:
+                break
             largest = max(self._bucket_counts, key=self._bucket_counts.get)
             self._flush_bucket(largest)
 
@@ -330,31 +349,64 @@ class PoseWriter:
             if not path.exists():
                 return path
 
+    def _sort_unsorted_chunks(self) -> None:
+        with self._memory_guard():
+            chunks = self._unsorted_chunks
+            if not chunks:
+                return
+            self._unsorted_chunks = []
+            sorted_count = sum(len(chunk[0]) for chunk in chunks)
+
+            conf = np.concatenate([chunk[0] for chunk in chunks])
+            rot = np.concatenate([chunk[1] for chunk in chunks])
+            grid = np.concatenate([chunk[2] for chunk in chunks])
+            Ms, Os = split_M_O(grid)
+            unique_M = np.unique(Ms, axis=0)
+            for M in unique_M:
+                mask = np.all(Ms == M, axis=1)
+                key = tuple(int(x) for x in M)
+                self._buckets[key].append(
+                    (
+                        conf[mask].copy(),
+                        rot[mask].copy(),
+                        Os[mask].astype(np.int8, copy=True),
+                    )
+                )
+                self._bucket_counts[key] += int(mask.sum())
+            self._unsorted_poses -= sorted_count
+            self._sorted_poses += sorted_count
+
     def _flush_bucket(self, key: tuple[int, int, int]) -> None:
         parts = self._buckets.pop(key, [])
         count = self._bucket_counts.pop(key, 0)
         if count == 0:
             return
-        self._cached_poses -= count
-        conf = np.concatenate([p[0] for p in parts])
-        rot = np.concatenate([p[1] for p in parts])
-        O_rows = np.concatenate([p[2] for p in parts])
-        O, inverse = np.unique(O_rows, axis=0, return_inverse=True)
-        C = np.bincount(inverse, minlength=len(O)).astype(np.uint32)
-        P = np.column_stack((conf, rot, inverse.astype(np.uint16, copy=False)))
+        self._sorted_poses -= count
+        with self._memory_guard():
+            conf = np.concatenate([p[0] for p in parts])
+            rot = np.concatenate([p[1] for p in parts])
+            O_rows = np.concatenate([p[2] for p in parts])
+            O, inverse = np.unique(O_rows, axis=0, return_inverse=True)
+            C = np.bincount(inverse, minlength=len(O)).astype(np.uint32)
+            P = np.column_stack((conf, rot, inverse.astype(np.uint16, copy=False)))
+            M = np.array(key, dtype=np.int8)
+
         path = self._next_unorganized_path()
-        write_arc_file(path, np.array(key, dtype=np.int8), O, C, P, zstd=True)
+        write_arc_file(path, M, O, C, P, zstd=True)
         self._written.append(path)
 
     def finish(self) -> list[Path]:
+        self._sort_unsorted_chunks()
         for key in list(self._bucket_counts):
             self._flush_bucket(key)
         return list(self._written)
 
     def cleanup(self) -> None:
+        self._unsorted_chunks.clear()
         self._buckets.clear()
         self._bucket_counts.clear()
-        self._cached_poses = 0
+        self._unsorted_poses = 0
+        self._sorted_poses = 0
 
 
 def iter_decoded_rows(paths: Iterable[str | Path]) -> Iterable[np.ndarray]:
