@@ -4,6 +4,7 @@ library.py
 offsets.py
 parse_pdb.py
 poses.py
+organize.py
 rna_pdb.py
 mutate.py
 ../fraglib/templates/A-ppdb.npy

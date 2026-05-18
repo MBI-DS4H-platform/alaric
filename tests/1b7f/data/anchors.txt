@@ -1,0 +1,4 @@
+nuc 4 dom 2  214
+nuc 5 dom 2  256
+nuc 6 dom 1  131
+nuc 11 dom 1 170

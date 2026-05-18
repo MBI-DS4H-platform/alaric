@@ -13,6 +13,11 @@ htmlcov/
 # Generated pose-pool outputs from local stack/grow runs.
 frag4-bwd/
 frag4-fwd/
+frag4-det-*/
 poses-*.npy
 poses-*.npy.zst
+poses-*.arc
 offsets-*.dat
+unorganized-*.arc
+unorganized-*.arc.zst
+.ORGANIZED-DONE

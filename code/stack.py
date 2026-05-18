@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 from math import sqrt
 import sys
@@ -13,7 +14,7 @@ from tqdm import tqdm
 from library import config
 from offsets import get_discrete_offsets
 from parse_pdb import parse_pdb
-from poses import PoseStreamAccumulator
+from poses import PoseWriter, discover_organized
 from rna_pdb import ppdb2nucseq
 from stack_geometry import (
     RINGS,
@@ -134,14 +135,21 @@ and the values in between are eliminated.""",
         "--output",
         metavar="POSE_DIR",
         required=True,
-        help="Output directory where poses-*.npy and offsets-*.dat are written (must not exist).",
+        help="Output directory where unorganized .arc.zst pose shards are written.",
     )
     parser.add_argument(
-        "--max-poses-per-chunk",
+        "--cache-size",
         type=int,
-        default=30_000_000,
+        default=50_000_000,
         metavar="N",
-        help="Maximum number of poses per output file pair (default: 30000000).",
+        help="Approximate number of poses to cache before flushing an unorganized shard (default: 50000000).",
+    )
+    parser.add_argument(
+        "--nprocs",
+        type=int,
+        default=os.cpu_count() or 1,
+        metavar="N",
+        help="Reserved for launcher compatibility; run multiple stack.py instances for parallel production.",
     )
     parser.add_argument(
         "--test-seed",
@@ -331,12 +339,17 @@ def _run(args: argparse.Namespace) -> int:
         dihedral_min_deg, dihedral_max_deg = _dihedral_pair(args.dihedral)
     if args.margin < 0:
         raise ValueError("--margin must be non-negative")
-    if args.max_poses_per_chunk <= 0:
-        raise ValueError("--max-poses-per-chunk must be positive")
+    if args.cache_size <= 0:
+        raise ValueError("--cache-size must be positive")
+    if args.nprocs <= 0:
+        raise ValueError("--nprocs must be positive")
 
     output_dir = Path(args.output)
-    if output_dir.exists():
-        raise ValueError(f"--output directory already exists: {output_dir}")
+    if discover_organized(output_dir):
+        raise ValueError(
+            f"--output directory already contains organized poses-*.arc: {output_dir}"
+        )
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     print("[1/7] Loading protein structure...", file=sys.stderr)
     protein_atoms = parse_pdb(Path(args.protein).read_text())
@@ -396,10 +409,9 @@ def _run(args: argparse.Namespace) -> int:
     total_surviving = 0
     reverse_table: np.ndarray | None = None
 
-    stream_acc = PoseStreamAccumulator(
+    pose_writer = PoseWriter(
         output_dir,
-        zstd=True,
-        max_poses_per_chunk=args.max_poses_per_chunk,
+        cache_poses=args.cache_size,
     )
     distance_pbar = tqdm(
         desc="Offset-distance filter",
@@ -569,7 +581,7 @@ def _run(args: argparse.Namespace) -> int:
                         dtype=np.uint16,
                     )
                     rotamers_chunk = rot_batch[kept_disp]
-                    stream_acc.add_chunk(
+                    pose_writer.add_chunk(
                         conformers_chunk,
                         rotamers_chunk,
                         translations,
@@ -586,19 +598,19 @@ def _run(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         print("[7/7] Packing and writing poses...", file=sys.stderr)
-        written = stream_acc.finish()
+        written = pose_writer.finish()
         if len(written) > 1:
             print(
-                f"[7/7] Output split into {len(written)} chunks (poses-*.npy, offsets-*.dat).",
+                f"[7/7] Output split into {len(written)} unorganized .arc.zst shards.",
                 file=sys.stderr,
             )
 
-        print(f"{stream_acc.total_poses} total solutions", file=sys.stderr)
+        print(f"{pose_writer.total_poses} total solutions", file=sys.stderr)
         return 0
     finally:
         if hasattr(distance_pbar, "disable") and not distance_pbar.disable:
             distance_pbar.close()
-        stream_acc.cleanup()
+        pose_writer.cleanup()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
