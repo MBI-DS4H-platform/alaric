@@ -29,7 +29,8 @@ A checksum over alaric's own output is self-referential, so the values here
 were validated **once** against an independent implementation (crocodile,
 read-only reference) before being recorded:
 
-1. Regenerated crocodile old-format output anew:
+1. Regenerated crocodile old-format output anew for the original random
+   `--test-conformers 100 --test-rotamers 1000` script:
    `frag4-fwd/` (15,908,584 poses), `frag4-bwd/` (17,643,720 poses).
 2. Decoded fresh crocodile via crocodile's own `unpack_poses`, sorted rows
    by `x, y, z, conformer, rotamer`; its sha256 reproduced the previously
@@ -41,8 +42,13 @@ read-only reference) before being recorded:
 5. Recorded the sha256 of the blessed organized `.arc` here.
 
 Blessed on 2026-05-18 against crocodile at `crocodile/tests/1b7f`
-(`stack-frag4-fwd.sh` / `stack-frag4-bwd.sh`, now expressed as
-`--conformer-range 1 100 --rotamer-range 1 1000`).
+(`stack-frag4-fwd.sh` / `stack-frag4-bwd.sh`,
+`--test-conformers 100 --test-rotamers 1000`).
+
+The bwd checksum was updated on 2026-05-19 after `stack-frag4-bwd.sh`
+changed to deterministic first-index selection
+(`--conformer-range 1 100 --rotamer-range 1 1000`), producing
+18,837,845 poses.
 
 Equality means identical sorted physical pose rows -- independent of `.arc`
 file boundaries -- which is then frozen as the binary `.arc` checksum.
