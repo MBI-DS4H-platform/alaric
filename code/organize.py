@@ -3,16 +3,18 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+import contextlib
 from dataclasses import dataclass
+import multiprocessing as mp
 import os
 from pathlib import Path
-import shutil
 import sys
 import tempfile
 import threading
 from typing import Sequence
 
 import numpy as np
+from tqdm import tqdm
 
 from poses import (
     MAGIC,
@@ -43,7 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="Canonicalize unorganized alaric .arc pose shards.",
     )
     parser.add_argument("pose_dir", metavar="POSE_DIR")
-    parser.add_argument("--capacity", type=int, default=2_000_000_000)
+    parser.add_argument(
+        "--capacity",
+        type=int,
+        default=2_000_000_000,
+        help="Per-worker memory budget in poses; peak in-memory ~ capacity * nprocs * 4 bytes.",
+    )
     parser.add_argument("--max-poses-per-file", type=int, default=100_000_000)
     parser.add_argument(
         "--chunk-poses",
@@ -75,6 +82,13 @@ class Segment:
     offset_id: int
     start: int
     count: int
+
+
+@dataclass(frozen=True)
+class LayoutEntry:
+    M: tuple[int, int, int]
+    offset: tuple[int, int, int]
+    segment: Segment
 
 
 def _read_source_meta(path: Path) -> SourceMeta:
@@ -190,165 +204,6 @@ def _build_layouts(
     return layouts, destination
 
 
-def _scatter_source(
-    source: SourceMeta,
-    destination: dict[
-        tuple[tuple[int, int, int], tuple[int, int, int]],
-        list[Segment],
-    ],
-    temp_paths: list[Path],
-    temp_locks: list[threading.Lock],
-    split_ids: dict[tuple[tuple[int, int, int], tuple[int, int, int]], int],
-    split_paths: list[Path],
-    split_locks: list[threading.Lock],
-    chunk_poses: int,
-) -> None:
-    M = source.M
-    output_file = np.empty(len(source.O), dtype=np.uint16)
-    output_offset = np.empty(len(source.O), dtype=np.uint16)
-    split_local_ids = np.full(len(source.O), -1, dtype=np.int32)
-    for local_index, offset_row in enumerate(source.O):
-        key = (M, tuple(int(x) for x in offset_row))
-        segments = destination[key]
-        if len(segments) == 1:
-            segment = segments[0]
-            output_file[local_index] = segment.layout_id
-            output_offset[local_index] = segment.offset_id
-        else:
-            split_local_ids[local_index] = split_ids[key]
-
-    saw_chunk = False
-    checked_meta = False
-    for M_arr, O, C, P in iter_arc_pose_chunks(
-        source.path,
-        rows_per_chunk=chunk_poses,
-    ):
-        saw_chunk = True
-        if not checked_meta:
-            M = tuple(int(x) for x in M_arr)
-            if M != source.M:
-                raise ValueError(f"M changed while reading {source.path}")
-            if len(O) != len(source.O) or not np.array_equal(O, source.O):
-                raise ValueError(f"O changed while reading {source.path}")
-            if len(C) != len(source.C) or not np.array_equal(C, source.C):
-                raise ValueError(f"C changed while reading {source.path}")
-            checked_meta = True
-        if len(P) == 0:
-            continue
-
-        row_split_ids = split_local_ids[P[:, 2]]
-        split_mask = row_split_ids >= 0
-        for split_id in np.unique(row_split_ids[split_mask]):
-            mask = row_split_ids == split_id
-            records = P[mask, 0:2].astype(np.uint16, copy=True)
-            split_index = int(split_id)
-            with split_locks[split_index]:
-                with split_paths[split_index].open("ab") as handle:
-                    handle.write(records.tobytes(order="C"))
-
-        keep_mask = ~split_mask
-        if not np.any(keep_mask):
-            continue
-        kept_offsets = P[keep_mask, 2]
-        file_ids = output_file[kept_offsets]
-        offset_ids = output_offset[kept_offsets]
-        conf_rot = P[keep_mask, 0:2]
-        for file_id in np.unique(file_ids):
-            mask = file_ids == file_id
-            n = int(mask.sum())
-            if n == 0:
-                continue
-            records = np.empty((n, 3), dtype=np.uint16)
-            records[:, 0] = offset_ids[mask]
-            records[:, 1:3] = conf_rot[mask]
-            file_index = int(file_id)
-            with temp_locks[file_index]:
-                with temp_paths[file_index].open("ab") as handle:
-                    handle.write(records.tobytes(order="C"))
-
-    if not saw_chunk and source.nP != 0:
-        raise ValueError(f"no pose chunks read from {source.path}")
-
-
-def _distribute_split_offset(
-    split_path: Path,
-    segments: list[Segment],
-    temp_paths: list[Path],
-    temp_locks: list[threading.Lock],
-    work_dir: Path,
-    *,
-    chunk_poses: int,
-) -> None:
-    size = split_path.stat().st_size
-    if size % 4 != 0:
-        raise ValueError(f"{split_path} has a truncated record")
-    nrows = size // 4
-    expected = sum(segment.count for segment in segments)
-    if nrows != expected:
-        raise ValueError(f"{split_path} has {nrows} rows, expected {expected}")
-
-    rows = np.memmap(split_path, dtype=np.uint16, mode="r", shape=(nrows, 2))
-    packed_path = work_dir / f"{split_path.stem}.keys"
-    packed = np.memmap(
-        packed_path,
-        dtype=np.uint32,
-        mode="w+",
-        shape=(nrows,),
-    )
-    for start in range(0, nrows, chunk_poses):
-        stop = min(start + chunk_poses, nrows)
-        chunk = rows[start:stop]
-        packed[start:stop] = (
-            (chunk[:, 0].astype(np.uint32, copy=False) << 16)
-            | chunk[:, 1].astype(np.uint32, copy=False)
-        )
-    packed.flush()
-    packed.sort()
-    packed.flush()
-
-    try:
-        for segment in segments:
-            segment_stop = segment.start + segment.count
-            for start in range(segment.start, segment_stop, chunk_poses):
-                stop = min(start + chunk_poses, segment_stop)
-                chunk = packed[start:stop]
-                records = np.empty((len(chunk), 3), dtype=np.uint16)
-                records[:, 0] = segment.offset_id
-                records[:, 1] = (chunk >> 16).astype(np.uint16, copy=False)
-                records[:, 2] = chunk.astype(np.uint16, copy=False)
-                with temp_locks[segment.layout_id]:
-                    with temp_paths[segment.layout_id].open("ab") as handle:
-                        handle.write(records.tobytes(order="C"))
-    finally:
-        del packed
-        if packed_path.exists():
-            packed_path.unlink()
-
-
-def _compress_arc_file(source: Path, dest: Path) -> None:
-    try:
-        import zstandard as zstd
-    except ImportError as exc:
-        raise ImportError("zstandard is required for --compress") from exc
-
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        prefix=f"{dest.name}.",
-        suffix=".tmp",
-        dir=dest.parent,
-        delete=False,
-    ) as handle:
-        tmp_path = Path(handle.name)
-        with source.open("rb") as arc:
-            with zstd.ZstdCompressor().stream_writer(handle) as compressor:
-                shutil.copyfileobj(arc, compressor, length=1024 * 1024)
-    try:
-        tmp_path.replace(dest)
-    finally:
-        if tmp_path.exists():
-            tmp_path.unlink()
-
-
 def _write_arc_header(
     handle,
     M: np.ndarray,
@@ -378,140 +233,369 @@ def _write_arc_header(
     handle.write(C.astype("<u4", copy=False).tobytes(order="C"))
 
 
-def _write_arc_from_bucketed_conf_rot(
-    path: Path,
-    M: np.ndarray,
-    O: np.ndarray,
-    C: np.ndarray,
-    bucketed: np.memmap,
+def _build_layout_entries(
+    layouts: list[OutputLayout],
+    destination: dict[
+        tuple[tuple[int, int, int], tuple[int, int, int]],
+        list[Segment],
+    ],
+) -> list[list[LayoutEntry]]:
+    entries: list[list[LayoutEntry | None]] = [
+        [None] * len(layout.offsets) for layout in layouts
+    ]
+    for (M, offset), segments in destination.items():
+        for segment in segments:
+            entries[segment.layout_id][segment.offset_id] = LayoutEntry(
+                M=M,
+                offset=offset,
+                segment=segment,
+            )
+    finalized = []
+    for layout_id, layout_entries in enumerate(entries):
+        missing = [i for i, entry in enumerate(layout_entries) if entry is None]
+        if missing:
+            raise ValueError(f"layout {layout_id} is missing entries for {missing[:5]}")
+        finalized.append([entry for entry in layout_entries if entry is not None])
+    return finalized
+
+
+def _write_bucket(handle, offset_id: int, bucket: np.ndarray, *, chunk_poses: int) -> None:
+    bucket.sort()
+    for start in range(0, len(bucket), chunk_poses):
+        stop = min(start + chunk_poses, len(bucket))
+        chunk = bucket[start:stop]
+        P = np.empty((len(chunk), 3), dtype=np.uint16)
+        P[:, 0] = (chunk >> 16).astype(np.uint16, copy=False)
+        P[:, 1] = chunk.astype(np.uint16, copy=False)
+        P[:, 2] = offset_id
+        handle.write(P.tobytes(order="C"))
+
+
+@dataclass(frozen=True)
+class LayoutGroup:
+    M: tuple[int, int, int]
+    layout_ids: list[int]
+    nposes: int
+
+
+def _build_layout_groups(
+    layouts: list[OutputLayout],
     *,
-    chunk_poses: int,
-) -> None:
-    nP = int(C.sum(dtype=np.uint64))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        prefix=f"{path.name}.",
-        suffix=".tmp",
-        dir=path.parent,
-        delete=False,
-    ) as handle:
-        tmp_path = Path(handle.name)
-        _write_arc_header(handle, M, O, C, nP)
+    capacity: int,
+) -> list[LayoutGroup]:
+    groups: list[LayoutGroup] = []
+    current_M: tuple[int, int, int] | None = None
+    current_ids: list[int] = []
+    current_nposes = 0
 
-        row_start = 0
-        for offset_id, count_raw in enumerate(C):
-            count = int(count_raw)
-            row_stop = row_start + count
-            packed_rows = bucketed[row_start:row_stop]
-            packed_rows.sort()
-            for start in range(row_start, row_stop, chunk_poses):
-                stop = min(start + chunk_poses, row_stop)
-                chunk = bucketed[start:stop]
-                P = np.empty((len(chunk), 3), dtype=np.uint16)
-                P[:, 0] = (chunk >> 16).astype(np.uint16, copy=False)
-                P[:, 1] = chunk.astype(np.uint16, copy=False)
-                P[:, 2] = offset_id
-                handle.write(P.tobytes(order="C"))
-            row_start = row_stop
+    def close_current() -> None:
+        nonlocal current_M, current_ids, current_nposes
+        if current_M is None or not current_ids:
+            return
+        groups.append(LayoutGroup(current_M, current_ids, current_nposes))
+        current_M = None
+        current_ids = []
+        current_nposes = 0
 
-    try:
-        tmp_path.replace(path)
-    finally:
-        if tmp_path.exists():
-            tmp_path.unlink()
+    for layout_id, layout in enumerate(layouts):
+        nposes = int(sum(layout.counts))
+        if (
+            current_M is not None
+            and (
+                layout.M != current_M
+                or (current_nposes and current_nposes + nposes > capacity)
+            )
+        ):
+            close_current()
+        if current_M is None:
+            current_M = layout.M
+        current_ids.append(layout_id)
+        current_nposes += nposes
+    close_current()
+    return groups
 
 
-def _write_layout_from_temp(
+def _write_group_layout(
     pose_dir: Path,
     layout: OutputLayout,
-    temp_path: Path,
-    arc_temp_dir: Path,
+    entries: list[LayoutEntry],
+    buffers: dict[tuple[tuple[int, int, int], tuple[int, int, int]], np.ndarray],
     *,
     compress: bool,
     chunk_poses: int,
+    progress=None,
 ) -> int:
-    expected = int(sum(layout.counts))
-    size = temp_path.stat().st_size
-    if size % 6 != 0:
-        raise ValueError(f"{temp_path} has a truncated record")
-    nrecords = size // 6
-    if nrecords != expected:
-        raise ValueError(f"{temp_path} has {nrecords} records, expected {expected}")
+    try:
+        import zstandard as zstd
+    except ImportError as exc:
+        if compress:
+            raise ImportError("zstandard is required for --compress") from exc
+        zstd = None
 
-    records = np.memmap(temp_path, dtype=np.uint16, mode="r", shape=(expected, 3))
-    packed_path = arc_temp_dir / f"poses-{layout.file_index}.packed"
-    packed = np.memmap(
-        packed_path,
-        dtype=np.uint32,
-        mode="w+",
-        shape=(expected,),
-    )
-    counts = np.array(layout.counts, dtype=np.uint32)
-    starts = np.empty(len(counts), dtype=np.uint64)
-    if len(starts):
-        starts[0] = 0
-        np.cumsum(counts[:-1], dtype=np.uint64, out=starts[1:])
-    cursors = starts.copy()
-
-    for start in range(0, expected, chunk_poses):
-        stop = min(start + chunk_poses, expected)
-        chunk = records[start:stop]
-        offset_ids = chunk[:, 0]
-        conf_rot = (
-            (chunk[:, 1].astype(np.uint32, copy=False) << 16)
-            | chunk[:, 2].astype(np.uint32, copy=False)
-        )
-        order = np.argsort(offset_ids, kind="stable")
-        sorted_offsets = offset_ids[order]
-        sorted_conf_rot = conf_rot[order]
-        run_starts = np.r_[
-            0,
-            np.flatnonzero(sorted_offsets[1:] != sorted_offsets[:-1]) + 1,
-        ]
-        run_stops = np.r_[run_starts[1:], len(sorted_offsets)]
-        for run_start, run_stop in zip(run_starts, run_stops):
-            offset_id = int(sorted_offsets[run_start])
-            n = int(run_stop - run_start)
-            cursor = int(cursors[offset_id])
-            packed[cursor : cursor + n] = sorted_conf_rot[run_start:run_stop]
-            cursors[offset_id] += n
-    packed.flush()
-
-    expected_ends = starts + counts.astype(np.uint64, copy=False)
-    if not np.array_equal(cursors, expected_ends):
-        raise ValueError(f"{temp_path} has records that do not match layout counts")
-
+    M = np.array(layout.M, dtype=np.int8)
     O = np.array(layout.offsets, dtype=np.int8)
-    arc_path = (
-        arc_temp_dir / f"poses-{layout.file_index}.arc"
+    C = np.array(layout.counts, dtype=np.uint32)
+    dest = (
+        pose_dir / f"poses-{layout.file_index}.arc.zst"
         if compress
         else pose_dir / f"poses-{layout.file_index}.arc"
     )
-    try:
-        _write_arc_from_bucketed_conf_rot(
-            arc_path,
-            np.array(layout.M, dtype=np.int8),
-            O,
-            counts,
-            packed,
-            chunk_poses=chunk_poses,
-        )
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        prefix=f"{dest.name}.",
+        suffix=".tmp",
+        dir=dest.parent,
+        delete=False,
+    ) as raw_handle:
+        tmp_path = Path(raw_handle.name)
+        output_handle = raw_handle
+        compressor = None
         if compress:
-            _compress_arc_file(
-                arc_path,
-                pose_dir / f"poses-{layout.file_index}.arc.zst",
-            )
+            assert zstd is not None
+            compressor = zstd.ZstdCompressor().stream_writer(raw_handle)
+            output_handle = compressor
+        try:
+            _write_arc_header(output_handle, M, O, C, int(C.sum(dtype=np.uint64)))
+            for offset_id, entry in enumerate(entries):
+                key = (entry.M, entry.offset)
+                segment = entry.segment
+                bucket = buffers[key]
+                if len(bucket) == segment.count and segment.start == 0:
+                    out_bucket = bucket
+                    out_bucket.sort()
+                else:
+                    bucket.sort()
+                    out_bucket = bucket[
+                        segment.start : segment.start + segment.count
+                    ]
+                if len(out_bucket) != int(layout.counts[offset_id]):
+                    raise ValueError(f"layout count mismatch for {key}")
+                _write_bucket(
+                    output_handle,
+                    offset_id,
+                    out_bucket,
+                    chunk_poses=chunk_poses,
+                )
+                if progress is not None:
+                    progress.update(len(out_bucket))
+            if compressor is not None:
+                compressor.close()
+                compressor = None
+        finally:
+            if compressor is not None:
+                compressor.close()
+    try:
+        tmp_path.replace(dest)
     finally:
-        del packed
-        if packed_path.exists():
-            packed_path.unlink()
+        if tmp_path.exists():
+            tmp_path.unlink()
     return layout.file_index
+
+
+class _CounterSink:
+    __slots__ = ("counter",)
+
+    def __init__(self, counter) -> None:
+        self.counter = counter
+
+    def update(self, n: int) -> None:
+        if n <= 0:
+            return
+        with self.counter.get_lock():
+            self.counter.value += int(n)
+
+
+def _process_layout_group(
+    pose_dir: Path,
+    group: LayoutGroup,
+    layouts: list[OutputLayout],
+    layout_entries: list[list[LayoutEntry]],
+    sources: list[SourceMeta],
+    destination: dict[
+        tuple[tuple[int, int, int], tuple[int, int, int]],
+        list[Segment],
+    ],
+    *,
+    compress: bool,
+    chunk_poses: int,
+    progress: bool = True,
+    progress_counter=None,
+) -> None:
+    group_keys: list[tuple[tuple[int, int, int], tuple[int, int, int]]] = []
+    collect_counts: dict[
+        tuple[tuple[int, int, int], tuple[int, int, int]],
+        int,
+    ] = {}
+    for layout_id in group.layout_ids:
+        for entry in layout_entries[layout_id]:
+            key = (entry.M, entry.offset)
+            if key in collect_counts:
+                continue
+            segments = destination[key]
+            if len(segments) == 1:
+                collect_count = entry.segment.count
+            else:
+                collect_count = sum(segment.count for segment in segments)
+            collect_counts[key] = int(collect_count)
+            group_keys.append(key)
+
+    key_to_index = {key: index for index, key in enumerate(group_keys)}
+    buffers = {
+        key: np.empty(count, dtype=np.uint32)
+        for key, count in collect_counts.items()
+    }
+    cursors = np.zeros(len(group_keys), dtype=np.uint64)
+    group_sources = [source for source in sources if source.M == group.M]
+    if progress_counter is not None:
+        sink = _CounterSink(progress_counter)
+        read_cm = contextlib.nullcontext(sink)
+        write_cm = contextlib.nullcontext(sink)
+    else:
+        read_cm = tqdm(
+            total=group.nposes,
+            desc=f"Organize {group.M} read",
+            unit="pose",
+            unit_scale=True,
+            mininterval=2.0,
+            disable=not progress,
+        )
+        write_cm = tqdm(
+            total=group.nposes,
+            desc=f"Organize {group.M} write",
+            unit="pose",
+            unit_scale=True,
+            mininterval=2.0,
+            disable=not progress,
+        )
+    with read_cm as read_pbar:
+        for source in group_sources:
+            local_to_group = np.full(len(source.O), -1, dtype=np.int32)
+            for local_index, offset_row in enumerate(source.O):
+                key = (source.M, tuple(int(x) for x in offset_row))
+                group_index = key_to_index.get(key)
+                if group_index is not None:
+                    local_to_group[local_index] = group_index
+            if not np.any(local_to_group >= 0):
+                continue
+            saw_chunk = False
+            checked_meta = False
+            for M_arr, O, C, P in iter_arc_pose_chunks(
+                source.path,
+                rows_per_chunk=chunk_poses,
+            ):
+                saw_chunk = True
+                if not checked_meta:
+                    M = tuple(int(x) for x in M_arr)
+                    if M != source.M:
+                        raise ValueError(f"M changed while reading {source.path}")
+                    if len(O) != len(source.O) or not np.array_equal(O, source.O):
+                        raise ValueError(f"O changed while reading {source.path}")
+                    if len(C) != len(source.C) or not np.array_equal(C, source.C):
+                        raise ValueError(f"C changed while reading {source.path}")
+                    checked_meta = True
+                if len(P) == 0:
+                    continue
+                group_ids = local_to_group[P[:, 2]]
+                keep = group_ids >= 0
+                n_kept = int(np.count_nonzero(keep))
+                read_pbar.update(n_kept)
+                if n_kept == 0:
+                    continue
+                kept_group_ids = group_ids[keep]
+                kept_rows = P[keep, 0:2]
+                packed = (
+                    (kept_rows[:, 0].astype(np.uint32, copy=False) << 16)
+                    | kept_rows[:, 1].astype(np.uint32, copy=False)
+                )
+                order = np.argsort(kept_group_ids, kind="stable")
+                sorted_group_ids = kept_group_ids[order]
+                sorted_packed = packed[order]
+                run_starts = np.r_[
+                    0,
+                    np.flatnonzero(sorted_group_ids[1:] != sorted_group_ids[:-1]) + 1,
+                ]
+                run_stops = np.r_[run_starts[1:], len(sorted_group_ids)]
+                for run_start, run_stop in zip(run_starts, run_stops):
+                    group_index = int(sorted_group_ids[run_start])
+                    key = group_keys[group_index]
+                    n = int(run_stop - run_start)
+                    cursor = int(cursors[group_index])
+                    buffers[key][cursor : cursor + n] = sorted_packed[run_start:run_stop]
+                    cursors[group_index] += n
+            if not saw_chunk and source.nP != 0:
+                raise ValueError(f"no pose chunks read from {source.path}")
+
+    for index, key in enumerate(group_keys):
+        expected = len(buffers[key])
+        if int(cursors[index]) != expected:
+            raise ValueError(
+                f"group {group.M} offset {key[1]} has {int(cursors[index])} "
+                f"poses, expected {expected}"
+            )
+
+    with write_cm as write_pbar:
+        for layout_id in group.layout_ids:
+            _write_group_layout(
+                pose_dir,
+                layouts[layout_id],
+                layout_entries[layout_id],
+                buffers,
+                compress=compress,
+                chunk_poses=chunk_poses,
+                progress=write_pbar,
+            )
+
+
+_WORKER_STATE: dict = {}
+
+
+def _init_group_worker(state: dict) -> None:
+    _WORKER_STATE.clear()
+    _WORKER_STATE.update(state)
+
+
+def _run_group_in_worker(group: LayoutGroup) -> None:
+    state = _WORKER_STATE
+    _process_layout_group(
+        state["pose_dir"],
+        group,
+        state["layouts"],
+        state["layout_entries"],
+        state["sources"],
+        state["destination"],
+        compress=state["compress"],
+        chunk_poses=state["chunk_poses"],
+        progress=False,
+        progress_counter=state.get("progress_counter"),
+    )
+
+
+def _poll_progress(counter, total: int, stop_event: threading.Event) -> None:
+    with tqdm(
+        total=total,
+        desc="Organize poses",
+        unit="pose",
+        unit_scale=True,
+        mininterval=2.0,
+    ) as bar:
+        last = 0
+        while not stop_event.wait(0.5):
+            with counter.get_lock():
+                current = counter.value
+            if current > last:
+                bar.update(current - last)
+                last = current
+        with counter.get_lock():
+            current = counter.value
+        if current > last:
+            bar.update(current - last)
 
 
 def _organize_streaming(
     pose_dir: Path,
     sources: list[SourceMeta],
     *,
+    capacity: int,
     max_poses_per_file: int,
     nprocs: int,
     compress: bool,
@@ -524,107 +608,55 @@ def _organize_streaming(
     if not layouts:
         return 0
 
-    with tempfile.TemporaryDirectory(prefix=f"{pose_dir.name}.organize-") as temp_name:
-        temp_dir = Path(temp_name)
-        temp_paths = [
-            temp_dir / f"poses-{layout.file_index}.records" for layout in layouts
-        ]
-        for path in temp_paths:
-            path.touch()
-        temp_locks = [threading.Lock() for _ in temp_paths]
-        split_items = [
-            (key, segments)
-            for key, segments in destination.items()
-            if len(segments) > 1
-        ]
-        split_ids = {key: index for index, (key, _) in enumerate(split_items)}
-        split_paths = [
-            temp_dir / f"split-{index}.records" for index in range(len(split_items))
-        ]
-        for path in split_paths:
-            path.touch()
-        split_locks = [threading.Lock() for _ in split_paths]
-        arc_temp_dir = temp_dir / "arc"
-        arc_temp_dir.mkdir()
+    layout_entries = _build_layout_entries(layouts, destination)
+    effective_nprocs = max(1, nprocs)
+    groups = _build_layout_groups(layouts, capacity=capacity)
+    n_workers = min(effective_nprocs, len(groups))
+    if n_workers <= 1:
+        for group in tqdm(groups, desc="Organize ranges", unit="range"):
+            _process_layout_group(
+                pose_dir,
+                group,
+                layouts,
+                layout_entries,
+                sources,
+                destination,
+                compress=compress,
+                chunk_poses=chunk_poses,
+            )
+        return len(layouts)
 
-        workers = min(nprocs, max(len(sources), len(layouts)))
-        if workers <= 1:
-            for source in sources:
-                _scatter_source(
-                    source,
-                    destination,
-                    temp_paths,
-                    temp_locks,
-                    split_ids,
-                    split_paths,
-                    split_locks,
-                    chunk_poses,
-                )
-            for split_path, (_, segments) in zip(split_paths, split_items):
-                _distribute_split_offset(
-                    split_path,
-                    segments,
-                    temp_paths,
-                    temp_locks,
-                    arc_temp_dir,
-                    chunk_poses=chunk_poses,
-                )
-            for layout, temp_path in zip(layouts, temp_paths):
-                _write_layout_from_temp(
-                    pose_dir,
-                    layout,
-                    temp_path,
-                    arc_temp_dir,
-                    compress=compress,
-                    chunk_poses=chunk_poses,
-                )
-        else:
-            with ThreadPoolExecutor(max_workers=min(workers, len(sources))) as executor:
-                futures = [
-                    executor.submit(
-                        _scatter_source,
-                        source,
-                        destination,
-                        temp_paths,
-                        temp_locks,
-                        split_ids,
-                        split_paths,
-                        split_locks,
-                        chunk_poses,
-                    )
-                    for source in sources
-                ]
-                for future in futures:
-                    future.result()
-
-            if split_items:
-                with ThreadPoolExecutor(
-                    max_workers=min(workers, len(split_items))
-                ) as executor:
-                    futures = [
-                        executor.submit(
-                            _distribute_split_offset,
-                            split_path,
-                            segments,
-                            temp_paths,
-                            temp_locks,
-                            arc_temp_dir,
-                            chunk_poses=chunk_poses,
-                        )
-                        for split_path, (_, segments) in zip(split_paths, split_items)
-                    ]
-                    for future in futures:
-                        future.result()
-
-            for layout, temp_path in zip(layouts, temp_paths):
-                _write_layout_from_temp(
-                    pose_dir,
-                    layout,
-                    temp_path,
-                    arc_temp_dir,
-                    compress=compress,
-                    chunk_poses=chunk_poses,
-                )
+    ctx = mp.get_context("fork")
+    counter = ctx.Value("Q", 0)
+    total_work = 2 * sum(group.nposes for group in groups)
+    state = {
+        "pose_dir": pose_dir,
+        "layouts": layouts,
+        "layout_entries": layout_entries,
+        "sources": sources,
+        "destination": destination,
+        "compress": compress,
+        "chunk_poses": chunk_poses,
+        "progress_counter": counter,
+    }
+    stop_event = threading.Event()
+    poll_thread = threading.Thread(
+        target=_poll_progress,
+        args=(counter, total_work, stop_event),
+        daemon=True,
+    )
+    poll_thread.start()
+    try:
+        with ctx.Pool(
+            processes=n_workers,
+            initializer=_init_group_worker,
+            initargs=(state,),
+        ) as pool:
+            for _ in pool.imap_unordered(_run_group_in_worker, groups):
+                pass
+    finally:
+        stop_event.set()
+        poll_thread.join()
     return len(layouts)
 
 
@@ -662,7 +694,8 @@ def _run(args: argparse.Namespace) -> int:
         _organize_streaming(
             pose_dir,
             sources,
-            max_poses_per_file=min(int(args.capacity), int(args.max_poses_per_file)),
+            capacity=int(args.capacity),
+            max_poses_per_file=int(args.max_poses_per_file),
             nprocs=int(args.nprocs),
             compress=bool(args.compress),
             chunk_poses=int(args.chunk_poses),
