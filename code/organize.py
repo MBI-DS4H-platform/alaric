@@ -15,13 +15,13 @@ from typing import Sequence
 import numpy as np
 
 from poses import (
+    MAGIC,
     MAX_NO,
     MAX_NP,
     discover_organized,
     discover_unorganized,
-    read_arc_file,
+    iter_arc_pose_chunks,
     read_arc_offsets,
-    write_arc_file,
 )
 
 
@@ -45,6 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("pose_dir", metavar="POSE_DIR")
     parser.add_argument("--capacity", type=int, default=2_000_000_000)
     parser.add_argument("--max-poses-per-file", type=int, default=100_000_000)
+    parser.add_argument(
+        "--chunk-poses",
+        type=int,
+        default=1_000_000,
+        help="Maximum pose rows to hold in memory for streaming scatter/write steps.",
+    )
     parser.add_argument("--nprocs", type=int, default=os.cpu_count() or 1)
     parser.add_argument(
         "--compress",
@@ -195,18 +201,13 @@ def _scatter_source(
     split_ids: dict[tuple[tuple[int, int, int], tuple[int, int, int]], int],
     split_paths: list[Path],
     split_locks: list[threading.Lock],
+    chunk_poses: int,
 ) -> None:
-    M_arr, O, C, P = read_arc_file(source.path)
-    M = tuple(int(x) for x in M_arr)
-    if M != source.M:
-        raise ValueError(f"M changed while reading {source.path}")
-    if len(P) == 0:
-        return
-
-    output_file = np.empty(len(O), dtype=np.uint16)
-    output_offset = np.empty(len(O), dtype=np.uint16)
-    split_local_ids = np.full(len(O), -1, dtype=np.int32)
-    for local_index, offset_row in enumerate(O):
+    M = source.M
+    output_file = np.empty(len(source.O), dtype=np.uint16)
+    output_offset = np.empty(len(source.O), dtype=np.uint16)
+    split_local_ids = np.full(len(source.O), -1, dtype=np.int32)
+    for local_index, offset_row in enumerate(source.O):
         key = (M, tuple(int(x) for x in offset_row))
         segments = destination[key]
         if len(segments) == 1:
@@ -216,35 +217,57 @@ def _scatter_source(
         else:
             split_local_ids[local_index] = split_ids[key]
 
-    row_split_ids = split_local_ids[P[:, 2]]
-    split_mask = row_split_ids >= 0
-    for split_id in np.unique(row_split_ids[split_mask]):
-        mask = row_split_ids == split_id
-        records = P[mask, 0:2].astype(np.uint16, copy=True)
-        split_index = int(split_id)
-        with split_locks[split_index]:
-            with split_paths[split_index].open("ab") as handle:
-                handle.write(records.tobytes(order="C"))
-
-    keep_mask = ~split_mask
-    if not np.any(keep_mask):
-        return
-    kept_offsets = P[keep_mask, 2]
-    file_ids = output_file[kept_offsets]
-    offset_ids = output_offset[kept_offsets]
-    conf_rot = P[keep_mask, 0:2]
-    for file_id in np.unique(file_ids):
-        mask = file_ids == file_id
-        n = int(mask.sum())
-        if n == 0:
+    saw_chunk = False
+    checked_meta = False
+    for M_arr, O, C, P in iter_arc_pose_chunks(
+        source.path,
+        rows_per_chunk=chunk_poses,
+    ):
+        saw_chunk = True
+        if not checked_meta:
+            M = tuple(int(x) for x in M_arr)
+            if M != source.M:
+                raise ValueError(f"M changed while reading {source.path}")
+            if len(O) != len(source.O) or not np.array_equal(O, source.O):
+                raise ValueError(f"O changed while reading {source.path}")
+            if len(C) != len(source.C) or not np.array_equal(C, source.C):
+                raise ValueError(f"C changed while reading {source.path}")
+            checked_meta = True
+        if len(P) == 0:
             continue
-        records = np.empty((n, 3), dtype=np.uint16)
-        records[:, 0] = offset_ids[mask]
-        records[:, 1:3] = conf_rot[mask]
-        file_index = int(file_id)
-        with temp_locks[file_index]:
-            with temp_paths[file_index].open("ab") as handle:
-                handle.write(records.tobytes(order="C"))
+
+        row_split_ids = split_local_ids[P[:, 2]]
+        split_mask = row_split_ids >= 0
+        for split_id in np.unique(row_split_ids[split_mask]):
+            mask = row_split_ids == split_id
+            records = P[mask, 0:2].astype(np.uint16, copy=True)
+            split_index = int(split_id)
+            with split_locks[split_index]:
+                with split_paths[split_index].open("ab") as handle:
+                    handle.write(records.tobytes(order="C"))
+
+        keep_mask = ~split_mask
+        if not np.any(keep_mask):
+            continue
+        kept_offsets = P[keep_mask, 2]
+        file_ids = output_file[kept_offsets]
+        offset_ids = output_offset[kept_offsets]
+        conf_rot = P[keep_mask, 0:2]
+        for file_id in np.unique(file_ids):
+            mask = file_ids == file_id
+            n = int(mask.sum())
+            if n == 0:
+                continue
+            records = np.empty((n, 3), dtype=np.uint16)
+            records[:, 0] = offset_ids[mask]
+            records[:, 1:3] = conf_rot[mask]
+            file_index = int(file_id)
+            with temp_locks[file_index]:
+                with temp_paths[file_index].open("ab") as handle:
+                    handle.write(records.tobytes(order="C"))
+
+    if not saw_chunk and source.nP != 0:
+        raise ValueError(f"no pose chunks read from {source.path}")
 
 
 def _distribute_split_offset(
@@ -252,27 +275,54 @@ def _distribute_split_offset(
     segments: list[Segment],
     temp_paths: list[Path],
     temp_locks: list[threading.Lock],
+    work_dir: Path,
+    *,
+    chunk_poses: int,
 ) -> None:
-    rows = np.fromfile(split_path, dtype=np.uint16).reshape(-1, 2)
+    size = split_path.stat().st_size
+    if size % 4 != 0:
+        raise ValueError(f"{split_path} has a truncated record")
+    nrows = size // 4
     expected = sum(segment.count for segment in segments)
-    if len(rows) != expected:
-        raise ValueError(f"{split_path} has {len(rows)} rows, expected {expected}")
-    packed = (
-        (rows[:, 0].astype(np.uint32, copy=False) << 16)
-        | rows[:, 1].astype(np.uint32, copy=False)
-    )
-    del rows
-    packed.sort()
+    if nrows != expected:
+        raise ValueError(f"{split_path} has {nrows} rows, expected {expected}")
 
-    for segment in segments:
-        chunk = packed[segment.start : segment.start + segment.count]
-        records = np.empty((len(chunk), 3), dtype=np.uint16)
-        records[:, 0] = segment.offset_id
-        records[:, 1] = (chunk >> 16).astype(np.uint16, copy=False)
-        records[:, 2] = chunk.astype(np.uint16, copy=False)
-        with temp_locks[segment.layout_id]:
-            with temp_paths[segment.layout_id].open("ab") as handle:
-                handle.write(records.tobytes(order="C"))
+    rows = np.memmap(split_path, dtype=np.uint16, mode="r", shape=(nrows, 2))
+    packed_path = work_dir / f"{split_path.stem}.keys"
+    packed = np.memmap(
+        packed_path,
+        dtype=np.uint32,
+        mode="w+",
+        shape=(nrows,),
+    )
+    for start in range(0, nrows, chunk_poses):
+        stop = min(start + chunk_poses, nrows)
+        chunk = rows[start:stop]
+        packed[start:stop] = (
+            (chunk[:, 0].astype(np.uint32, copy=False) << 16)
+            | chunk[:, 1].astype(np.uint32, copy=False)
+        )
+    packed.flush()
+    packed.sort()
+    packed.flush()
+
+    try:
+        for segment in segments:
+            segment_stop = segment.start + segment.count
+            for start in range(segment.start, segment_stop, chunk_poses):
+                stop = min(start + chunk_poses, segment_stop)
+                chunk = packed[start:stop]
+                records = np.empty((len(chunk), 3), dtype=np.uint16)
+                records[:, 0] = segment.offset_id
+                records[:, 1] = (chunk >> 16).astype(np.uint16, copy=False)
+                records[:, 2] = chunk.astype(np.uint16, copy=False)
+                with temp_locks[segment.layout_id]:
+                    with temp_paths[segment.layout_id].open("ab") as handle:
+                        handle.write(records.tobytes(order="C"))
+    finally:
+        del packed
+        if packed_path.exists():
+            packed_path.unlink()
 
 
 def _compress_arc_file(source: Path, dest: Path) -> None:
@@ -299,6 +349,78 @@ def _compress_arc_file(source: Path, dest: Path) -> None:
             tmp_path.unlink()
 
 
+def _write_arc_header(
+    handle,
+    M: np.ndarray,
+    O: np.ndarray,
+    C: np.ndarray,
+    nP: int,
+) -> None:
+    if M.shape != (3,):
+        raise ValueError("M must have shape (3,)")
+    if O.ndim != 2 or O.shape[1] != 3:
+        raise ValueError("O must be a [nO,3] array")
+    if C.ndim != 1 or len(C) != len(O):
+        raise ValueError("C length must equal nO")
+    if len(O) > MAX_NO:
+        raise ValueError("nO must be <= 65536")
+    if nP <= 0 or nP > MAX_NP:
+        raise ValueError("nP must be in 1..2**32-1")
+    if int(C.sum(dtype=np.uint64)) != nP:
+        raise ValueError("sum(C) must equal nP")
+
+    nO_raw = 0 if len(O) == MAX_NO else len(O)
+    handle.write(MAGIC)
+    handle.write(M.astype(np.int8, copy=False).tobytes(order="C"))
+    handle.write(np.array([nO_raw], dtype="<u2").tobytes())
+    handle.write(np.array([nP], dtype="<u4").tobytes())
+    handle.write(O.astype(np.int8, copy=False).tobytes(order="C"))
+    handle.write(C.astype("<u4", copy=False).tobytes(order="C"))
+
+
+def _write_arc_from_bucketed_conf_rot(
+    path: Path,
+    M: np.ndarray,
+    O: np.ndarray,
+    C: np.ndarray,
+    bucketed: np.memmap,
+    *,
+    chunk_poses: int,
+) -> None:
+    nP = int(C.sum(dtype=np.uint64))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        prefix=f"{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+        delete=False,
+    ) as handle:
+        tmp_path = Path(handle.name)
+        _write_arc_header(handle, M, O, C, nP)
+
+        row_start = 0
+        for offset_id, count_raw in enumerate(C):
+            count = int(count_raw)
+            row_stop = row_start + count
+            packed_rows = bucketed[row_start:row_stop]
+            packed_rows.sort()
+            for start in range(row_start, row_stop, chunk_poses):
+                stop = min(start + chunk_poses, row_stop)
+                chunk = bucketed[start:stop]
+                P = np.empty((len(chunk), 3), dtype=np.uint16)
+                P[:, 0] = (chunk >> 16).astype(np.uint16, copy=False)
+                P[:, 1] = chunk.astype(np.uint16, copy=False)
+                P[:, 2] = offset_id
+                handle.write(P.tobytes(order="C"))
+            row_start = row_stop
+
+    try:
+        tmp_path.replace(path)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+
+
 def _write_layout_from_temp(
     pose_dir: Path,
     layout: OutputLayout,
@@ -306,42 +428,83 @@ def _write_layout_from_temp(
     arc_temp_dir: Path,
     *,
     compress: bool,
+    chunk_poses: int,
 ) -> int:
     expected = int(sum(layout.counts))
-    records = np.fromfile(temp_path, dtype=np.uint16).reshape(-1, 3)
-    if len(records) != expected:
-        raise ValueError(
-            f"{temp_path} has {len(records)} records, expected {expected}"
-        )
-    keys = (
-        (records[:, 0].astype(np.uint64, copy=False) << 32)
-        | (records[:, 1].astype(np.uint64, copy=False) << 16)
-        | records[:, 2].astype(np.uint64, copy=False)
-    )
-    del records
-    keys.sort()
+    size = temp_path.stat().st_size
+    if size % 6 != 0:
+        raise ValueError(f"{temp_path} has a truncated record")
+    nrecords = size // 6
+    if nrecords != expected:
+        raise ValueError(f"{temp_path} has {nrecords} records, expected {expected}")
 
-    P = np.empty((len(keys), 3), dtype=np.uint16)
-    P[:, 0] = ((keys >> 16) & 0xFFFF).astype(np.uint16, copy=False)
-    P[:, 1] = (keys & 0xFFFF).astype(np.uint16, copy=False)
-    P[:, 2] = (keys >> 32).astype(np.uint16, copy=False)
+    records = np.memmap(temp_path, dtype=np.uint16, mode="r", shape=(expected, 3))
+    packed_path = arc_temp_dir / f"poses-{layout.file_index}.packed"
+    packed = np.memmap(
+        packed_path,
+        dtype=np.uint32,
+        mode="w+",
+        shape=(expected,),
+    )
+    counts = np.array(layout.counts, dtype=np.uint32)
+    starts = np.empty(len(counts), dtype=np.uint64)
+    if len(starts):
+        starts[0] = 0
+        np.cumsum(counts[:-1], dtype=np.uint64, out=starts[1:])
+    cursors = starts.copy()
+
+    for start in range(0, expected, chunk_poses):
+        stop = min(start + chunk_poses, expected)
+        chunk = records[start:stop]
+        offset_ids = chunk[:, 0]
+        conf_rot = (
+            (chunk[:, 1].astype(np.uint32, copy=False) << 16)
+            | chunk[:, 2].astype(np.uint32, copy=False)
+        )
+        order = np.argsort(offset_ids, kind="stable")
+        sorted_offsets = offset_ids[order]
+        sorted_conf_rot = conf_rot[order]
+        run_starts = np.r_[
+            0,
+            np.flatnonzero(sorted_offsets[1:] != sorted_offsets[:-1]) + 1,
+        ]
+        run_stops = np.r_[run_starts[1:], len(sorted_offsets)]
+        for run_start, run_stop in zip(run_starts, run_stops):
+            offset_id = int(sorted_offsets[run_start])
+            n = int(run_stop - run_start)
+            cursor = int(cursors[offset_id])
+            packed[cursor : cursor + n] = sorted_conf_rot[run_start:run_stop]
+            cursors[offset_id] += n
+    packed.flush()
+
+    expected_ends = starts + counts.astype(np.uint64, copy=False)
+    if not np.array_equal(cursors, expected_ends):
+        raise ValueError(f"{temp_path} has records that do not match layout counts")
+
     O = np.array(layout.offsets, dtype=np.int8)
-    C = np.array(layout.counts, dtype=np.uint32)
     arc_path = (
         arc_temp_dir / f"poses-{layout.file_index}.arc"
         if compress
         else pose_dir / f"poses-{layout.file_index}.arc"
     )
-    write_arc_file(
-        arc_path,
-        np.array(layout.M, dtype=np.int8),
-        O,
-        C,
-        P,
-        zstd=False,
-    )
-    if compress:
-        _compress_arc_file(arc_path, pose_dir / f"poses-{layout.file_index}.arc.zst")
+    try:
+        _write_arc_from_bucketed_conf_rot(
+            arc_path,
+            np.array(layout.M, dtype=np.int8),
+            O,
+            counts,
+            packed,
+            chunk_poses=chunk_poses,
+        )
+        if compress:
+            _compress_arc_file(
+                arc_path,
+                pose_dir / f"poses-{layout.file_index}.arc.zst",
+            )
+    finally:
+        del packed
+        if packed_path.exists():
+            packed_path.unlink()
     return layout.file_index
 
 
@@ -352,6 +515,7 @@ def _organize_streaming(
     max_poses_per_file: int,
     nprocs: int,
     compress: bool,
+    chunk_poses: int,
 ) -> int:
     layouts, destination = _build_layouts(
         sources,
@@ -395,9 +559,17 @@ def _organize_streaming(
                     split_ids,
                     split_paths,
                     split_locks,
+                    chunk_poses,
                 )
             for split_path, (_, segments) in zip(split_paths, split_items):
-                _distribute_split_offset(split_path, segments, temp_paths, temp_locks)
+                _distribute_split_offset(
+                    split_path,
+                    segments,
+                    temp_paths,
+                    temp_locks,
+                    arc_temp_dir,
+                    chunk_poses=chunk_poses,
+                )
             for layout, temp_path in zip(layouts, temp_paths):
                 _write_layout_from_temp(
                     pose_dir,
@@ -405,6 +577,7 @@ def _organize_streaming(
                     temp_path,
                     arc_temp_dir,
                     compress=compress,
+                    chunk_poses=chunk_poses,
                 )
         else:
             with ThreadPoolExecutor(max_workers=min(workers, len(sources))) as executor:
@@ -418,6 +591,7 @@ def _organize_streaming(
                         split_ids,
                         split_paths,
                         split_locks,
+                        chunk_poses,
                     )
                     for source in sources
                 ]
@@ -435,26 +609,23 @@ def _organize_streaming(
                             segments,
                             temp_paths,
                             temp_locks,
+                            arc_temp_dir,
+                            chunk_poses=chunk_poses,
                         )
                         for split_path, (_, segments) in zip(split_paths, split_items)
                     ]
                     for future in futures:
                         future.result()
 
-            with ThreadPoolExecutor(max_workers=min(workers, len(layouts))) as executor:
-                futures = [
-                    executor.submit(
-                        _write_layout_from_temp,
-                        pose_dir,
-                        layout,
-                        temp_path,
-                        arc_temp_dir,
-                        compress=compress,
-                    )
-                    for layout, temp_path in zip(layouts, temp_paths)
-                ]
-                for future in futures:
-                    future.result()
+            for layout, temp_path in zip(layouts, temp_paths):
+                _write_layout_from_temp(
+                    pose_dir,
+                    layout,
+                    temp_path,
+                    arc_temp_dir,
+                    compress=compress,
+                    chunk_poses=chunk_poses,
+                )
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
     return len(layouts)
@@ -465,6 +636,8 @@ def _run(args: argparse.Namespace) -> int:
         raise ValueError("--capacity must be positive")
     if args.max_poses_per_file <= 0 or args.max_poses_per_file > MAX_NP:
         raise ValueError("--max-poses-per-file must be in 1..2**32-1")
+    if args.chunk_poses <= 0:
+        raise ValueError("--chunk-poses must be positive")
     if args.nprocs <= 0:
         raise ValueError("--nprocs must be positive")
 
@@ -495,6 +668,7 @@ def _run(args: argparse.Namespace) -> int:
             max_poses_per_file=min(int(args.capacity), int(args.max_poses_per_file)),
             nprocs=int(args.nprocs),
             compress=bool(args.compress),
+            chunk_poses=int(args.chunk_poses),
         )
 
     marker.touch()

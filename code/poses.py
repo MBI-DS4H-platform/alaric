@@ -128,6 +128,21 @@ def _read_arc_prefix(path: str | Path, size: int) -> bytes:
     return data
 
 
+def _read_exact(handle, size: int, path: str | Path) -> bytes:
+    chunks = []
+    remaining = size
+    while remaining:
+        chunk = handle.read(remaining)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    data = b"".join(chunks)
+    if len(data) != size:
+        raise ValueError(f".arc file is too small: {path}")
+    return data
+
+
 def _parse_arc_header(raw: bytes, path: str | Path) -> tuple[np.ndarray, int, int]:
     if len(raw) < HEADER_SIZE:
         raise ValueError(f".arc file is too small: {path}")
@@ -158,7 +173,7 @@ def read_arc_offsets(path: str | Path) -> tuple[np.ndarray, np.ndarray, np.ndarr
 
 def read_arc_file(path: str | Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     raw = _open_arc_bytes(path)
-    M, nO, nP = read_arc_header(path)
+    M, nO, nP = _parse_arc_header(raw[:HEADER_SIZE], path)
     expected = HEADER_SIZE + nO * 3 + nO * 4 + nP * 6
     if len(raw) != expected:
         raise ValueError(
@@ -171,6 +186,58 @@ def read_arc_file(path: str | Path) -> tuple[np.ndarray, np.ndarray, np.ndarray,
     pos += nO * 4
     P = np.frombuffer(raw[pos : pos + nP * 6], dtype="<u2").copy().reshape(nP, 3)
     return _validate_arc_arrays(M, O, C, P)
+
+
+def iter_arc_pose_chunks(
+    path: str | Path,
+    *,
+    rows_per_chunk: int = 1_000_000,
+) -> Iterable[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
+    """Yield one .arc file as bounded pose chunks.
+
+    The metadata arrays are copied once and reused across chunks. Pose chunks are
+    copied out of the input stream so callers can safely keep them after the next
+    read.
+    """
+    if rows_per_chunk <= 0:
+        raise ValueError("rows_per_chunk must be positive")
+
+    path = Path(path)
+    if path.name.endswith(ARC_ZSTD_SUFFIX):
+        zstd = _require_zstandard("read")
+        compressed = path.open("rb")
+        stream_context = zstd.ZstdDecompressor().stream_reader(compressed)
+    else:
+        compressed = None
+        stream_context = path.open("rb")
+
+    try:
+        with stream_context as stream:
+            header = _read_exact(stream, HEADER_SIZE, path)
+            M, nO, nP = _parse_arc_header(header, path)
+            O_raw = _read_exact(stream, nO * 3, path)
+            O = np.frombuffer(O_raw, dtype=np.int8).copy().reshape(nO, 3)
+            C_raw = _read_exact(stream, nO * 4, path)
+            C = np.frombuffer(C_raw, dtype="<u4").copy()
+            if int(C.sum(dtype=np.uint64)) != nP:
+                raise ValueError(f"sum(C) must equal nP in {path}")
+
+            remaining = nP
+            while remaining:
+                take = min(rows_per_chunk, remaining)
+                raw = _read_exact(stream, take * 6, path)
+                P = np.frombuffer(raw, dtype="<u2").copy().reshape(take, 3)
+                if len(P) and (len(O) == 0 or int(P[:, 2].max()) >= len(O)):
+                    raise ValueError(f"P offset indices must be < nO in {path}")
+                yield M, O, C, P
+                remaining -= take
+
+            extra = stream.read(1)
+            if extra:
+                raise ValueError(f"bad .arc length for {path}: trailing data")
+    finally:
+        if compressed is not None:
+            compressed.close()
 
 
 def write_arc_file(
