@@ -524,30 +524,29 @@ def _organize_streaming(
     if not layouts:
         return 0
 
-    temp_dir = pose_dir / ".organize-tmp"
-    if temp_dir.exists():
-        shutil.rmtree(temp_dir)
-    temp_dir.mkdir()
-    temp_paths = [temp_dir / f"poses-{layout.file_index}.records" for layout in layouts]
-    for path in temp_paths:
-        path.touch()
-    temp_locks = [threading.Lock() for _ in temp_paths]
-    split_items = [
-        (key, segments)
-        for key, segments in destination.items()
-        if len(segments) > 1
-    ]
-    split_ids = {key: index for index, (key, _) in enumerate(split_items)}
-    split_paths = [
-        temp_dir / f"split-{index}.records" for index in range(len(split_items))
-    ]
-    for path in split_paths:
-        path.touch()
-    split_locks = [threading.Lock() for _ in split_paths]
-    arc_temp_dir = temp_dir / "arc"
-    arc_temp_dir.mkdir()
+    with tempfile.TemporaryDirectory(prefix=f"{pose_dir.name}.organize-") as temp_name:
+        temp_dir = Path(temp_name)
+        temp_paths = [
+            temp_dir / f"poses-{layout.file_index}.records" for layout in layouts
+        ]
+        for path in temp_paths:
+            path.touch()
+        temp_locks = [threading.Lock() for _ in temp_paths]
+        split_items = [
+            (key, segments)
+            for key, segments in destination.items()
+            if len(segments) > 1
+        ]
+        split_ids = {key: index for index, (key, _) in enumerate(split_items)}
+        split_paths = [
+            temp_dir / f"split-{index}.records" for index in range(len(split_items))
+        ]
+        for path in split_paths:
+            path.touch()
+        split_locks = [threading.Lock() for _ in split_paths]
+        arc_temp_dir = temp_dir / "arc"
+        arc_temp_dir.mkdir()
 
-    try:
         workers = min(nprocs, max(len(sources), len(layouts)))
         if workers <= 1:
             for source in sources:
@@ -626,8 +625,6 @@ def _organize_streaming(
                     compress=compress,
                     chunk_poses=chunk_poses,
                 )
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
     return len(layouts)
 
 
