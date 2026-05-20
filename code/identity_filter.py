@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -234,13 +235,6 @@ def _read_loaded(entry: FileIndexEntry) -> LoadedFile:
     return LoadedFile(entry, P)
 
 
-def _load(entry: FileIndexEntry, cache: dict[Path, LoadedFile]) -> LoadedFile:
-    loaded = cache.get(entry.path)
-    if loaded is None:
-        loaded = _read_loaded(entry)
-        cache[entry.path] = loaded
-    return loaded
-
 import sortednp
 
 def _intersect_sorted_unique(left: np.ndarray, right: np.ndarray) -> np.ndarray:
@@ -251,6 +245,137 @@ def _intersect_sorted_unique(left: np.ndarray, right: np.ndarray) -> np.ndarray:
         right,
         duplicates=sortednp.IntersectDuplicates.DROP,
     )
+
+
+class _PrefetchingLoader:
+    """Refcount-based cache with a thread pool that prefetches .arc files.
+
+    Refholders are indexed 0..n-1. At any time the holders for indices in a
+    sliding window [current, current+window_ahead] are active; the loader
+    keeps in cache every path with refcount>0 and evicts the rest.
+    """
+
+    def __init__(
+        self,
+        refholder_paths_fn,
+        n_items: int,
+        path_to_entry: dict[Path, FileIndexEntry],
+        *,
+        window_ahead: int = 20,
+        workers: int = _LOADER_WORKERS,
+    ) -> None:
+        self._refholder_paths = refholder_paths_fn
+        self._n_items = n_items
+        self._path_to_entry = path_to_entry
+        self._window_ahead = window_ahead
+        self._cache: dict[Path, LoadedFile] = {}
+        self._refcount: dict[Path, int] = {}
+        self._in_flight: set[Path] = set()
+        self._lock = threading.Lock()
+        self._cond = threading.Condition(self._lock)
+        self._stop = threading.Event()
+        self._exc: list[BaseException] = []
+        self._pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=workers, thread_name_prefix="arc-loader"
+        )
+        with self._lock:
+            for j in range(min(window_ahead + 1, n_items)):
+                self._add_refs(j)
+            self._cond.notify_all()
+        self._thread = threading.Thread(target=self._loader, daemon=True)
+        self._thread.start()
+
+    def _add_refs(self, idx: int) -> None:
+        for p in self._refholder_paths(idx):
+            self._refcount[p] = self._refcount.get(p, 0) + 1
+
+    def _remove_refs(self, idx: int) -> None:
+        for p in self._refholder_paths(idx):
+            c = self._refcount.get(p, 0) - 1
+            if c <= 0:
+                self._refcount.pop(p, None)
+            else:
+                self._refcount[p] = c
+
+    def _make_callback(self, p: Path):
+        def callback(future: concurrent.futures.Future) -> None:
+            with self._lock:
+                self._in_flight.discard(p)
+                try:
+                    loaded = future.result()
+                except BaseException as exc:
+                    self._exc.append(exc)
+                    self._cond.notify_all()
+                    return
+                if self._refcount.get(p, 0) > 0 and p not in self._cache:
+                    self._cache[p] = loaded
+                self._cond.notify_all()
+        return callback
+
+    def _loader(self) -> None:
+        try:
+            while not self._stop.is_set():
+                with self._lock:
+                    stale = [
+                        p for p in self._cache
+                        if self._refcount.get(p, 0) == 0 and p not in self._in_flight
+                    ]
+                    for p in stale:
+                        del self._cache[p]
+                    pending = [
+                        p for p in self._refcount
+                        if p not in self._cache and p not in self._in_flight
+                    ]
+                    for p in pending:
+                        self._in_flight.add(p)
+                    entries_to_load = [(p, self._path_to_entry[p]) for p in pending]
+                for p, entry_to_load in entries_to_load:
+                    if self._stop.is_set():
+                        break
+                    future = self._pool.submit(_read_loaded, entry_to_load)
+                    future.add_done_callback(self._make_callback(p))
+                with self._lock:
+                    if self._stop.is_set():
+                        return
+                    if not [
+                        p for p in self._refcount
+                        if p not in self._cache and p not in self._in_flight
+                    ]:
+                        self._cond.wait(timeout=0.1)
+        except BaseException as exc:
+            with self._lock:
+                self._exc.append(exc)
+                self._cond.notify_all()
+
+    def wait_for(self, path: Path) -> LoadedFile:
+        with self._lock:
+            while path not in self._cache:
+                if self._exc:
+                    raise self._exc[0]
+                self._cond.wait()
+            return self._cache[path]
+
+    def advance(self, idx: int) -> None:
+        """After processing idx: drop its refs and add refs for idx+window+1."""
+        with self._lock:
+            self._remove_refs(idx)
+            nxt = idx + self._window_ahead + 1
+            if nxt < self._n_items:
+                self._add_refs(nxt)
+            self._cond.notify_all()
+
+    def close(self) -> None:
+        self._stop.set()
+        with self._lock:
+            self._cond.notify_all()
+        self._thread.join()
+        self._pool.shutdown(wait=True)
+
+    def __enter__(self) -> "_PrefetchingLoader":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.close()
 
 def build_identity_set(
     entries1: list[FileIndexEntry],
@@ -299,14 +424,6 @@ def build_identity_set(
     for entry in other_entries:
         path_to_entry[entry.path] = entry
 
-    cache: dict[Path, LoadedFile] = {}
-    refcount: dict[Path, int] = {}
-    in_flight: set[Path] = set()
-    lock = threading.Lock()
-    cond = threading.Condition(lock)
-    stop_event = threading.Event()
-    loader_exc: list[BaseException] = []
-
     def refholder_paths(idx: int) -> list[Path]:
         if idx < 0 or idx >= len(small_entries):
             return []
@@ -317,102 +434,21 @@ def build_identity_set(
             paths.append(other.path)
         return paths
 
-    def add_refs(idx: int) -> None:
-        for p in refholder_paths(idx):
-            refcount[p] = refcount.get(p, 0) + 1
-
-    def remove_refs(idx: int) -> None:
-        for p in refholder_paths(idx):
-            c = refcount.get(p, 0) - 1
-            if c <= 0:
-                refcount.pop(p, None)
-            else:
-                refcount[p] = c
-
-    def make_callback(p: Path):
-        def callback(future: concurrent.futures.Future) -> None:
-            with lock:
-                in_flight.discard(p)
-                try:
-                    loaded = future.result()
-                except BaseException as exc:
-                    loader_exc.append(exc)
-                    cond.notify_all()
-                    return
-                if refcount.get(p, 0) > 0 and p not in cache:
-                    cache[p] = loaded
-                cond.notify_all()
-        return callback
-
-    def loader() -> None:
-        pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=_LOADER_WORKERS, thread_name_prefix="arc-loader"
-        )
-        try:
-            while not stop_event.is_set():
-                with lock:
-                    stale = [
-                        p for p in cache
-                        if refcount.get(p, 0) == 0 and p not in in_flight
-                    ]
-                    for p in stale:
-                        del cache[p]
-                    pending = [
-                        p for p in refcount
-                        if p not in cache and p not in in_flight
-                    ]
-                    for p in pending:
-                        in_flight.add(p)
-                    entries_to_load = [(p, path_to_entry[p]) for p in pending]
-                for p, entry_to_load in entries_to_load:
-                    if stop_event.is_set():
-                        break
-                    future = pool.submit(_read_loaded, entry_to_load)
-                    future.add_done_callback(make_callback(p))
-                with lock:
-                    if stop_event.is_set():
-                        return
-                    if not [
-                        p for p in refcount
-                        if p not in cache and p not in in_flight
-                    ]:
-                        cond.wait(timeout=0.1)
-        except BaseException as exc:
-            with lock:
-                loader_exc.append(exc)
-                cond.notify_all()
-        finally:
-            pool.shutdown(wait=True)
-
-    def wait_for(path: Path) -> LoadedFile:
-        with lock:
-            while path not in cache:
-                if loader_exc:
-                    raise loader_exc[0]
-                cond.wait()
-            return cache[path]
-
-    with lock:
-        for j in range(min(WINDOW_AHEAD + 1, len(small_entries))):
-            add_refs(j)
-        cond.notify_all()
-
-    loader_thread = threading.Thread(target=loader, daemon=True)
-    loader_thread.start()
-
-    identity: dict[PoseKey, np.ndarray] = {}
-    try:
+    identity_parts: dict[PoseKey, list[np.ndarray]] = {}
+    with _PrefetchingLoader(
+        refholder_paths, len(small_entries), path_to_entry, window_ahead=WINDOW_AHEAD
+    ) as loader:
         for i, entry in enumerate(tqdm(small_entries, desc="Build identity set")):
             try:
                 holders = holders_for_entry[i]
                 if not holders:
                     continue
 
-                loaded_entry = wait_for(entry.path)
+                loaded_entry = loader.wait_for(entry.path)
                 common_for_bucket = set(common_offsets[entry.M])
                 holder_path_set = holder_paths_for_entry[i]
 
-                for offset, offset_index in tqdm(entry.offset_to_index.items(), desc="Filter mini-bucket"):
+                for offset, offset_index in entry.offset_to_index.items():
                     if offset not in common_for_bucket:
                         continue
                     other_holders = [
@@ -425,7 +461,7 @@ def build_identity_set(
                     left_keys = loaded_entry.pose_keys(offset_index)
                     other_parts = []
                     for other in other_holders:
-                        loaded_other = wait_for(other.path)
+                        loaded_other = loader.wait_for(other.path)
                         other_parts.append(loaded_other.pose_keys(other.offset_to_index[offset]))
                     if len(other_parts) == 1:
                         right_keys = other_parts[0]
@@ -433,24 +469,13 @@ def build_identity_set(
                         right_keys = np.concatenate(other_parts)
                     overlap = _intersect_sorted_unique(left_keys, right_keys)
                     if len(overlap):
-                        key = (entry.M, offset)
-                        previous = identity.get(key)
-                        identity[key] = (
-                            overlap if previous is None else np.union1d(previous, overlap)
-                        )
+                        identity_parts.setdefault((entry.M, offset), []).append(overlap)
             finally:
-                with lock:
-                    remove_refs(i)
-                    nxt = i + WINDOW_AHEAD + 1
-                    if nxt < len(small_entries):
-                        add_refs(nxt)
-                    cond.notify_all()
-    finally:
-        stop_event.set()
-        with lock:
-            cond.notify_all()
-        loader_thread.join()
-    return identity
+                loader.advance(i)
+    return {
+        key: parts[0] if len(parts) == 1 else np.concatenate(parts)
+        for key, parts in identity_parts.items()
+    }
 
 
 def _clean_output_dir(output_dir: Path, *, force: bool) -> None:
@@ -541,34 +566,56 @@ def write_identity_pose_dir(
 def build_mapping(
     entries: list[FileIndexEntry],
     global_lookup: dict[PoseKey, tuple[int, np.ndarray]],
+    *,
+    desc: str = "Build mapping",
 ) -> np.ndarray:
-    chunks: list[np.ndarray] = []
+    relevant_per_entry: list[list[tuple[int, tuple[int, np.ndarray]]]] = []
     for entry in entries:
-        relevant = [
-            (offset, offset_index, global_lookup[(entry.M, offset)])
+        rel = [
+            (offset_index, global_lookup[(entry.M, offset)])
             for offset, offset_index in entry.offset_to_index.items()
             if (entry.M, offset) in global_lookup
         ]
-        if not relevant:
-            continue
-        loaded = _load(entry, {})
-        for _offset, offset_index, (dest_start, dest_keys) in relevant:
-            keys = loaded.pose_keys(offset_index)
-            positions = np.searchsorted(dest_keys, keys)
-            in_range = positions < len(dest_keys)
-            mask = np.zeros(len(keys), dtype=bool)
-            if np.any(in_range):
-                checked = positions[in_range]
-                mask[in_range] = dest_keys[checked] == keys[in_range]
-            if not np.any(mask):
-                continue
-            local_start = int(entry.I[offset_index])
-            local_indices = np.nonzero(mask)[0].astype(np.uint64, copy=False)
-            source_ids = (
-                np.uint64(entry.global_start + local_start) + local_indices
-            )
-            dest_ids = np.uint64(dest_start) + positions[mask].astype(np.uint64, copy=False)
-            chunks.append(np.column_stack((source_ids, dest_ids)).astype(np.uint64, copy=False))
+        relevant_per_entry.append(rel)
+
+    path_to_entry = {entry.path: entry for entry in entries}
+
+    def refholder_paths(idx: int) -> list[Path]:
+        if 0 <= idx < len(entries) and relevant_per_entry[idx]:
+            return [entries[idx].path]
+        return []
+
+    chunks: list[np.ndarray] = []
+    with _PrefetchingLoader(refholder_paths, len(entries), path_to_entry) as loader:
+        for i, entry in enumerate(tqdm(entries, desc=desc)):
+            try:
+                relevant = relevant_per_entry[i]
+                if not relevant:
+                    continue
+                loaded = loader.wait_for(entry.path)
+                for offset_index, (dest_start, dest_keys) in relevant:
+                    keys = loaded.pose_keys(offset_index)
+                    if len(keys) == 0 or len(dest_keys) == 0:
+                        continue
+                    _, (idx_keys, idx_dest) = sortednp.intersect(
+                        keys,
+                        dest_keys,
+                        duplicates=sortednp.IntersectDuplicates.KEEP_MAX_N,
+                        indices=True,
+                    )
+                    if len(idx_keys) == 0:
+                        continue
+                    local_start = int(entry.I[offset_index])
+                    source_ids = (
+                        np.uint64(entry.global_start + local_start)
+                        + idx_keys.astype(np.uint64, copy=False)
+                    )
+                    dest_ids = (
+                        np.uint64(dest_start) + idx_dest.astype(np.uint64, copy=False)
+                    )
+                    chunks.append(np.column_stack((source_ids, dest_ids)).astype(np.uint64, copy=False))
+            finally:
+                loader.advance(i)
     if not chunks:
         return np.empty((0, 2), dtype=np.uint64)
     return np.concatenate(chunks, axis=0)
@@ -582,6 +629,7 @@ def run_identity_filter(
     force: bool = False,
     max_poses_per_file: int = 100_000_000,
 ) -> dict[str, int]:
+    print("Indexing pose directories...", file=sys.stderr)
     entries1 = _read_file_index(pose_dir1)
     entries2 = _read_file_index(pose_dir2)
     if not entries1:
@@ -595,6 +643,11 @@ def run_identity_filter(
             f"inconsistent bucket_size: {pose_dir1} has {bucket_size1}, "
             f"{pose_dir2} has {bucket_size2}"
         )
+    input_poses_1 = int(sum(entry.nP for entry in entries1))
+    input_poses_2 = int(sum(entry.nP for entry in entries2))
+    print(f"Bucket size: {bucket_size1}", file=sys.stderr)
+    print(f"Number of input poses in pose directory 1: {input_poses_1}", file=sys.stderr)
+    print(f"Number of input poses in pose directory 2: {input_poses_2}", file=sys.stderr)
 
     common_buckets = {entry.M for entry in entries1} & {entry.M for entry in entries2}
     kept1 = [entry for entry in entries1 if entry.M in common_buckets]
@@ -602,31 +655,44 @@ def run_identity_filter(
     common_offsets = _prepare_common_offsets(kept1, kept2)
     _assign_a_ranges(kept1, common_offsets)
     _assign_a_ranges(kept2, common_offsets)
+    kept_poses_1 = int(sum(entry.nP for entry in kept1))
+    kept_poses_2 = int(sum(entry.nP for entry in kept2))
+    common_mini_buckets = int(sum(len(v) for v in common_offsets.values()))
+    print(f"Number of common buckets: {len(common_buckets)}", file=sys.stderr)
+    print(f"Number of common mini-buckets: {common_mini_buckets}", file=sys.stderr)
+    print(f"Number of poses kept from pose directory 1: {kept_poses_1}", file=sys.stderr)
+    print(f"Number of poses kept from pose directory 2: {kept_poses_2}", file=sys.stderr)
 
     _clean_output_dir(output_dir, force=force)
     identity = build_identity_set(kept1, kept2, common_offsets)
+    total_identity_poses = int(sum(len(keys) for keys in identity.values()))
+    print(f"Number of unique poses: {total_identity_poses}", file=sys.stderr)
+    print("Writing output pose directory...", file=sys.stderr)
     global_lookup = write_identity_pose_dir(
         identity,
         output_dir,
         bucket_size=bucket_size1,
         max_poses_per_file=max_poses_per_file,
     )
+    print("Building mapping array 1...", file=sys.stderr)
     map1 = build_mapping(kept1, global_lookup)
+    print(f"Number of mapping rows for pose directory 1: {len(map1)}", file=sys.stderr)
+    print("Building mapping array 2...", file=sys.stderr)
     map2 = build_mapping(kept2, global_lookup)
+    print(f"Number of mapping rows for pose directory 2: {len(map2)}", file=sys.stderr)
     np.save(output_dir / "map-1.npy", map1)
     np.save(output_dir / "map-2.npy", map2)
 
-    total_identity_poses = int(sum(len(keys) for keys in identity.values()))
     manifest = {
         "pose_dir_1": str(pose_dir1),
         "pose_dir_2": str(pose_dir2),
         "bucket_size": bucket_size1,
-        "input_poses_1": int(sum(entry.nP for entry in entries1)),
-        "input_poses_2": int(sum(entry.nP for entry in entries2)),
-        "kept_poses_1": int(sum(entry.nP for entry in kept1)),
-        "kept_poses_2": int(sum(entry.nP for entry in kept2)),
+        "input_poses_1": input_poses_1,
+        "input_poses_2": input_poses_2,
+        "kept_poses_1": kept_poses_1,
+        "kept_poses_2": kept_poses_2,
         "common_buckets": len(common_buckets),
-        "common_mini_buckets": int(sum(len(v) for v in common_offsets.values())),
+        "common_mini_buckets": common_mini_buckets,
         "identity_poses": total_identity_poses,
         "map_1_rows": int(len(map1)),
         "map_2_rows": int(len(map2)),
@@ -660,14 +726,13 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    manifest = run_identity_filter(
+    run_identity_filter(
         args.pose_dir_1,
         args.pose_dir_2,
         args.output_dir,
         force=args.force,
         max_poses_per_file=args.max_poses_per_file,
     )
-    print(json.dumps(manifest, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

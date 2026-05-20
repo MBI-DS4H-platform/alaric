@@ -383,6 +383,7 @@ def _write_group_layout(
     compress: bool,
     chunk_poses: int,
     progress=None,
+    overrides: dict[int, tuple[int, int]] | None = None,
 ) -> int:
     try:
         import zstandard as zstd
@@ -393,7 +394,19 @@ def _write_group_layout(
 
     M = np.array(layout.M, dtype=np.int16)
     O = np.array(layout.offsets, dtype=np.int16)
-    C = np.array(layout.counts, dtype=np.uint32)
+    if overrides:
+        effective_counts = [
+            overrides[i][1] if i in overrides else c
+            for i, c in enumerate(layout.counts)
+        ]
+    else:
+        effective_counts = list(layout.counts)
+    C = np.array(effective_counts, dtype=np.uint32)
+    if int(C.sum(dtype=np.uint64)) == 0:
+        # A boundary-adjusted split slice collapsed to zero poses (e.g. an
+        # entire run of duplicates at the tail). Skip writing an empty file;
+        # discover_organized tolerates gaps in file_index.
+        return layout.file_index
     dest = (
         pose_dir / f"poses-{layout.file_index}.arc.zst"
         if compress
@@ -426,7 +439,11 @@ def _write_group_layout(
                 key = (entry.M, entry.offset)
                 segment = entry.segment
                 bucket = buffers[key]
-                if len(bucket) == segment.count and segment.start == 0:
+                if overrides and offset_id in overrides:
+                    bucket.sort()
+                    start, count = overrides[offset_id]
+                    out_bucket = bucket[start : start + count]
+                elif len(bucket) == segment.count and segment.start == 0:
                     out_bucket = bucket
                     out_bucket.sort()
                 else:
@@ -434,7 +451,7 @@ def _write_group_layout(
                     out_bucket = bucket[
                         segment.start : segment.start + segment.count
                     ]
-                if len(out_bucket) != int(layout.counts[offset_id]):
+                if len(out_bucket) != int(C[offset_id]):
                     raise ValueError(f"layout count mismatch for {key}")
                 _write_bucket(
                     output_handle,
@@ -599,6 +616,36 @@ def _process_layout_group(
                 f"poses, expected {expected}"
             )
 
+    # For split mini-buckets, sort and shift slice boundaries forward past any
+    # duplicate run that straddles them so identical poses never split across
+    # output files.
+    layout_overrides: dict[int, dict[int, tuple[int, int]]] = {}
+    for key in group_keys:
+        segments = destination[key]
+        if len(segments) <= 1:
+            continue
+        bucket = buffers[key]
+        bucket.sort()
+        n = len(bucket)
+        cur = 0
+        last_idx = len(segments) - 1
+        for i, seg in enumerate(segments):
+            if i == last_idx:
+                new_start = cur
+                new_count = n - cur
+            else:
+                planned_end = min(cur + seg.count, n)
+                while planned_end < n and bucket[planned_end] == bucket[planned_end - 1]:
+                    planned_end += 1
+                new_start = cur
+                new_count = planned_end - cur
+                cur = planned_end
+            if new_start != seg.start or new_count != seg.count:
+                layout_overrides.setdefault(seg.layout_id, {})[seg.offset_id] = (
+                    new_start,
+                    new_count,
+                )
+
     with write_cm as write_pbar:
         for layout_id in group.layout_ids:
             _write_group_layout(
@@ -609,6 +656,7 @@ def _process_layout_group(
                 compress=compress,
                 chunk_poses=chunk_poses,
                 progress=write_pbar,
+                overrides=layout_overrides.get(layout_id),
             )
 
 
