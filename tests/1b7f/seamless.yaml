@@ -1,0 +1,3 @@
+- project: sandbox
+- execution: remote
+- cluster: mbi-deploy-tunnel
