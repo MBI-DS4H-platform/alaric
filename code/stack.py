@@ -50,6 +50,8 @@ class _StackWorkConfig:
     dihedral_max_deg: float | None
     output_dir: Path
     cache_size: int
+    bucket_size: int
+    unorganized_subdirs: bool
     center_batch_size: int
     offset_chunk_size: int
     writer_memory_lock: object | None
@@ -188,6 +190,25 @@ and the values in between are eliminated.""",
         help=(
             "Approximate weighted pose cache before flushing; unsorted poses count "
             "as 7 and sorted poses count as 1 (default: 50000000)."
+        ),
+    )
+    parser.add_argument(
+        "--bucket-size",
+        type=int,
+        default=16,
+        metavar="N",
+        help=(
+            "Grid bucket edge length (1..65535) written into each .arc header. "
+            "Smaller buckets give organize finer-grained parallelism at the cost "
+            "of more shards; larger buckets do the reverse (default: 16)."
+        ),
+    )
+    parser.add_argument(
+        "--unorganized-subdirs",
+        action="store_true",
+        help=(
+            "Write unorganized pose shards as unorganized-PID/RANDOM.arc.zst "
+            "instead of flat unorganized-PID-RANDOM.arc.zst files."
         ),
     )
     parser.add_argument(
@@ -610,7 +631,9 @@ def _process_conformer_batch(
     pose_writer = PoseWriter(
         config.output_dir,
         cache_poses=config.cache_size,
+        bucket_size=config.bucket_size,
         memory_lock=config.writer_memory_lock,
+        unorganized_subdirs=config.unorganized_subdirs,
     )
     total_candidates = 0
     total_surviving = 0
@@ -730,6 +753,8 @@ def _run(args: argparse.Namespace) -> int:
         raise ValueError("--margin must be non-negative")
     if args.cache_size <= 0:
         raise ValueError("--cache-size must be positive")
+    if args.bucket_size < 1 or args.bucket_size > 65535:
+        raise ValueError("--bucket-size must be in 1..65535")
     if args.nprocs <= 0:
         raise ValueError("--nprocs must be positive")
     if args.poselock is not None and args.poselock <= 0:
@@ -819,6 +844,8 @@ def _run(args: argparse.Namespace) -> int:
         dihedral_max_deg=dihedral_max_deg,
         output_dir=output_dir,
         cache_size=args.cache_size,
+        bucket_size=args.bucket_size,
+        unorganized_subdirs=bool(args.unorganized_subdirs),
         center_batch_size=center_batch_size,
         offset_chunk_size=offset_chunk_size,
         writer_memory_lock=writer_memory_lock,

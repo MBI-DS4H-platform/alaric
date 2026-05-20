@@ -12,11 +12,14 @@ import numpy as np
 
 
 MAGIC = b"alaric1"
-HEADER_SIZE = 16
+HEADER_SIZE = 21
 MAX_NP = 2**32 - 1
 MAX_NO = 2**16
+MAX_BUCKET_SIZE = 2**16 - 1
+DEFAULT_BUCKET_SIZE = 16
 ARC_SUFFIX = ".arc"
 ARC_ZSTD_SUFFIX = ".arc.zst"
+ARC_ZSTD_FRAME_BYTES = 4 * 1024 * 1024
 
 
 def _require_zstandard(action: str):
@@ -47,36 +50,54 @@ def _as_grid_array(translations: np.ndarray) -> np.ndarray:
     return translations.astype(np.int32, copy=False)
 
 
-def split_M_O(grid: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _check_bucket_size(bucket_size: int) -> int:
+    bucket_size = int(bucket_size)
+    if bucket_size < 1 or bucket_size > MAX_BUCKET_SIZE:
+        raise ValueError(f"bucket_size must be in 1..{MAX_BUCKET_SIZE}")
+    return bucket_size
+
+
+def split_M_O(grid: np.ndarray, bucket_size: int) -> tuple[np.ndarray, np.ndarray]:
     """Split absolute grid coordinates into .arc M and O components."""
+    bucket_size = _check_bucket_size(bucket_size)
+    half = bucket_size // 2
     grid = _as_grid_array(grid)
-    M = ((grid + 128) // 256).astype(np.int32, copy=False)
-    O = grid - 256 * M
-    if M.size and (M.min() < -128 or M.max() > 127):
-        raise ValueError("M values must fit in signed int8")
-    if O.size and (O.min() < -128 or O.max() > 127):
-        raise ValueError("O values must fit in signed int8")
-    return M.astype(np.int8, copy=False), O.astype(np.int8, copy=False)
+    M = ((grid + half) // bucket_size).astype(np.int32, copy=False)
+    O = grid - bucket_size * M
+    if M.size and (M.min() < -32768 or M.max() > 32767):
+        raise ValueError("M values must fit in signed int16")
+    if O.size and (O.min() < -32768 or O.max() > 32767):
+        raise ValueError("O values must fit in signed int16")
+    return M.astype(np.int16, copy=False), O.astype(np.int16, copy=False)
 
 
 def _validate_arc_arrays(
-    M: np.ndarray, O: np.ndarray, C: np.ndarray, P: np.ndarray
+    M: np.ndarray,
+    O: np.ndarray,
+    C: np.ndarray,
+    P: np.ndarray,
+    bucket_size: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    bucket_size = _check_bucket_size(bucket_size)
+    half = bucket_size // 2
+
     M = np.asarray(M)
     if M.shape != (3,):
         raise ValueError("M must have shape (3,)")
-    if M.size and (M.min() < -128 or M.max() > 127):
-        raise ValueError("M values must fit in signed int8")
-    M = M.astype(np.int8, copy=False)
+    if M.size and (M.min() < -32768 or M.max() > 32767):
+        raise ValueError("M values must fit in signed int16")
+    M = M.astype(np.int16, copy=False)
 
     O = np.asarray(O)
     if O.ndim != 2 or O.shape[1] != 3:
         raise ValueError("O must be a [nO,3] array")
     if len(O) > MAX_NO:
         raise ValueError("nO must be <= 65536")
-    if O.size and (O.min() < -128 or O.max() > 127):
-        raise ValueError("O values must fit in signed int8")
-    O = O.astype(np.int8, copy=False)
+    if O.size and (O.min() < -half or O.max() > half - 1):
+        raise ValueError(
+            f"O values must fit in [-{half}, {half - 1}] for bucket_size {bucket_size}"
+        )
+    O = O.astype(np.int16, copy=False)
 
     C = np.asarray(C)
     if C.ndim != 1:
@@ -143,56 +164,64 @@ def _read_exact(handle, size: int, path: str | Path) -> bytes:
     return data
 
 
-def _parse_arc_header(raw: bytes, path: str | Path) -> tuple[np.ndarray, int, int]:
+def _parse_arc_header(raw: bytes, path: str | Path) -> tuple[np.ndarray, int, int, int]:
     if len(raw) < HEADER_SIZE:
         raise ValueError(f".arc file is too small: {path}")
     if raw[:7] != MAGIC:
         raise ValueError(f"bad .arc magic in {path}")
-    M = np.frombuffer(raw[7:10], dtype=np.int8).copy()
-    nO_raw = int(np.frombuffer(raw[10:12], dtype="<u2")[0])
+    bucket_size = int(np.frombuffer(raw[7:9], dtype="<u2")[0])
+    if bucket_size < 1:
+        raise ValueError(f"bucket_size must be >= 1 in {path}")
+    M = np.frombuffer(raw[9:15], dtype="<i2").copy()
+    nO_raw = int(np.frombuffer(raw[15:17], dtype="<u2")[0])
     nO = MAX_NO if nO_raw == 0 else nO_raw
-    nP = int(np.frombuffer(raw[12:16], dtype="<u4")[0])
-    return M, nO, nP
+    nP = int(np.frombuffer(raw[17:21], dtype="<u4")[0])
+    return M, nO, nP, bucket_size
 
 
-def read_arc_header(path: str | Path) -> tuple[np.ndarray, int, int]:
+def read_arc_header(path: str | Path) -> tuple[np.ndarray, int, int, int]:
     return _parse_arc_header(_read_arc_prefix(path, HEADER_SIZE), path)
 
 
-def read_arc_offsets(path: str | Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
-    M, nO, nP = read_arc_header(path)
-    raw = _read_arc_prefix(path, HEADER_SIZE + nO * 3 + nO * 4)
+def read_arc_offsets(
+    path: str | Path,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
+    M, nO, nP, bucket_size = read_arc_header(path)
+    raw = _read_arc_prefix(path, HEADER_SIZE + nO * 6 + nO * 4)
     pos = HEADER_SIZE
-    O = np.frombuffer(raw[pos : pos + nO * 3], dtype=np.int8).copy().reshape(nO, 3)
-    pos += nO * 3
+    O = np.frombuffer(raw[pos : pos + nO * 6], dtype="<i2").copy().reshape(nO, 3)
+    pos += nO * 6
     C = np.frombuffer(raw[pos : pos + nO * 4], dtype="<u4").copy()
     if int(C.sum(dtype=np.uint64)) != nP:
         raise ValueError(f"sum(C) must equal nP in {path}")
-    return M, O, C, nP
+    return M, O, C, nP, bucket_size
 
 
-def read_arc_file(path: str | Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def read_arc_file(
+    path: str | Path,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
     raw = _open_arc_bytes(path)
-    M, nO, nP = _parse_arc_header(raw[:HEADER_SIZE], path)
-    expected = HEADER_SIZE + nO * 3 + nO * 4 + nP * 6
+    M, nO, nP, bucket_size = _parse_arc_header(raw[:HEADER_SIZE], path)
+    expected = HEADER_SIZE + nO * 6 + nO * 4 + nP * 6
     if len(raw) != expected:
         raise ValueError(
             f"bad .arc length for {path}: expected {expected} bytes, got {len(raw)}"
         )
     pos = HEADER_SIZE
-    O = np.frombuffer(raw[pos : pos + nO * 3], dtype=np.int8).copy().reshape(nO, 3)
-    pos += nO * 3
+    O = np.frombuffer(raw[pos : pos + nO * 6], dtype="<i2").copy().reshape(nO, 3)
+    pos += nO * 6
     C = np.frombuffer(raw[pos : pos + nO * 4], dtype="<u4").copy()
     pos += nO * 4
     P = np.frombuffer(raw[pos : pos + nP * 6], dtype="<u2").copy().reshape(nP, 3)
-    return _validate_arc_arrays(M, O, C, P)
+    M, O, C, P = _validate_arc_arrays(M, O, C, P, bucket_size)
+    return M, O, C, P, bucket_size
 
 
 def iter_arc_pose_chunks(
     path: str | Path,
     *,
     rows_per_chunk: int = 1_000_000,
-) -> Iterable[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
+) -> Iterable[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]]:
     """Yield one .arc file as bounded pose chunks.
 
     The metadata arrays are copied once and reused across chunks. Pose chunks are
@@ -214,9 +243,9 @@ def iter_arc_pose_chunks(
     try:
         with stream_context as stream:
             header = _read_exact(stream, HEADER_SIZE, path)
-            M, nO, nP = _parse_arc_header(header, path)
-            O_raw = _read_exact(stream, nO * 3, path)
-            O = np.frombuffer(O_raw, dtype=np.int8).copy().reshape(nO, 3)
+            M, nO, nP, bucket_size = _parse_arc_header(header, path)
+            O_raw = _read_exact(stream, nO * 6, path)
+            O = np.frombuffer(O_raw, dtype="<i2").copy().reshape(nO, 3)
             C_raw = _read_exact(stream, nO * 4, path)
             C = np.frombuffer(C_raw, dtype="<u4").copy()
             if int(C.sum(dtype=np.uint64)) != nP:
@@ -229,7 +258,7 @@ def iter_arc_pose_chunks(
                 P = np.frombuffer(raw, dtype="<u2").copy().reshape(take, 3)
                 if len(P) and (len(O) == 0 or int(P[:, 2].max()) >= len(O)):
                     raise ValueError(f"P offset indices must be < nO in {path}")
-                yield M, O, C, P
+                yield M, O, C, P, bucket_size
                 remaining -= take
 
             extra = stream.read(1)
@@ -247,9 +276,11 @@ def write_arc_file(
     C: np.ndarray,
     P: np.ndarray,
     *,
+    bucket_size: int,
     zstd: bool | None = None,
 ) -> None:
-    M, O, C, P = _validate_arc_arrays(M, O, C, P)
+    bucket_size = _check_bucket_size(bucket_size)
+    M, O, C, P = _validate_arc_arrays(M, O, C, P, bucket_size)
     if len(P) == 0:
         raise ValueError("empty .arc files are not written")
 
@@ -260,10 +291,11 @@ def write_arc_file(
 
     payload = io.BytesIO()
     payload.write(MAGIC)
-    payload.write(M.tobytes(order="C"))
+    payload.write(np.array([bucket_size], dtype="<u2").tobytes())
+    payload.write(M.astype("<i2", copy=False).tobytes(order="C"))
     payload.write(np.array([nO_raw], dtype="<u2").tobytes())
     payload.write(np.array([len(P)], dtype="<u4").tobytes())
-    payload.write(O.tobytes(order="C"))
+    payload.write(O.astype("<i2", copy=False).tobytes(order="C"))
     payload.write(C.astype("<u4", copy=False).tobytes(order="C"))
     payload.write(P.astype("<u2", copy=False).tobytes(order="C"))
     data = payload.getvalue()
@@ -275,7 +307,12 @@ def write_arc_file(
         tmp_path = Path(handle.name)
         if zstd:
             zstd_mod = _require_zstandard("write")
-            handle.write(zstd_mod.ZstdCompressor().compress(data))
+            compressor = zstd_mod.ZstdCompressor()
+            view = memoryview(data)
+            for offset in range(0, len(data), ARC_ZSTD_FRAME_BYTES):
+                handle.write(
+                    compressor.compress(view[offset : offset + ARC_ZSTD_FRAME_BYTES])
+                )
         else:
             handle.write(data)
     try:
@@ -290,9 +327,11 @@ def pack_pool(
     rotamer_indices: np.ndarray,
     translations: np.ndarray,
     *,
+    bucket_size: int,
     sort_offsets: bool = True,
 ) -> list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
     """Pack expanded pose rows into one .arc tuple per M bucket."""
+    bucket_size = _check_bucket_size(bucket_size)
     conf = _as_uint16_array("conformer_indices", conformer_indices)
     rot = _as_uint16_array("rotamer_indices", rotamer_indices)
     if conf.shape != rot.shape:
@@ -303,7 +342,7 @@ def pack_pool(
     if len(grid) == 0:
         return []
 
-    Ms, Os = split_M_O(grid)
+    Ms, Os = split_M_O(grid, bucket_size)
     buckets: dict[tuple[int, int, int], list[np.ndarray]] = defaultdict(list)
     for m in np.unique(Ms, axis=0):
         mask = np.all(Ms == m, axis=1)
@@ -313,7 +352,7 @@ def pack_pool(
     packed = []
     for m_key in sorted(buckets):
         rows = np.concatenate(buckets[m_key], axis=0)
-        offsets = rows[:, :3].astype(np.int8, copy=False)
+        offsets = rows[:, :3].astype(np.int16, copy=False)
         conf_rot = rows[:, 3:5].astype(np.uint16, copy=False)
         O, inverse = np.unique(offsets, axis=0, return_inverse=True)
         if sort_offsets:
@@ -324,15 +363,16 @@ def pack_pool(
             inverse = remap[inverse]
         C = np.bincount(inverse, minlength=len(O)).astype(np.uint32)
         P = np.column_stack((conf_rot, inverse.astype(np.uint16, copy=False)))
-        packed.append((np.array(m_key, dtype=np.int8), O, C, P))
+        packed.append((np.array(m_key, dtype=np.int16), O, C, P))
     return packed
 
 
 def decode_pool(
-    M: np.ndarray, O: np.ndarray, C: np.ndarray, P: np.ndarray
+    M: np.ndarray, O: np.ndarray, C: np.ndarray, P: np.ndarray, bucket_size: int
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    M, O, C, P = _validate_arc_arrays(M, O, C, P)
-    grid = O.astype(np.int16) + 256 * M.astype(np.int16)
+    bucket_size = _check_bucket_size(bucket_size)
+    M, O, C, P = _validate_arc_arrays(M, O, C, P, bucket_size)
+    grid = O.astype(np.int32) + bucket_size * M.astype(np.int32)
     translations = grid[P[:, 2].astype(np.int64)]
     return (
         P[:, 0].astype(np.uint16, copy=False),
@@ -345,9 +385,15 @@ def discover_unorganized(directory: str | Path) -> list[Path]:
     directory = Path(directory)
     if not directory.exists():
         return []
-    return sorted(directory.glob("unorganized-*.arc")) + sorted(
-        directory.glob("unorganized-*.arc.zst")
-    )
+    paths: set[Path] = set()
+    for pattern in (
+        "unorganized-*.arc",
+        "unorganized-*.arc.zst",
+        "unorganized-*/*.arc",
+        "unorganized-*/*.arc.zst",
+    ):
+        paths.update(directory.glob(pattern))
+    return sorted(paths)
 
 
 def _pose_index_from_arc_name(name: str) -> int | None:
@@ -382,13 +428,17 @@ class PoseWriter:
         outdir: str | Path,
         *,
         cache_poses: int = 50_000_000,
+        bucket_size: int = DEFAULT_BUCKET_SIZE,
         memory_lock=None,
+        unorganized_subdirs: bool = False,
     ) -> None:
         self.outdir = Path(outdir)
         self.cache_poses = int(cache_poses)
         if self.cache_poses <= 0:
             raise ValueError("cache_poses must be positive")
+        self.bucket_size = _check_bucket_size(bucket_size)
         self._memory_lock = memory_lock
+        self.unorganized_subdirs = bool(unorganized_subdirs)
         self._unsorted_chunks: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
         self._buckets: dict[
             tuple[int, int, int],
@@ -446,8 +496,12 @@ class PoseWriter:
     def _next_unorganized_path(self) -> Path:
         self.outdir.mkdir(parents=True, exist_ok=True)
         while True:
-            name = f"unorganized-{os.getpid():x}-{np.random.bytes(4).hex()}.arc.zst"
-            path = self.outdir / name
+            prefix = f"unorganized-{os.getpid():x}"
+            token = np.random.bytes(4).hex()
+            if self.unorganized_subdirs:
+                path = self.outdir / prefix / f"{token}.arc.zst"
+            else:
+                path = self.outdir / f"{prefix}-{token}.arc.zst"
             if not path.exists():
                 return path
 
@@ -462,7 +516,7 @@ class PoseWriter:
             conf = np.concatenate([chunk[0] for chunk in chunks])
             rot = np.concatenate([chunk[1] for chunk in chunks])
             grid = np.concatenate([chunk[2] for chunk in chunks])
-            Ms, Os = split_M_O(grid)
+            Ms, Os = split_M_O(grid, self.bucket_size)
             unique_M = np.unique(Ms, axis=0)
             for M in unique_M:
                 mask = np.all(Ms == M, axis=1)
@@ -471,7 +525,7 @@ class PoseWriter:
                     (
                         conf[mask].copy(),
                         rot[mask].copy(),
-                        Os[mask].astype(np.int8, copy=True),
+                        Os[mask].astype(np.int16, copy=True),
                     )
                 )
                 self._bucket_counts[key] += int(mask.sum())
@@ -491,10 +545,10 @@ class PoseWriter:
             O, inverse = np.unique(O_rows, axis=0, return_inverse=True)
             C = np.bincount(inverse, minlength=len(O)).astype(np.uint32)
             P = np.column_stack((conf, rot, inverse.astype(np.uint16, copy=False)))
-            M = np.array(key, dtype=np.int8)
+            M = np.array(key, dtype=np.int16)
 
         path = self._next_unorganized_path()
-        write_arc_file(path, M, O, C, P, zstd=True)
+        write_arc_file(path, M, O, C, P, bucket_size=self.bucket_size, zstd=True)
         self._written.append(path)
 
     def finish(self) -> list[Path]:
@@ -513,6 +567,6 @@ class PoseWriter:
 
 def iter_decoded_rows(paths: Iterable[str | Path]) -> Iterable[np.ndarray]:
     for path in paths:
-        M, O, C, P = read_arc_file(path)
-        conf, rot, translations = decode_pool(M, O, C, P)
+        M, O, C, P, bucket_size = read_arc_file(path)
+        conf, rot, translations = decode_pool(M, O, C, P, bucket_size)
         yield np.column_stack((translations, conf, rot))

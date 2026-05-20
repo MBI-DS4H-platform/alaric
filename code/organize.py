@@ -8,6 +8,8 @@ from dataclasses import dataclass
 import multiprocessing as mp
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -17,6 +19,8 @@ import numpy as np
 from tqdm import tqdm
 
 from poses import (
+    ARC_SUFFIX,
+    ARC_ZSTD_SUFFIX,
     MAGIC,
     MAX_NO,
     MAX_NP,
@@ -37,6 +41,7 @@ class SourceMeta:
     O: np.ndarray
     C: np.ndarray
     nP: int
+    bucket_size: int
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -64,6 +69,25 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Write organized poses-*.arc.zst files by streaming completed temp .arc files through zstd.",
     )
+    parser.add_argument(
+        "--local-tempdir",
+        action="store_true",
+        help="Copy unorganized shards into a local tempdir, decompressing .arc.zst to .arc, and read sources from there.",
+    )
+    parser.add_argument(
+        "--local-stagedir",
+        action="store_true",
+        help=(
+            "Write organized output to a local tempdir, then delete the "
+            "unorganized shards in the pose dir and move the staged output "
+            "in. Use when the pose dir's partition cannot hold the organized "
+            "and unorganized data simultaneously. WARNING: a process crash "
+            "between the unorganized deletion and the staged commit destroys "
+            "both the organized output (still in a local tempdir that will be "
+            "cleaned up) and the unorganized inputs; recovery requires "
+            "regenerating the unorganized shards from upstream."
+        ),
+    )
     parser.add_argument("--debug", action="store_true")
     return parser
 
@@ -74,6 +98,7 @@ class OutputLayout:
     M: tuple[int, int, int]
     offsets: list[tuple[int, int, int]]
     counts: list[int]
+    bucket_size: int
 
 
 @dataclass(frozen=True)
@@ -92,18 +117,41 @@ class LayoutEntry:
 
 
 def _read_source_meta(path: Path) -> SourceMeta:
-    M, O, C, nP = read_arc_offsets(path)
+    M, O, C, nP, bucket_size = read_arc_offsets(path)
     if int(C.max(initial=0)) > MAX_NP:
         raise ValueError(f"mini-bucket count exceeds uint32 in {path}")
-    return SourceMeta(path=path, M=tuple(int(x) for x in M), O=O, C=C, nP=nP)
+    return SourceMeta(
+        path=path,
+        M=tuple(int(x) for x in M),
+        O=O,
+        C=C,
+        nP=nP,
+        bucket_size=bucket_size,
+    )
 
 
 def _read_sources(paths: list[Path], *, nprocs: int = 1) -> list[SourceMeta]:
-    if nprocs <= 1 or len(paths) <= 1:
-        return [_read_source_meta(path) for path in paths]
+    if not paths:
+        return []
+    first = _read_source_meta(paths[0])
+    expected_bucket_size = first.bucket_size
 
-    with ThreadPoolExecutor(max_workers=min(nprocs, len(paths))) as executor:
-        return list(executor.map(_read_source_meta, paths))
+    def _read_and_verify(path: Path) -> SourceMeta:
+        meta = _read_source_meta(path)
+        if meta.bucket_size != expected_bucket_size:
+            raise ValueError(
+                f"inconsistent bucket_size: {paths[0]} has {expected_bucket_size}, "
+                f"{path} has {meta.bucket_size}"
+            )
+        return meta
+
+    remaining = paths[1:]
+    if not remaining:
+        return [first]
+    if nprocs <= 1 or len(remaining) <= 1:
+        return [first] + [_read_and_verify(p) for p in remaining]
+    with ThreadPoolExecutor(max_workers=min(nprocs, len(remaining))) as executor:
+        return [first] + list(executor.map(_read_and_verify, remaining))
 
 
 def _build_layouts(
@@ -113,7 +161,12 @@ def _build_layouts(
 ) -> tuple[
     list[OutputLayout],
     dict[tuple[tuple[int, int, int], tuple[int, int, int]], list[Segment]],
+    int,
 ]:
+    if not sources:
+        raise ValueError("no sources")
+    bucket_size = sources[0].bucket_size
+
     counts_by_offset: dict[
         tuple[int, int, int],
         dict[tuple[int, int, int], int],
@@ -144,7 +197,11 @@ def _build_layouts(
             nonlocal file_index, current_offsets, current_counts, current_nposes
             if not current_offsets:
                 return
-            layouts.append(OutputLayout(file_index, M, current_offsets, current_counts))
+            layouts.append(
+                OutputLayout(
+                    file_index, M, current_offsets, current_counts, bucket_size
+                )
+            )
             file_index += 1
             current_offsets = []
             current_counts = []
@@ -201,7 +258,7 @@ def _build_layouts(
             destination[key] = segments
 
         close_current()
-    return layouts, destination
+    return layouts, destination, bucket_size
 
 
 def _write_arc_header(
@@ -210,6 +267,7 @@ def _write_arc_header(
     O: np.ndarray,
     C: np.ndarray,
     nP: int,
+    bucket_size: int,
 ) -> None:
     if M.shape != (3,):
         raise ValueError("M must have shape (3,)")
@@ -226,10 +284,11 @@ def _write_arc_header(
 
     nO_raw = 0 if len(O) == MAX_NO else len(O)
     handle.write(MAGIC)
-    handle.write(M.astype(np.int8, copy=False).tobytes(order="C"))
+    handle.write(np.array([bucket_size], dtype="<u2").tobytes())
+    handle.write(M.astype("<i2", copy=False).tobytes(order="C"))
     handle.write(np.array([nO_raw], dtype="<u2").tobytes())
     handle.write(np.array([nP], dtype="<u4").tobytes())
-    handle.write(O.astype(np.int8, copy=False).tobytes(order="C"))
+    handle.write(O.astype("<i2", copy=False).tobytes(order="C"))
     handle.write(C.astype("<u4", copy=False).tobytes(order="C"))
 
 
@@ -332,8 +391,8 @@ def _write_group_layout(
             raise ImportError("zstandard is required for --compress") from exc
         zstd = None
 
-    M = np.array(layout.M, dtype=np.int8)
-    O = np.array(layout.offsets, dtype=np.int8)
+    M = np.array(layout.M, dtype=np.int16)
+    O = np.array(layout.offsets, dtype=np.int16)
     C = np.array(layout.counts, dtype=np.uint32)
     dest = (
         pose_dir / f"poses-{layout.file_index}.arc.zst"
@@ -355,7 +414,14 @@ def _write_group_layout(
             compressor = zstd.ZstdCompressor().stream_writer(raw_handle)
             output_handle = compressor
         try:
-            _write_arc_header(output_handle, M, O, C, int(C.sum(dtype=np.uint64)))
+            _write_arc_header(
+                output_handle,
+                M,
+                O,
+                C,
+                int(C.sum(dtype=np.uint64)),
+                layout.bucket_size,
+            )
             for offset_id, entry in enumerate(entries):
                 key = (entry.M, entry.offset)
                 segment = entry.segment
@@ -479,7 +545,7 @@ def _process_layout_group(
                 continue
             saw_chunk = False
             checked_meta = False
-            for M_arr, O, C, P in iter_arc_pose_chunks(
+            for M_arr, O, C, P, _bs in iter_arc_pose_chunks(
                 source.path,
                 rows_per_chunk=chunk_poses,
             ):
@@ -601,7 +667,7 @@ def _organize_streaming(
     compress: bool,
     chunk_poses: int,
 ) -> int:
-    layouts, destination = _build_layouts(
+    layouts, destination, _bucket_size = _build_layouts(
         sources,
         max_poses_per_file=max_poses_per_file,
     )
@@ -660,6 +726,91 @@ def _organize_streaming(
     return len(layouts)
 
 
+def _staged_unorganized_arc_name(src: Path) -> str:
+    if src.name.endswith(ARC_ZSTD_SUFFIX):
+        stem = src.name[: -len(ARC_ZSTD_SUFFIX)]
+    elif src.name.endswith(ARC_SUFFIX):
+        stem = src.name[: -len(ARC_SUFFIX)]
+    else:
+        raise ValueError(f"unexpected unorganized file: {src}")
+
+    if src.parent.name.startswith("unorganized-") and not src.name.startswith(
+        "unorganized-"
+    ):
+        stem = f"{src.parent.name}-{stem}"
+    return f"{stem}{ARC_SUFFIX}"
+
+
+def _unlink_unorganized(paths: Sequence[Path], root: Path) -> None:
+    parents: set[Path] = set()
+    for path in paths:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            continue
+        if path.parent != root and path.parent.name.startswith("unorganized-"):
+            parents.add(path.parent)
+
+    for parent in sorted(parents, key=lambda p: len(p.parts), reverse=True):
+        with contextlib.suppress(OSError):
+            parent.rmdir()
+
+
+def _stage_unorganized_uncompressed(unorganized: list[Path], tempdir: Path) -> None:
+    if not unorganized:
+        return
+    has_zst = any(p.name.endswith(ARC_ZSTD_SUFFIX) for p in unorganized)
+    zstd_bin = shutil.which("zstd") if has_zst else None
+    if has_zst and zstd_bin is None:
+        raise FileNotFoundError(
+            "zstd CLI is required to decompress .arc.zst sources for --local-tempdir"
+        )
+
+    ncores = os.cpu_count() or 1
+    workers = max(1, min(8, ncores, len(unorganized)))
+    threads_per_worker = max(1, ncores // workers)
+
+    def stage_one(src: Path) -> None:
+        dst = tempdir / _staged_unorganized_arc_name(src)
+        if src.name.endswith(ARC_ZSTD_SUFFIX):
+            assert zstd_bin is not None
+            subprocess.run(
+                [
+                    zstd_bin,
+                    "-d",
+                    "-q",
+                    "-f",
+                    f"-T{threads_per_worker}",
+                    "-o",
+                    str(dst),
+                    str(src),
+                ],
+                check=True,
+            )
+        elif src.name.endswith(ARC_SUFFIX):
+            shutil.copy2(src, dst)
+        else:
+            raise ValueError(f"unexpected unorganized file: {src}")
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        list(
+            tqdm(
+                executor.map(stage_one, unorganized),
+                total=len(unorganized),
+                desc="Staging sources",
+                unit="file",
+            )
+        )
+
+
+def _commit_staged_organized(stagedir: Path, pose_dir: Path) -> None:
+    organized = discover_organized(stagedir)
+    if not organized:
+        return
+    for src in organized:
+        shutil.move(str(src), str(pose_dir / src.name))
+
+
 def _run(args: argparse.Namespace) -> int:
     if args.capacity <= 0:
         raise ValueError("--capacity must be positive")
@@ -677,8 +828,7 @@ def _run(args: argparse.Namespace) -> int:
     organized = discover_organized(pose_dir)
 
     if marker.exists():
-        for path in unorganized:
-            path.unlink()
+        _unlink_unorganized(unorganized, pose_dir)
         marker.unlink()
         return 0
 
@@ -686,25 +836,47 @@ def _run(args: argparse.Namespace) -> int:
         return 0
     if organized:
         raise ValueError(
-            f"{pose_dir} contains both organized poses-*.arc and unorganized-*.arc* files"
+            f"{pose_dir} contains both organized poses-*.arc and unorganized .arc files"
         )
 
-    sources = _read_sources(unorganized, nprocs=int(args.nprocs))
-    if sources:
-        _organize_streaming(
-            pose_dir,
-            sources,
-            capacity=int(args.capacity),
-            max_poses_per_file=int(args.max_poses_per_file),
-            nprocs=int(args.nprocs),
-            compress=bool(args.compress),
-            chunk_poses=int(args.chunk_poses),
-        )
+    local_tempdir: Path | None = None
+    local_stagedir: Path | None = None
+    try:
+        if args.local_tempdir:
+            local_tempdir = Path(tempfile.mkdtemp(prefix="alaric-organize-src-"))
+            _stage_unorganized_uncompressed(unorganized, local_tempdir)
+            source_paths = discover_unorganized(local_tempdir)
+        else:
+            source_paths = unorganized
 
-    marker.touch()
-    for path in unorganized:
-        path.unlink()
-    marker.unlink()
+        if args.local_stagedir:
+            local_stagedir = Path(tempfile.mkdtemp(prefix="alaric-organize-stage-"))
+            output_dir = local_stagedir
+        else:
+            output_dir = pose_dir
+
+        sources = _read_sources(source_paths, nprocs=int(args.nprocs))
+        if sources:
+            _organize_streaming(
+                output_dir,
+                sources,
+                capacity=int(args.capacity),
+                max_poses_per_file=int(args.max_poses_per_file),
+                nprocs=int(args.nprocs),
+                compress=bool(args.compress),
+                chunk_poses=int(args.chunk_poses),
+            )
+
+        marker.touch()
+        _unlink_unorganized(unorganized, pose_dir)
+        if local_stagedir is not None:
+            _commit_staged_organized(local_stagedir, pose_dir)
+        marker.unlink()
+    finally:
+        if local_tempdir is not None and local_tempdir.exists():
+            shutil.rmtree(local_tempdir)
+        if local_stagedir is not None and local_stagedir.exists():
+            shutil.rmtree(local_stagedir)
     return 0
 
 

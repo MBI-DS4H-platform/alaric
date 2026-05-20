@@ -332,13 +332,19 @@ Output dir if exists must have the correct checksum signature, else error.
 
 ### Pose format
 first 7 bytes: alaric1
-3x uint8 : the mean M to be added to each offset x256
-uint16: the number of offsets nO 
+uint16: bucket_size B (the grid edge length of one bucket; 1..65535)
+3x int16 (little-endian): the bucket coordinate M; absolute grid = O + B*M
+uint16: the number of offsets nO
 uint32: number of poses nP
-nO x 3 x int8: the offset array O
+nO x 3 x int16 (little-endian): the offset array O
 nO x uint32: the offset count array C
-nP x 3 x uint16: the pose array P. 
+nP x 3 x uint16: the pose array P.
     conformer, rotamer, offset index into O
+
+bucket_size is recorded per file and is a per-dataset (uniform) parameter
+chosen at stack-write time via stack.py's --bucket-size flag (default 16).
+Organize requires all source shards in a pose dir to share the same
+bucket_size; the value is propagated unchanged into the organized output.
 
 The offset count array C contains for every element in O
  the number of poses that belong to it.
@@ -346,15 +352,15 @@ The sum of C is nP.
 
 To unpack a pose offset into grid coordinates:
 - Take the element of O at the offset index
-- Add 256 * M
+- Add B * M (where B is the file's bucket_size)
 
 To pack a grid coordinate offset G into a pose offset
-- Calculate M0 as G rounded to the nearest multiple of 256.
-  ERROR if any element does not fit in a int8 .
-- Calculate M as M0 / 256
-- Calculate O0 as G - 256 * M
+- Calculate M0 as G rounded to the nearest multiple of B.
+  ERROR if any element of M does not fit in a int16.
+- Calculate M as M0 / B
+- Calculate O0 as G - B * M (O0 fits in [-B/2, B/2-1] and thus int16)
 - In the bucket M, in its O array, look up the index of O0. If it doesn't exist, append it to O
-- The pose offset is the index of O0 
+- The pose offset is the index of O0
 
 Pose writing is bucket-based and massively parallel.
 Each pose writer has its own cache size, by default 50 million poses (300 MB + offsets)
