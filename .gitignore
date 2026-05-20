@@ -13,6 +13,7 @@ htmlcov/
 # Generated pose-pool outputs from local stack/grow runs.
 frag4-bwd/
 frag4-fwd/
+frag4-identity/
 frag4-det-*/
 poses-*.npy
 poses-*.npy.zst
