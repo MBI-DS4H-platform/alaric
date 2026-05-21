@@ -1,4 +1,5 @@
 /crocodile
+/crocodile-OLD
 
 __pycache__/
 *.py[cod]
@@ -13,12 +14,11 @@ htmlcov/
 # Generated pose-pool outputs from local stack/grow runs.
 frag4-bwd/
 frag4-fwd/
+frag4-merged/
 frag4-identity/
 frag4-det-*/
-poses-*.npy
-poses-*.npy.zst
 poses-*.arc
-offsets-*.dat
+poses-*.arc.zst
 unorganized-*.arc
 unorganized-*.arc.zst
 .ORGANIZED-DONE

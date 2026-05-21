@@ -995,6 +995,17 @@ def _resolve_templates_dir(config: dict[str, object], fraglib_root: Path) -> Pat
     return fraglib_root / "templates"
 
 
+def load_mononucleotide_templates() -> dict[str, np.ndarray]:
+    """Load configured mononucleotide ParsedPDB templates."""
+    config_data = _fraglib_config()
+    fraglib_root = Path(__file__).resolve().parent.parent / "fraglib"
+    templates_dir = _resolve_templates_dir(config_data, fraglib_root)
+    return {
+        base: np.load(str(templates_dir / f"{base}-ppdb.npy"), allow_pickle=False)
+        for base in ["A", "C", "G", "U"]
+    }
+
+
 def config(
     verify_checksums: bool = True,
 ) -> tuple[dict[str, "LibraryFactory"], dict[str, np.ndarray]]:
@@ -1026,11 +1037,8 @@ def config(
     )
 
     _bases = ["A", "C", "G", "U"]
-    mononucleotide_templates = {}
     templates_dir = _resolve_templates_dir(config_data, fraglib_root)
-    for base in _bases:
-        ppdb = np.load(str(templates_dir / f"{base}-ppdb.npy"))
-        mononucleotide_templates[base] = ppdb
+    load_mononucleotide_templates()
 
     dinucleotide_templates = {}
     dinucleotide_libraries = {}
