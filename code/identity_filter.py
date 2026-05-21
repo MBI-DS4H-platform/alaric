@@ -1,3 +1,10 @@
+"""Filter identity-overlapping organized pose directories.
+
+This module intentionally bypasses PoseReader because it compares and rewrites
+raw .arc bucket structure: M/O/C metadata, local offset indices, and packed
+conformer/rotamer keys are part of the algorithm.
+"""
+
 from __future__ import annotations
 
 import argparse

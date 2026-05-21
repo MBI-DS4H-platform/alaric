@@ -4,9 +4,10 @@ import io
 import os
 from collections import defaultdict
 from contextlib import nullcontext
+from dataclasses import dataclass
 from pathlib import Path
 import tempfile
-from typing import Iterable
+from typing import Iterable, Iterator
 
 import numpy as np
 
@@ -20,6 +21,7 @@ DEFAULT_BUCKET_SIZE = 16
 ARC_SUFFIX = ".arc"
 ARC_ZSTD_SUFFIX = ".arc.zst"
 ARC_ZSTD_FRAME_BYTES = 4 * 1024 * 1024
+DEFAULT_POSE_CHUNK_SIZE = 10_000
 
 
 def _require_zstandard(action: str):
@@ -93,9 +95,10 @@ def _validate_arc_arrays(
         raise ValueError("O must be a [nO,3] array")
     if len(O) > MAX_NO:
         raise ValueError("nO must be <= 65536")
-    if O.size and (O.min() < -half or O.max() > half - 1):
+    max_offset = bucket_size - half - 1
+    if O.size and (O.min() < -half or O.max() > max_offset):
         raise ValueError(
-            f"O values must fit in [-{half}, {half - 1}] for bucket_size {bucket_size}"
+            f"O values must fit in [-{half}, {max_offset}] for bucket_size {bucket_size}"
         )
     O = O.astype(np.int16, copy=False)
 
@@ -418,6 +421,214 @@ def discover_organized(directory: str | Path) -> list[Path]:
         if index is not None:
             indexed.append((index, path))
     return [path for _, path in sorted(indexed)]
+
+
+@dataclass(frozen=True)
+class PoseChunk:
+    conformers: np.ndarray
+    rotamers: np.ndarray
+    translations_grid: np.ndarray
+
+    def __len__(self) -> int:
+        return len(self.conformers)
+
+
+@dataclass(frozen=True)
+class _PoseFile:
+    path: Path
+    nposes: int
+    global_start: int
+
+
+class PoseReader:
+    """Streaming reader for organized pose directories."""
+
+    @staticmethod
+    def get_nposes(pose_dir: str | Path) -> int:
+        paths = discover_organized(pose_dir)
+        if not paths:
+            raise FileNotFoundError(f"No organized poses-*.arc files found in {pose_dir}")
+        total = 0
+        for path in paths:
+            _, _, nposes, _ = read_arc_header(path)
+            total += int(nposes)
+        return total
+
+    def __init__(
+        self,
+        pose_dir: str | Path,
+        *,
+        pose_range: tuple[int, int] | None = None,
+        rows_per_chunk: int = DEFAULT_POSE_CHUNK_SIZE,
+    ) -> None:
+        if rows_per_chunk <= 0:
+            raise ValueError("rows_per_chunk must be positive")
+
+        self.pose_dir = Path(pose_dir)
+        self.rows_per_chunk = int(rows_per_chunk)
+        self.paths = discover_organized(self.pose_dir)
+        if not self.paths:
+            raise FileNotFoundError(
+                f"No organized poses-*.arc files found in {self.pose_dir}"
+            )
+
+        files = []
+        global_start = 0
+        for path in self.paths:
+            _, _, nposes, _ = read_arc_header(path)
+            files.append(
+                _PoseFile(
+                    path=path,
+                    nposes=int(nposes),
+                    global_start=global_start,
+                )
+            )
+            global_start += int(nposes)
+        self.files = files
+        self.total_poses = global_start
+
+        if pose_range is None:
+            self.start0 = 0
+            self.stop0 = self.total_poses
+        else:
+            start, end = pose_range
+            if start <= 0 or end <= 0:
+                raise ValueError("pose range values must be positive")
+            if start > end:
+                raise ValueError("pose range START must be <= END")
+            self.start0 = start - 1
+            self.stop0 = end
+            if self.start0 >= self.total_poses:
+                raise ValueError(
+                    f"pose range starts after the last pose ({self.total_poses})"
+                )
+            if self.stop0 > self.total_poses:
+                raise ValueError(
+                    f"pose range END={end} exceeds number of poses ({self.total_poses})"
+                )
+        self._pos0 = self.start0
+        self._stream: Iterator[PoseChunk] | None = None
+        self._pending: PoseChunk | None = None
+
+    @property
+    def selected_poses(self) -> int:
+        return max(0, self.stop0 - self.start0)
+
+    def tell(self) -> int:
+        return self._pos0 - self.start0
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        if whence == 0:
+            relative = offset
+        elif whence == 1:
+            relative = self.tell() + offset
+        elif whence == 2:
+            relative = self.selected_poses + offset
+        else:
+            raise ValueError("whence must be 0, 1, or 2")
+        if relative < 0 or relative > self.selected_poses:
+            raise ValueError("seek position out of range")
+        self._pos0 = self.start0 + relative
+        self._stream = None
+        self._pending = None
+        return self.tell()
+
+    def read(self, size: int = -1) -> PoseChunk:
+        remaining = self.stop0 - self._pos0
+        if size is None or size < 0:
+            size = remaining
+        else:
+            size = min(int(size), remaining)
+        if size < 0:
+            raise ValueError("read size must be non-negative")
+        if size == 0:
+            return self._empty_chunk()
+
+        chunks = []
+        needed = size
+        while needed:
+            if self._pending is None or len(self._pending) == 0:
+                if self._stream is None:
+                    self._stream = self._iter_absolute_chunks(self._pos0, self.stop0)
+                try:
+                    self._pending = next(self._stream)
+                except StopIteration:
+                    break
+
+            take = min(needed, len(self._pending))
+            chunks.append(self._slice_chunk(self._pending, 0, take))
+            self._pending = self._slice_chunk(self._pending, take, len(self._pending))
+            self._pos0 += take
+            needed -= take
+
+        if not chunks:
+            return self._empty_chunk()
+        return self._concat_chunks(chunks)
+
+    def iter_chunks(self) -> Iterator[PoseChunk]:
+        while True:
+            chunk = self.read(self.rows_per_chunk)
+            if len(chunk) == 0:
+                break
+            yield chunk
+
+    def _iter_absolute_chunks(self, start0: int, stop0: int) -> Iterator[PoseChunk]:
+        for file_entry in self.files:
+            file_start = file_entry.global_start
+            file_stop = file_start + file_entry.nposes
+            if file_stop <= start0:
+                continue
+            if file_start >= stop0:
+                break
+
+            chunk_start = file_start
+            for M, O, _C, P, bucket_size in iter_arc_pose_chunks(
+                file_entry.path,
+                rows_per_chunk=self.rows_per_chunk,
+            ):
+                chunk_stop = chunk_start + len(P)
+                take_start = max(start0, chunk_start)
+                take_stop = min(stop0, chunk_stop)
+                if take_start < take_stop:
+                    rel_start = take_start - chunk_start
+                    rel_stop = take_stop - chunk_start
+                    P_slice = P[rel_start:rel_stop]
+                    grid = O.astype(np.int32) + bucket_size * M.astype(np.int32)
+                    translations = grid[P_slice[:, 2].astype(np.int64)]
+                    yield PoseChunk(
+                        conformers=P_slice[:, 0].astype(np.uint16, copy=False),
+                        rotamers=P_slice[:, 1].astype(np.uint16, copy=False),
+                        translations_grid=translations.astype(np.int16, copy=False),
+                    )
+                chunk_start = chunk_stop
+
+    @staticmethod
+    def _empty_chunk() -> PoseChunk:
+        return PoseChunk(
+            conformers=np.empty((0,), dtype=np.uint16),
+            rotamers=np.empty((0,), dtype=np.uint16),
+            translations_grid=np.empty((0, 3), dtype=np.int16),
+        )
+
+    @staticmethod
+    def _slice_chunk(chunk: PoseChunk, start: int, stop: int) -> PoseChunk:
+        return PoseChunk(
+            conformers=chunk.conformers[start:stop],
+            rotamers=chunk.rotamers[start:stop],
+            translations_grid=chunk.translations_grid[start:stop],
+        )
+
+    @staticmethod
+    def _concat_chunks(chunks: list[PoseChunk]) -> PoseChunk:
+        if len(chunks) == 1:
+            return chunks[0]
+        return PoseChunk(
+            conformers=np.concatenate([chunk.conformers for chunk in chunks]),
+            rotamers=np.concatenate([chunk.rotamers for chunk in chunks]),
+            translations_grid=np.concatenate(
+                [chunk.translations_grid for chunk in chunks]
+            ),
+        )
 
 
 class PoseWriter:

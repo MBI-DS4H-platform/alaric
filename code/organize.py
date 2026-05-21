@@ -1,3 +1,11 @@
+"""Organize unorganized .arc pose shards into bucketed pose files.
+
+This module intentionally reads .arc headers and pose payloads directly instead
+of using PoseReader: organization needs raw bucket metadata (M/O/C) and local
+offset indices, while PoseReader exposes decoded pose rows for downstream
+consumers.
+"""
+
 from __future__ import annotations
 
 import argparse
