@@ -1,0 +1,20 @@
+[project]
+name = "alaric"
+version = "0.1.0"
+description = "RNA fragment docking and scoring pipeline"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=2.0",
+    "scipy",
+    "zstandard",
+    "ruamel.yaml",
+    "tqdm",
+    "biopython",
+    "pyyaml",
+    "jax",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]

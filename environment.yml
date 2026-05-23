@@ -4,9 +4,11 @@ channels:
 dependencies:
   - python>=3.10,<3.14
   - zstandard
-  - numpy
+  - numpy>=2.0
   - scipy
   - ruamel.yaml
   - tqdm
   - biopython
   - julia
+  - jax
+  - pyyaml

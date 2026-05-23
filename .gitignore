@@ -11,6 +11,13 @@ __pycache__/
 .coverage
 htmlcov/
 
+# Generated attract-jax parameter file (derived from attract-jax/attract-original/attract.par)
+attract-par.npz
+
+# Large scoring output files (not tracked in git)
+scoring/
+tests/*/ground-truth/*/energies.npy
+
 # Generated pose-pool outputs from local stack/grow runs.
 frag4-bwd/
 frag4-fwd/
