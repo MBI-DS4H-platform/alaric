@@ -66,25 +66,18 @@ def _load_library(sequence: str):
     return lib_source.create(None, with_rotaconformers=True)
 
 
-def _process_arc_chunk(
-    M: np.ndarray,
-    O: np.ndarray,
-    P: np.ndarray,
-    bucket_size: int,
+def _process_chunk(
+    chunk,
     lib,
     rotvec_cache: dict[int, np.ndarray],
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Convert one arc chunk → (rotvec_dofs, conformer_ids)."""
-    n = len(P)
-    translations_grid = (
-        O[P[:, 2].astype(np.int64)].astype(np.int32)
-        + bucket_size * M.astype(np.int32)
-    )
-    conformer_ids = P[:, 0].astype(np.int32)
-    rotamer_ids = P[:, 1].astype(np.intp)
+    """Convert one PoseChunk → (rotvec_dofs, conformer_ids)."""
+    n = len(chunk)
+    conformer_ids = chunk.conformers.astype(np.int32)
+    rotamer_ids = chunk.rotamers.astype(np.intp)
 
     rotvec_dofs = np.empty((n, 6), dtype=np.float64)
-    rotvec_dofs[:, 3:] = translations_grid.astype(np.float64) * GRID_SPACING
+    rotvec_dofs[:, 3:] = chunk.translations_grid.astype(np.float64) * GRID_SPACING
 
     sort_idx = np.argsort(conformer_ids, kind="stable")
     sorted_conf = conformer_ids[sort_idx]
@@ -116,8 +109,7 @@ def _process_arc_chunk(
 
 def convert_arc_dir(
     pose_dir: Path,
-    first_index: int,
-    last_index: int,
+    pose_range: tuple[int, int] | None,
     sequence: str,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return (rotvec_dofs, conformers).
@@ -126,31 +118,20 @@ def convert_arc_dir(
       tx/ty/tz are world-frame translations in Angstrom
     conformers  : (N,) int32 — 0-based conformer index into the library
     """
-    from poses import iter_arc_pose_chunks
+    from poses import PoseReader
 
     lib = _load_library(sequence)
     rotvec_cache: dict[int, np.ndarray] = {}
     rotvec_chunks: list[np.ndarray] = []
     conf_chunks: list[np.ndarray] = []
 
-    for index in range(first_index, last_index + 1):
-        arc_path = pose_dir / f"poses-{index}.arc.zst"
-        if not arc_path.exists():
-            arc_path = pose_dir / f"poses-{index}.arc"
-        if not arc_path.is_file():
-            raise FileNotFoundError(
-                f"missing arc file for index {index}: "
-                f"{pose_dir}/poses-{index}.arc[.zst]"
-            )
-
-        for M, O, C, P, bucket_size in iter_arc_pose_chunks(arc_path):
-            if len(P) == 0:
-                continue
-            rv_chunk, conf_chunk = _process_arc_chunk(
-                M, O, P, bucket_size, lib, rotvec_cache
-            )
-            rotvec_chunks.append(rv_chunk)
-            conf_chunks.append(conf_chunk)
+    reader = PoseReader(pose_dir, pose_range=pose_range)
+    for chunk in reader.iter_chunks():
+        if len(chunk) == 0:
+            continue
+        rv_chunk, conf_chunk = _process_chunk(chunk, lib, rotvec_cache)
+        rotvec_chunks.append(rv_chunk)
+        conf_chunks.append(conf_chunk)
 
     if not rotvec_chunks:
         return np.empty((0, 6), dtype=np.float64), np.empty((0,), dtype=np.int32)
@@ -165,24 +146,26 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--pose-dir", required=True, type=_existing_dir,
-                    help="Directory containing poses-<index>.arc[.zst] files")
-    ap.add_argument("--first-index", required=True, type=_positive_int,
-                    help="First inclusive pose shard index")
-    ap.add_argument("--last-index", required=True, type=_positive_int,
-                    help="Last inclusive pose shard index")
+                    help="Directory containing poses-*.arc[.zst] files")
+    ap.add_argument("--pose-range", nargs=2, metavar=("START", "END"),
+                    type=_positive_int,
+                    help="1-based end-inclusive global pose range (default: all poses)")
     ap.add_argument("--sequence", required=True, type=_dinucleotide_sequence,
                     help="Dinucleotide sequence (e.g. GU)")
     ap.add_argument("--output-prefix", required=True,
                     help="Output prefix (no extension)")
     args = ap.parse_args()
 
-    if args.first_index > args.last_index:
-        ap.error("--first-index must be <= --last-index")
+    pose_range = None
+    if args.pose_range is not None:
+        start, end = args.pose_range
+        if start > end:
+            ap.error("--pose-range START must be <= END")
+        pose_range = (start, end)
 
     rotvec_dofs, conformers = convert_arc_dir(
         Path(args.pose_dir),
-        args.first_index,
-        args.last_index,
+        pose_range,
         args.sequence,
     )
 
