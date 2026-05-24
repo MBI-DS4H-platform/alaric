@@ -819,12 +819,12 @@ def _run(args: argparse.Namespace) -> int:
     pool_context = None
     writer_memory_lock = None
     if nprocs > 1:
-        ctx_name = "fork" if "fork" in mp.get_all_start_methods() else None
-        pool_context = (
-            mp.get_context(ctx_name)
-            if ctx_name is not None
-            else mp.get_context()
-        )
+        if "fork" not in mp.get_all_start_methods():
+            raise ValueError(
+                "--nprocs > 1 requires the 'fork' start method (Linux/macOS). "
+                "Use --nprocs 1 on this platform."
+            )
+        pool_context = mp.get_context("fork")
         if args.poselock is not None:
             writer_memory_lock = pool_context.Semaphore(args.poselock)
 
