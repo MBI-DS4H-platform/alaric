@@ -10,6 +10,12 @@ import sys
 import time
 from typing import Sequence
 
+# Grow uses many tiny k=9 matrix products. Multi-threaded BLAS adds more
+# scheduling overhead than useful parallelism here; use process-level parallelism
+# via --nprocs unless the caller explicitly overrides these.
+for _thread_var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_thread_var, "1")
+
 import numpy as np
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
@@ -649,31 +655,56 @@ def _pooled_trace_grow(
                 rotamer_indices = target_rotamer_positions
             if len(rot_qq) == 0:
                 continue
-            rot_qq_3x3n = np.ascontiguousarray(np.transpose(rot_qq, (1, 2, 0)))
+            rot_qq_flat_t = np.ascontiguousarray(
+                rot_qq.reshape(len(rot_qq), 9).T
+            )
             means_q = np.einsum("j,njk->nk", mean_t0, rot_qq).astype(
                 np.float32, copy=False
             )
 
+            trace_batches = []
+            row_start = 0
             for source_conformer in target_to_sources[target_conformer].tolist():
                 cache = source_caches.get(int(source_conformer))
                 if cache is None:
                     continue
+                cross_second_moment = cache.centered.T.dot(centered_t).astype(
+                    np.float32,
+                    copy=False,
+                )
+                source_trace_vectors = np.einsum(
+                    "ij,nik->njk",
+                    cross_second_moment,
+                    cache.rotamer_matrices,
+                    optimize=True,
+                ).reshape(len(cache.rotamer_matrices), 9)
+                row_stop = row_start + len(source_trace_vectors)
+                trace_batches.append(
+                    (
+                        cache,
+                        row_start,
+                        row_stop,
+                        np.ascontiguousarray(source_trace_vectors),
+                    )
+                )
+                row_start = row_stop
+
+            if not trace_batches:
+                continue
+
+            source_trace_matrix = np.concatenate(
+                [batch[3] for batch in trace_batches], axis=0
+            )
+            trace_scores = source_trace_matrix @ rot_qq_flat_t
+
+            for cache, row_start, row_stop, _source_trace_vectors in trace_batches:
                 trace_work = len(cache.rotamer_flat) * len(rot_qq)
                 try:
-                    cross_second_moment = cache.centered.T.dot(centered_t).astype(
-                        np.float32,
-                        copy=False,
+                    rc_sd = (
+                        cache.pose_trace
+                        + target_trace
+                        - 2.0 * trace_scores[row_start:row_stop]
                     )
-                    sqq_t = np.ascontiguousarray(
-                        np.einsum(
-                            "ij,jkn->ikn",
-                            cross_second_moment,
-                            rot_qq_3x3n,
-                            optimize=True,
-                        ).reshape(9, len(rot_qq))
-                    )
-                    trace_block = cache.rotamer_flat @ sqq_t
-                    rc_sd = cache.pose_trace + target_trace - 2.0 * trace_block
                     rc_sd = np.maximum(rc_sd, 0.0).astype(np.float32, copy=False)
 
                     pp_rows, qq_cols = np.nonzero(rc_sd < total_overlap_sd)
