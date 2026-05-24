@@ -2,21 +2,24 @@
 """Filter poses by energy threshold.
 
 Usage:
-  python filter-poses.py POSE_DIR THRESHOLD OUT_DIR
+  python filter-poses.py [--force] POSE_DIR ENERGY_FILE THRESHOLD OUT_DIR
 
-POSE_DIR must contain energies.npy (one float per pose, in pose order).
+ENERGY_FILE must contain one float per pose, in pose order.
 Writes filtered poses and provenance.npy (uint64, 0-based indices into POSE_DIR).
 """
 
 import sys
 import argparse
+import shutil
 import numpy as np
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent / "code"))
+_CODE_DIR = Path(__file__).resolve().parent
+if str(_CODE_DIR) not in sys.path:
+    sys.path.insert(0, str(_CODE_DIR))
 
+from organize import main as organize_main
 from poses import PoseReader, PoseWriter
-import subprocess, os
 
 BUCKET_SIZE = 16
 
@@ -24,18 +27,37 @@ BUCKET_SIZE = 16
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("pose_dir")
+    p.add_argument("energy_file")
     p.add_argument("threshold", type=float)
     p.add_argument("out_dir")
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="Remove OUT_DIR first if it already exists and is non-empty.",
+    )
     return p.parse_args()
+
+
+def prepare_output_dir(out_dir: Path, *, force: bool) -> None:
+    if out_dir.exists():
+        if not out_dir.is_dir():
+            raise ValueError(f"output path is not a directory: {out_dir}")
+        if any(out_dir.iterdir()):
+            if not force:
+                raise ValueError(
+                    f"output directory is not empty: {out_dir}; use --force to replace it"
+                )
+            shutil.rmtree(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
 
 def main():
     args = parse_args()
     pose_dir = Path(args.pose_dir)
     out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    prepare_output_dir(out_dir, force=bool(args.force))
 
-    energies = np.load(pose_dir / "energies.npy")
+    energies = np.load(Path(args.energy_file))
     mask = energies < args.threshold
     keep_idx = np.where(mask)[0]  # 0-based
 
@@ -74,13 +96,10 @@ def main():
     written = writer.finish()
     print(f"Wrote {len(written)} arc shard(s)", flush=True)
 
-    # Organize
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(Path(__file__).parent / "code")
-    subprocess.run(
-        [sys.executable, str(Path(__file__).parent / "code" / "organize.py"), str(out_dir)],
-        env=env, check=True
-    )
+    # Organize the unorganized shards produced by PoseWriter.
+    organize_rc = organize_main([str(out_dir)])
+    if organize_rc:
+        raise RuntimeError(f"organize failed with exit code {organize_rc}")
 
     np.save(out_dir / "provenance.npy", provenance)
     print(f"Wrote provenance.npy: shape={provenance.shape}, dtype={provenance.dtype}", flush=True)
