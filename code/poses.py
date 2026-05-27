@@ -384,6 +384,77 @@ def decode_pool(
     )
 
 
+def select_pose_indices(pose_dir: str | Path, pose_indices: np.ndarray) -> PoseChunk:
+    """Return selected 0-based pose indices from an organized pose directory.
+
+    The requested indices are sorted for efficient .arc access, then the
+    returned rows are restored to the original request order.
+    """
+    indices = np.asarray(pose_indices)
+    if indices.ndim != 1:
+        raise ValueError("pose indices must be a 1D array")
+    if np.issubdtype(indices.dtype, np.signedinteger) and indices.size:
+        if int(indices.min()) < 0:
+            raise ValueError("pose indices must be non-negative")
+    indices = indices.astype(np.uint64, copy=False)
+
+    paths = discover_organized(pose_dir)
+    if not paths:
+        raise FileNotFoundError(f"No organized poses-*.arc files found in {pose_dir}")
+
+    files: list[_PoseFile] = []
+    global_start = 0
+    for path in paths:
+        _, _, nposes, _ = read_arc_header(path)
+        files.append(_PoseFile(path=path, nposes=int(nposes), global_start=global_start))
+        global_start += int(nposes)
+
+    if len(indices) == 0:
+        return PoseReader._empty_chunk()
+    if int(indices.max()) >= global_start:
+        raise ValueError(
+            f"pose index {int(indices.max())} exceeds number of poses ({global_start})"
+        )
+
+    sort_order = np.argsort(indices, kind="stable")
+    sorted_indices = indices[sort_order]
+    restore_order = np.empty(len(sort_order), dtype=np.intp)
+    restore_order[sort_order] = np.arange(len(sort_order), dtype=np.intp)
+
+    conformers: list[np.ndarray] = []
+    rotamers: list[np.ndarray] = []
+    translations: list[np.ndarray] = []
+
+    for file_entry in files:
+        file_start = file_entry.global_start
+        file_stop = file_start + file_entry.nposes
+        first = int(np.searchsorted(sorted_indices, file_start, side="left"))
+        last = int(np.searchsorted(sorted_indices, file_stop, side="left"))
+        if first == last:
+            continue
+
+        M, O, _C, P, bucket_size = read_arc_file(file_entry.path)
+        rel = (sorted_indices[first:last] - np.uint64(file_start)).astype(
+            np.intp,
+            copy=False,
+        )
+        P_selected = P[rel]
+        grid = O.astype(np.int32) + bucket_size * M.astype(np.int32)
+        selected_translations = grid[P_selected[:, 2].astype(np.int64)]
+        conformers.append(P_selected[:, 0].astype(np.uint16, copy=False))
+        rotamers.append(P_selected[:, 1].astype(np.uint16, copy=False))
+        translations.append(selected_translations.astype(np.int16, copy=False))
+
+    if not conformers:
+        raise RuntimeError("no selected poses were read")
+
+    return PoseChunk(
+        conformers=np.concatenate(conformers)[restore_order],
+        rotamers=np.concatenate(rotamers)[restore_order],
+        translations_grid=np.concatenate(translations)[restore_order],
+    )
+
+
 def discover_unorganized(directory: str | Path) -> list[Path]:
     directory = Path(directory)
     if not directory.exists():
