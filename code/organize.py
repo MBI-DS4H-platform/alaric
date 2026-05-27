@@ -12,7 +12,7 @@ import argparse
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import multiprocessing as mp
 import os
 from pathlib import Path
@@ -50,6 +50,7 @@ class SourceMeta:
     C: np.ndarray
     nP: int
     bucket_size: int
+    pose_start: int = 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -96,6 +97,15 @@ def build_parser() -> argparse.ArgumentParser:
             "regenerating the unorganized shards from upstream."
         ),
     )
+    parser.add_argument(
+        "--order-array",
+        type=Path,
+        metavar="OUTPUT_FILE",
+        help=(
+            "Write a NumPy array mapping organized pose indices to the "
+            "corresponding unorganized pose indices."
+        ),
+    )
     parser.add_argument("--debug", action="store_true")
     return parser
 
@@ -107,6 +117,7 @@ class OutputLayout:
     offsets: list[tuple[int, int, int]]
     counts: list[int]
     bucket_size: int
+    pose_start: int
 
 
 @dataclass(frozen=True)
@@ -155,11 +166,29 @@ def _read_sources(paths: list[Path], *, nprocs: int = 1) -> list[SourceMeta]:
 
     remaining = paths[1:]
     if not remaining:
-        return [first]
-    if nprocs <= 1 or len(remaining) <= 1:
-        return [first] + [_read_and_verify(p) for p in remaining]
-    with ThreadPoolExecutor(max_workers=min(nprocs, len(remaining))) as executor:
-        return [first] + list(executor.map(_read_and_verify, remaining))
+        sources = [first]
+    elif nprocs <= 1 or len(remaining) <= 1:
+        sources = [first] + [_read_and_verify(p) for p in remaining]
+    else:
+        with ThreadPoolExecutor(max_workers=min(nprocs, len(remaining))) as executor:
+            sources = [first] + list(executor.map(_read_and_verify, remaining))
+    pose_start = 0
+    indexed = []
+    for source in sources:
+        indexed.append(replace(source, pose_start=pose_start))
+        pose_start += int(source.nP)
+    return indexed
+
+
+def _uint_dtype_for_count(count: int) -> np.dtype:
+    max_value = max(0, int(count) - 1)
+    if max_value <= np.iinfo(np.uint8).max:
+        return np.dtype(np.uint8)
+    if max_value <= np.iinfo(np.uint16).max:
+        return np.dtype(np.uint16)
+    if max_value <= np.iinfo(np.uint32).max:
+        return np.dtype(np.uint32)
+    return np.dtype(np.uint64)
 
 
 def _build_layouts(
@@ -196,21 +225,30 @@ def _build_layouts(
         list[Segment],
     ] = {}
     file_index = 1
+    pose_start = 0
     for M in sorted(counts_by_offset):
         current_offsets: list[tuple[int, int, int]] = []
         current_counts: list[int] = []
         current_nposes = 0
 
         def close_current() -> None:
-            nonlocal file_index, current_offsets, current_counts, current_nposes
+            nonlocal file_index, pose_start
+            nonlocal current_offsets, current_counts, current_nposes
             if not current_offsets:
                 return
+            nposes = int(sum(current_counts))
             layouts.append(
                 OutputLayout(
-                    file_index, M, current_offsets, current_counts, bucket_size
+                    file_index,
+                    M,
+                    current_offsets,
+                    current_counts,
+                    bucket_size,
+                    pose_start,
                 )
             )
             file_index += 1
+            pose_start += nposes
             current_offsets = []
             current_counts = []
             current_nposes = 0
@@ -326,8 +364,21 @@ def _build_layout_entries(
     return finalized
 
 
-def _write_bucket(handle, offset_id: int, bucket: np.ndarray, *, chunk_poses: int) -> None:
-    bucket.sort()
+def _write_bucket(
+    handle,
+    offset_id: int,
+    bucket: np.ndarray,
+    *,
+    chunk_poses: int,
+    origins: np.ndarray | None = None,
+) -> np.ndarray | None:
+    if origins is None:
+        bucket.sort()
+        sorted_origins = None
+    else:
+        order = np.argsort(bucket, kind="stable")
+        bucket = bucket[order]
+        sorted_origins = origins[order]
     for start in range(0, len(bucket), chunk_poses):
         stop = min(start + chunk_poses, len(bucket))
         chunk = bucket[start:stop]
@@ -336,6 +387,18 @@ def _write_bucket(handle, offset_id: int, bucket: np.ndarray, *, chunk_poses: in
         P[:, 1] = chunk.astype(np.uint16, copy=False)
         P[:, 2] = offset_id
         handle.write(P.tobytes(order="C"))
+    return sorted_origins
+
+
+def _sort_bucket_with_origins(
+    bucket: np.ndarray,
+    origins: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray | None]:
+    if origins is None:
+        bucket.sort()
+        return bucket, None
+    order = np.argsort(bucket, kind="stable")
+    return bucket[order], origins[order]
 
 
 @dataclass(frozen=True)
@@ -392,6 +455,11 @@ def _write_group_layout(
     chunk_poses: int,
     progress=None,
     overrides: dict[int, tuple[int, int]] | None = None,
+    order_buffers: dict[
+        tuple[tuple[int, int, int], tuple[int, int, int]], np.ndarray
+    ]
+    | None = None,
+    order_array: np.ndarray | None = None,
 ) -> int:
     try:
         import zstandard as zstd
@@ -443,32 +511,70 @@ def _write_group_layout(
                 int(C.sum(dtype=np.uint64)),
                 layout.bucket_size,
             )
+            output_cursor = layout.pose_start
             for offset_id, entry in enumerate(entries):
                 key = (entry.M, entry.offset)
                 segment = entry.segment
                 bucket = buffers[key]
+                origins = None if order_buffers is None else order_buffers[key]
                 if overrides and offset_id in overrides:
-                    bucket.sort()
+                    bucket, origins = _sort_bucket_with_origins(bucket, origins)
                     start, count = overrides[offset_id]
                     out_bucket = bucket[start : start + count]
+                    out_origins = (
+                        None if origins is None else origins[start : start + count]
+                    )
                 elif len(bucket) == segment.count and segment.start == 0:
                     out_bucket = bucket
-                    out_bucket.sort()
+                    out_origins = _write_bucket(
+                        output_handle,
+                        offset_id,
+                        out_bucket,
+                        chunk_poses=chunk_poses,
+                        origins=origins,
+                    )
+                    if len(out_bucket) != int(C[offset_id]):
+                        raise ValueError(f"layout count mismatch for {key}")
+                    if order_array is not None:
+                        if out_origins is None:
+                            raise ValueError("missing order array origins")
+                        order_array[output_cursor : output_cursor + len(out_origins)] = (
+                            out_origins
+                        )
+                    output_cursor += len(out_bucket)
+                    if progress is not None:
+                        progress.update(len(out_bucket))
+                    continue
                 else:
-                    bucket.sort()
+                    bucket, origins = _sort_bucket_with_origins(bucket, origins)
                     out_bucket = bucket[
                         segment.start : segment.start + segment.count
                     ]
+                    out_origins = (
+                        None
+                        if origins is None
+                        else origins[segment.start : segment.start + segment.count]
+                    )
                 if len(out_bucket) != int(C[offset_id]):
                     raise ValueError(f"layout count mismatch for {key}")
-                _write_bucket(
+                sorted_origins = _write_bucket(
                     output_handle,
                     offset_id,
                     out_bucket,
                     chunk_poses=chunk_poses,
+                    origins=out_origins,
                 )
+                if order_array is not None:
+                    if sorted_origins is None:
+                        raise ValueError("missing order array origins")
+                    order_array[output_cursor : output_cursor + len(sorted_origins)] = (
+                        sorted_origins
+                    )
+                output_cursor += len(out_bucket)
                 if progress is not None:
                     progress.update(len(out_bucket))
+            if output_cursor != layout.pose_start + int(C.sum(dtype=np.uint64)):
+                raise ValueError("layout output cursor mismatch")
             if compressor is not None:
                 compressor.close()
                 compressor = None
@@ -511,6 +617,9 @@ def _process_layout_group(
     chunk_poses: int,
     progress: bool = True,
     progress_counter=None,
+    order_array_path: Path | None = None,
+    order_array_dtype: np.dtype | None = None,
+    order_array_shape: tuple[int, ...] | None = None,
 ) -> None:
     group_keys: list[tuple[tuple[int, int, int], tuple[int, int, int]]] = []
     collect_counts: dict[
@@ -535,8 +644,26 @@ def _process_layout_group(
         key: np.empty(count, dtype=np.uint32)
         for key, count in collect_counts.items()
     }
+    order_buffers = (
+        None
+        if order_array_path is None
+        else {
+            key: np.empty(count, dtype=order_array_dtype)
+            for key, count in collect_counts.items()
+        }
+    )
     cursors = np.zeros(len(group_keys), dtype=np.uint64)
     group_sources = [source for source in sources if source.M == group.M]
+    order_array = None
+    if order_array_path is not None:
+        if order_array_dtype is None or order_array_shape is None:
+            raise ValueError("order array dtype/shape are required")
+        order_array = np.lib.format.open_memmap(
+            order_array_path,
+            mode="r+",
+            dtype=order_array_dtype,
+            shape=order_array_shape,
+        )
     if progress_counter is not None:
         sink = _CounterSink(progress_counter)
         read_cm = contextlib.nullcontext(sink)
@@ -570,6 +697,7 @@ def _process_layout_group(
                 continue
             saw_chunk = False
             checked_meta = False
+            source_cursor = 0
             for M_arr, O, C, P, _bs in iter_arc_pose_chunks(
                 source.path,
                 rows_per_chunk=chunk_poses,
@@ -591,6 +719,7 @@ def _process_layout_group(
                 n_kept = int(np.count_nonzero(keep))
                 read_pbar.update(n_kept)
                 if n_kept == 0:
+                    source_cursor += len(P)
                     continue
                 kept_group_ids = group_ids[keep]
                 kept_rows = P[keep, 0:2]
@@ -598,9 +727,20 @@ def _process_layout_group(
                     (kept_rows[:, 0].astype(np.uint32, copy=False) << 16)
                     | kept_rows[:, 1].astype(np.uint32, copy=False)
                 )
+                kept_origins = None
+                if order_buffers is not None:
+                    origin_start = np.array(
+                        source.pose_start + source_cursor,
+                        dtype=order_array_dtype,
+                    )
+                    kept_origins = (
+                        np.flatnonzero(keep).astype(order_array_dtype, copy=False)
+                        + origin_start
+                    )
                 order = np.argsort(kept_group_ids, kind="stable")
                 sorted_group_ids = kept_group_ids[order]
                 sorted_packed = packed[order]
+                sorted_origins = None if kept_origins is None else kept_origins[order]
                 run_starts = np.r_[
                     0,
                     np.flatnonzero(sorted_group_ids[1:] != sorted_group_ids[:-1]) + 1,
@@ -612,7 +752,13 @@ def _process_layout_group(
                     n = int(run_stop - run_start)
                     cursor = int(cursors[group_index])
                     buffers[key][cursor : cursor + n] = sorted_packed[run_start:run_stop]
+                    if order_buffers is not None:
+                        assert sorted_origins is not None
+                        order_buffers[key][cursor : cursor + n] = sorted_origins[
+                            run_start:run_stop
+                        ]
                     cursors[group_index] += n
+                source_cursor += len(P)
             if not saw_chunk and source.nP != 0:
                 raise ValueError(f"no pose chunks read from {source.path}")
 
@@ -632,8 +778,7 @@ def _process_layout_group(
         segments = destination[key]
         if len(segments) <= 1:
             continue
-        bucket = buffers[key]
-        bucket.sort()
+        bucket = np.sort(buffers[key])
         n = len(bucket)
         cur = 0
         last_idx = len(segments) - 1
@@ -665,7 +810,11 @@ def _process_layout_group(
                 chunk_poses=chunk_poses,
                 progress=write_pbar,
                 overrides=layout_overrides.get(layout_id),
+                order_buffers=order_buffers,
+                order_array=order_array,
             )
+    if order_array is not None:
+        order_array.flush()
 
 
 _WORKER_STATE: dict = {}
@@ -689,6 +838,9 @@ def _run_group_in_worker(group: LayoutGroup) -> None:
         chunk_poses=state["chunk_poses"],
         progress=False,
         progress_counter=state.get("progress_counter"),
+        order_array_path=state.get("order_array_path"),
+        order_array_dtype=state.get("order_array_dtype"),
+        order_array_shape=state.get("order_array_shape"),
     )
 
 
@@ -722,6 +874,7 @@ def _organize_streaming(
     nprocs: int,
     compress: bool,
     chunk_poses: int,
+    order_array_path: Path | None = None,
 ) -> int:
     layouts, destination, _bucket_size = _build_layouts(
         sources,
@@ -731,6 +884,21 @@ def _organize_streaming(
         return 0
 
     layout_entries = _build_layout_entries(layouts, destination)
+    total_poses = sum(source.nP for source in sources)
+    order_array_dtype = None
+    order_array_shape = None
+    if order_array_path is not None:
+        order_array_dtype = _uint_dtype_for_count(total_poses)
+        order_array_shape = (int(total_poses),)
+        order_array_path.parent.mkdir(parents=True, exist_ok=True)
+        out = np.lib.format.open_memmap(
+            order_array_path,
+            mode="w+",
+            dtype=order_array_dtype,
+            shape=order_array_shape,
+        )
+        out.flush()
+        del out
     effective_nprocs = max(1, nprocs)
     groups = _build_layout_groups(layouts, capacity=capacity)
     n_workers = min(effective_nprocs, len(groups))
@@ -745,6 +913,9 @@ def _organize_streaming(
                 destination,
                 compress=compress,
                 chunk_poses=chunk_poses,
+                order_array_path=order_array_path,
+                order_array_dtype=order_array_dtype,
+                order_array_shape=order_array_shape,
             )
         return len(layouts)
 
@@ -760,6 +931,9 @@ def _organize_streaming(
         "compress": compress,
         "chunk_poses": chunk_poses,
         "progress_counter": counter,
+        "order_array_path": order_array_path,
+        "order_array_dtype": order_array_dtype,
+        "order_array_shape": order_array_shape,
     }
     stop_event = threading.Event()
     poll_thread = threading.Thread(
@@ -867,18 +1041,36 @@ def _commit_staged_organized(stagedir: Path, pose_dir: Path) -> None:
         shutil.move(str(src), str(pose_dir / src.name))
 
 
-def _run(args: argparse.Namespace) -> int:
-    if args.capacity <= 0:
+def organize_pose_dir(
+    pose_dir: str | Path,
+    *,
+    capacity: int = 2_000_000_000,
+    max_poses_per_file: int = 100_000_000,
+    chunk_poses: int = 1_000_000,
+    nprocs: int = os.cpu_count() or 1,
+    compress: bool = False,
+    local_tempdir: bool = False,
+    local_stagedir: bool = False,
+    return_order_array: bool = False,
+    order_array_path: str | Path | None = None,
+) -> np.ndarray | None:
+    """Organize a pose directory and optionally return/write row-order mapping."""
+    if capacity <= 0:
         raise ValueError("--capacity must be positive")
-    if args.max_poses_per_file <= 0 or args.max_poses_per_file > MAX_NP:
+    if max_poses_per_file <= 0 or max_poses_per_file > MAX_NP:
         raise ValueError("--max-poses-per-file must be in 1..2**32-1")
-    if args.chunk_poses <= 0:
+    if chunk_poses <= 0:
         raise ValueError("--chunk-poses must be positive")
-    if args.nprocs <= 0:
+    if nprocs <= 0:
         raise ValueError("--nprocs must be positive")
 
-    pose_dir = Path(args.pose_dir)
+    pose_dir = Path(pose_dir)
+    use_local_tempdir = bool(local_tempdir)
+    use_local_stagedir = bool(local_stagedir)
     pose_dir.mkdir(parents=True, exist_ok=True)
+    if return_order_array and order_array_path is None:
+        order_array_path = pose_dir / "order-array.npy"
+    order_array_output = None if order_array_path is None else Path(order_array_path)
     marker = pose_dir / DONE_MARKER
     unorganized = discover_unorganized(pose_dir)
     organized = discover_organized(pose_dir)
@@ -886,10 +1078,16 @@ def _run(args: argparse.Namespace) -> int:
     if marker.exists():
         _unlink_unorganized(unorganized, pose_dir)
         marker.unlink()
-        return 0
+        return None
 
     if not unorganized:
-        return 0
+        if (
+            return_order_array
+            and order_array_output is not None
+            and order_array_output.exists()
+        ):
+            return np.load(order_array_output, mmap_mode="r")
+        return None
     if organized:
         raise ValueError(
             f"{pose_dir} contains both organized poses-*.arc and unorganized .arc files"
@@ -898,29 +1096,30 @@ def _run(args: argparse.Namespace) -> int:
     local_tempdir: Path | None = None
     local_stagedir: Path | None = None
     try:
-        if args.local_tempdir:
+        if use_local_tempdir:
             local_tempdir = Path(tempfile.mkdtemp(prefix="alaric-organize-src-"))
             _stage_unorganized_uncompressed(unorganized, local_tempdir)
             source_paths = discover_unorganized(local_tempdir)
         else:
             source_paths = unorganized
 
-        if args.local_stagedir:
+        if use_local_stagedir:
             local_stagedir = Path(tempfile.mkdtemp(prefix="alaric-organize-stage-"))
             output_dir = local_stagedir
         else:
             output_dir = pose_dir
 
-        sources = _read_sources(source_paths, nprocs=int(args.nprocs))
+        sources = _read_sources(source_paths, nprocs=int(nprocs))
         if sources:
             _organize_streaming(
                 output_dir,
                 sources,
-                capacity=int(args.capacity),
-                max_poses_per_file=int(args.max_poses_per_file),
-                nprocs=int(args.nprocs),
-                compress=bool(args.compress),
-                chunk_poses=int(args.chunk_poses),
+                capacity=int(capacity),
+                max_poses_per_file=int(max_poses_per_file),
+                nprocs=int(nprocs),
+                compress=bool(compress),
+                chunk_poses=int(chunk_poses),
+                order_array_path=order_array_output,
             )
 
         marker.touch()
@@ -933,6 +1132,24 @@ def _run(args: argparse.Namespace) -> int:
             shutil.rmtree(local_tempdir)
         if local_stagedir is not None and local_stagedir.exists():
             shutil.rmtree(local_stagedir)
+    if return_order_array and order_array_output is not None:
+        return np.load(order_array_output, mmap_mode="r")
+    return None
+
+
+def run(args: argparse.Namespace) -> int:
+    organize_pose_dir(
+        args.pose_dir,
+        capacity=int(args.capacity),
+        max_poses_per_file=int(args.max_poses_per_file),
+        chunk_poses=int(args.chunk_poses),
+        nprocs=int(args.nprocs),
+        compress=bool(args.compress),
+        local_tempdir=bool(args.local_tempdir),
+        local_stagedir=bool(args.local_stagedir),
+        return_order_array=args.order_array is not None,
+        order_array_path=args.order_array,
+    )
     return 0
 
 
@@ -940,7 +1157,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        return int(_run(args))
+        return int(run(args))
     except SystemExit:
         raise
     except Exception as exc:

@@ -37,6 +37,27 @@ def _existing_dir(path: str) -> Path:
     return result
 
 
+def _load_order_array(path: Path, total_poses: int) -> np.ndarray:
+    order = np.load(path, mmap_mode="r")
+    if order.ndim != 1:
+        raise ValueError("--order-array must be a 1D NumPy array")
+    if len(order) != total_poses:
+        raise ValueError(
+            f"--order-array length {len(order)} does not match pose count {total_poses}"
+        )
+    if not np.issubdtype(order.dtype, np.integer):
+        raise ValueError("--order-array must contain integer indices")
+    if (
+        np.issubdtype(order.dtype, np.signedinteger)
+        and order.size
+        and int(order.min()) < 0
+    ):
+        raise ValueError("--order-array must contain non-negative indices")
+    if order.size and int(order.max()) >= total_poses:
+        raise ValueError("--order-array contains indices outside the pose array")
+    return order
+
+
 def _positive_int(value: str) -> int:
     try:
         result = int(value)
@@ -108,6 +129,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--outputfile",
         type=Path,
         help="Optional output path. Use .npy for NumPy output; otherwise write text.",
+    )
+    parser.add_argument(
+        "--order-array",
+        type=_existing_file,
+        help=(
+            "NumPy array mapping organized pose indices to output pose indices. "
+            "Used to restore results after organize reordered selected poses."
+        ),
     )
     parser.add_argument(
         "--pose-range",
@@ -809,6 +838,77 @@ def write_npy_output_chunks(
         progress.close()
 
 
+def write_ordered_npy_output_chunks(
+    outputfile: Path,
+    chunks: Iterator[tuple[int, np.ndarray]],
+    *,
+    total_poses: int,
+    order_array: np.ndarray,
+    show_progress: bool = False,
+) -> None:
+    outputfile.parent.mkdir(parents=True, exist_ok=True)
+    progress = tqdm(
+        total=total_poses,
+        desc="RMSD",
+        unit="pose",
+        unit_scale=True,
+        disable=not show_progress,
+    )
+    try:
+        out = np.lib.format.open_memmap(
+            outputfile,
+            mode="w+",
+            dtype=np.float32,
+            shape=(total_poses,),
+        )
+        written = 0
+        for offset, chunk in chunks:
+            stop = offset + len(chunk)
+            if offset < 0 or stop > total_poses:
+                raise RuntimeError(
+                    f"RMSD chunk [{offset}:{stop}] is outside output size {total_poses}"
+                )
+            targets = np.asarray(order_array[offset:stop], dtype=np.intp)
+            out[targets] = chunk
+            written += len(chunk)
+            progress.update(len(chunk))
+        if written != total_poses:
+            raise RuntimeError(f"Expected {total_poses} RMSDs, wrote {written}")
+        out.flush()
+    finally:
+        progress.close()
+
+
+def collect_ordered_output_chunks(
+    chunks: Iterator[tuple[int, np.ndarray]],
+    *,
+    total_poses: int,
+    order_array: np.ndarray,
+    show_progress: bool = False,
+) -> np.ndarray:
+    progress = tqdm(
+        total=total_poses,
+        desc="RMSD",
+        unit="pose",
+        unit_scale=True,
+        disable=not show_progress,
+    )
+    out = np.empty((total_poses,), dtype=np.float32)
+    written = 0
+    try:
+        for offset, chunk in chunks:
+            stop = offset + len(chunk)
+            targets = np.asarray(order_array[offset:stop], dtype=np.intp)
+            out[targets] = chunk
+            written += len(chunk)
+            progress.update(len(chunk))
+        if written != total_poses:
+            raise RuntimeError(f"Expected {total_poses} RMSDs, wrote {written}")
+        return out
+    finally:
+        progress.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -835,6 +935,13 @@ def main(argv: list[str] | None = None) -> int:
             pose_range=pose_range,
             rows_per_chunk=args.chunksize,
         )
+        if args.order_array is not None and pose_range is not None:
+            raise ValueError("--order-array cannot be combined with --pose-range")
+        order_array = (
+            None
+            if args.order_array is None
+            else _load_order_array(args.order_array, reader.selected_poses)
+        )
         effective_nprocs = (
             args.nprocs if reader.selected_poses > args.parallel_min_poses else 1
         )
@@ -844,7 +951,40 @@ def main(argv: list[str] | None = None) -> int:
                 factory,
                 rows_per_chunk=args.rotamer_matrix_build_chunksize,
             )
-        if args.outputfile is not None and args.outputfile.suffix.lower() == ".npy":
+        if order_array is not None:
+            indexed_chunks = iter_indexed_rmsd_chunks_with_library(
+                reader,
+                args.reference,
+                fragment=args.fragment,
+                sequence=sequence,
+                library=library,
+                nprocs=effective_nprocs,
+                max_pending_chunks=args.max_pending_chunks,
+                ordered=False,
+            )
+            if args.outputfile is not None and args.outputfile.suffix.lower() == ".npy":
+                write_ordered_npy_output_chunks(
+                    args.outputfile,
+                    indexed_chunks,
+                    total_poses=reader.selected_poses,
+                    order_array=order_array,
+                    show_progress=reader.selected_poses > args.chunksize,
+                )
+            else:
+                ordered = collect_ordered_output_chunks(
+                    indexed_chunks,
+                    total_poses=reader.selected_poses,
+                    order_array=order_array,
+                    show_progress=reader.selected_poses > args.chunksize,
+                )
+                write_output_chunks(
+                    args.outputfile,
+                    iter([ordered]),
+                    total_poses=reader.selected_poses,
+                    stdout_limit=args.chunksize,
+                    show_progress=False,
+                )
+        elif args.outputfile is not None and args.outputfile.suffix.lower() == ".npy":
             indexed_chunks = iter_indexed_rmsd_chunks_with_library(
                 reader,
                 args.reference,
