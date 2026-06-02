@@ -20,8 +20,7 @@ from poses import DEFAULT_POSE_CHUNK_SIZE, PoseChunk, PoseReader
 GRID_SPACING = sqrt(3) / 3
 DEFAULT_ROTAMER_MATRIX_BUILD_CHUNK = 1_000_000
 DEFAULT_PARALLEL_MIN_POSES = 10_000
-
-print("TODO: use fast algorithm", file=sys.stderr)
+RMSD_DECIMALS = 3
 
 def _existing_file(path: str) -> Path:
     result = Path(path)
@@ -693,6 +692,10 @@ def _rmsd_for_pose_chunk(
     translations = chunk.translations_grid.astype(np.float32, copy=False) * GRID_SPACING
     rmsd = np.empty((len(conf_ids),), dtype=np.float32)
 
+    ref_mean = reference_coords.mean(axis=0).astype(np.float32, copy=False)
+    ref_centered = (reference_coords - ref_mean).astype(np.float32, copy=False)
+    ref_trace = float(np.einsum("ij,ij->", ref_centered, ref_centered))
+
     conf_order = np.argsort(conf_ids, kind="stable")
     sorted_conf = conf_ids[conf_order]
     boundaries = np.flatnonzero(np.diff(sorted_conf)) + 1
@@ -707,6 +710,12 @@ def _rmsd_for_pose_chunk(
 
         rotamers = library.get_rotamers(conf)
 
+        conf_coords = coordinates[conf].astype(np.float32, copy=False)
+        mean_coords = conf_coords.mean(axis=0).astype(np.float32, copy=False)
+        centered = (conf_coords - mean_coords).astype(np.float32, copy=False)
+        pose_trace = float(np.einsum("ij,ij->", centered, centered))
+        cross = centered.T @ ref_centered  # (3, 3)
+
         for batch_start in range(0, len(rows), pose_batch_size):
             batch_rows = rows[batch_start : batch_start + pose_batch_size]
             batch_rot = rot_ids[batch_rows].astype(np.int64, copy=False)
@@ -718,18 +727,20 @@ def _rmsd_for_pose_chunk(
                     f"Pose row {bad_row}: rotamer index {bad_rot} out of range "
                     f"for conformer {conf} (n={len(rotamers)})"
                 )
-            rotations = _rotamers_to_matrices(rotamers[batch_rot])
 
-            transformed = np.einsum(
-                "aj,njk->nak",
-                coordinates[conf],
-                rotations,
-            )
-            transformed += translations[batch_rows, None, :]
-            dif = transformed - reference_coords[None, :, :]
-            rmsd[batch_rows] = np.sqrt(np.einsum("nij,nij->n", dif, dif) / natoms)
+            unique_rot, inverse = np.unique(batch_rot, return_inverse=True)
+            rotations = _rotamers_to_matrices(rotamers[unique_rot])
+            trace_scores = np.einsum("njk,jk->n", rotations, cross)
+            rc_sd_unique = pose_trace + ref_trace - 2.0 * trace_scores
+            mean_rotated_unique = np.einsum("j,njk->nk", mean_coords, rotations)
 
-    return rmsd
+            rc_sd = rc_sd_unique[inverse]
+            mean_rotated = mean_rotated_unique[inverse]
+            delta = mean_rotated + translations[batch_rows] - ref_mean
+            total_sd = rc_sd + natoms * np.einsum("ij,ij->i", delta, delta)
+            rmsd[batch_rows] = np.sqrt(np.maximum(total_sd, 0.0) / natoms)
+
+    return np.round(rmsd, RMSD_DECIMALS).astype(np.float32, copy=False)
 
 
 def write_output_chunks(

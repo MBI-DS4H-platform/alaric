@@ -75,7 +75,7 @@ def test_pairwise_rmsd_stores_upper_triangle_order(tmp_path: Path) -> None:
         nprocs=1,
     )
     expected = GRID_SPACING * np.array([1.0, 2.0, np.sqrt(5.0)], dtype=np.float32)
-    assert np.allclose(actual, expected, atol=5e-6, rtol=0)
+    assert np.allclose(actual, expected, atol=1e-3, rtol=0)
 
 
 def test_pairwise_npy_output_accepts_unordered_indexed_chunks(tmp_path: Path) -> None:

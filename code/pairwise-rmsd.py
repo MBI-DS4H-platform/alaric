@@ -7,7 +7,7 @@ import multiprocessing as mp
 import os
 from pathlib import Path
 import sys
-from typing import Iterator
+from typing import Iterator, NamedTuple
 
 import numpy as np
 from tqdm import tqdm
@@ -17,6 +17,7 @@ from rmsd import (
     DEFAULT_PARALLEL_MIN_POSES,
     DEFAULT_ROTAMER_MATRIX_BUILD_CHUNK,
     GRID_SPACING,
+    RMSD_DECIMALS,
     _convert_library_rotaconformers_to_matrices,
     _dinucleotide_sequence,
     _existing_dir,
@@ -31,6 +32,16 @@ from rmsd import (
 
 
 DEFAULT_PAIRWISE_CHUNK_SIZE = 5_000_000
+MAX_POSES_NPY = 250_000
+MAX_POSES_TEXT = 50_000
+TRACE_CANCEL_TOLERANCE = 1e-5
+
+
+class PoseFeatures(NamedTuple):
+    pose_centered: np.ndarray  # (N, n_atoms, 3) rotated, centered atom coords (sum_a = 0)
+    pose_mean: np.ndarray  # (N, 3) full pose mean position (with translation)
+    trace_per_pose: np.ndarray  # (N,) sum_a ||pose_centered[i, a]||^2 -- rotation invariant per conformer
+    natoms: int
 
 
 def _rotamer_batch_to_matrices(rotamers: np.ndarray) -> np.ndarray:
@@ -205,18 +216,23 @@ def _iter_row_ranges(nposes: int, max_pairs: int) -> Iterator[tuple[int, int]]:
         start = stop
 
 
-def _coordinates_for_pose_chunk(
+def _features_for_pose_chunk(
     chunk: PoseChunk,
     *,
-    coordinates: np.ndarray,
+    centered_per_conf: np.ndarray,
+    mean_per_conf: np.ndarray,
+    trace_per_conf: np.ndarray,
     library,
     pose_offset: int = 0,
-) -> np.ndarray:
-    natoms = coordinates.shape[1]
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    natoms = centered_per_conf.shape[1]
     conf_ids = chunk.conformers
     rot_ids = chunk.rotamers
     translations = chunk.translations_grid.astype(np.float32, copy=False) * GRID_SPACING
-    result = np.empty((len(conf_ids), natoms, 3), dtype=np.float32)
+    n = len(conf_ids)
+    pose_centered = np.empty((n, natoms, 3), dtype=np.float32)
+    pose_mean = np.empty((n, 3), dtype=np.float32)
+    trace_per_pose = np.empty((n,), dtype=np.float32)
 
     conf_order = np.argsort(conf_ids, kind="stable")
     sorted_conf = conf_ids[conf_order]
@@ -227,10 +243,13 @@ def _coordinates_for_pose_chunk(
     for start, stop in zip(starts, stops):
         rows = conf_order[start:stop]
         conf = int(sorted_conf[start])
-        if conf >= len(coordinates):
+        if conf >= len(centered_per_conf):
             raise ValueError(f"Conformer index {conf} out of range")
 
         rotamers = library.get_rotamers(conf)
+        centered_conf = centered_per_conf[conf]
+        mean_conf = mean_per_conf[conf]
+        trace_per_pose[rows] = trace_per_conf[conf]
 
         for batch_start in range(0, len(rows), DEFAULT_POSE_CHUNK_SIZE):
             batch_rows = rows[batch_start : batch_start + DEFAULT_POSE_CHUNK_SIZE]
@@ -244,81 +263,129 @@ def _coordinates_for_pose_chunk(
                     f"out of range for conformer {conf} (n={len(rotamers)})"
                 )
             rotations = _rotamer_batch_to_matrices(rotamers[batch_rot])
-            transformed = np.einsum(
-                "aj,njk->nak",
-                coordinates[conf],
-                rotations,
+            pose_centered[batch_rows] = np.einsum(
+                "aj,njk->nak", centered_conf, rotations
             )
-            transformed += translations[batch_rows, None, :]
-            result[batch_rows] = transformed
+            mean_rotated = np.einsum("j,njk->nk", mean_conf, rotations)
+            pose_mean[batch_rows] = mean_rotated + translations[batch_rows]
 
-    return result
+    return pose_centered, pose_mean, trace_per_pose
 
 
-def load_pose_coordinates(
+def load_pose_features(
     reader: PoseReader,
     *,
     library,
     show_progress: bool = False,
-) -> np.ndarray:
+) -> PoseFeatures:
     coordinates = library.coordinates.astype(np.float32, copy=False)
-    chunks = []
+    _n_confs, n_atoms, _ = coordinates.shape
+    mean_per_conf = coordinates.mean(axis=1).astype(np.float32, copy=False)
+    centered_per_conf = (coordinates - mean_per_conf[:, None, :]).astype(
+        np.float32, copy=False
+    )
+    trace_per_conf = np.einsum(
+        "nij,nij->n", centered_per_conf, centered_per_conf
+    ).astype(np.float32, copy=False)
+
+    parts_pc: list[np.ndarray] = []
+    parts_pm: list[np.ndarray] = []
+    parts_tr: list[np.ndarray] = []
     offset = 0
     progress = tqdm(
         total=reader.selected_poses,
-        desc="Build coordinates",
+        desc="Build pose features",
         unit="pose",
         unit_scale=True,
         disable=not show_progress,
     )
     try:
         for chunk in reader.iter_chunks():
-            transformed = _coordinates_for_pose_chunk(
+            pc, pm, tr = _features_for_pose_chunk(
                 chunk,
-                coordinates=coordinates,
+                centered_per_conf=centered_per_conf,
+                mean_per_conf=mean_per_conf,
+                trace_per_conf=trace_per_conf,
                 library=library,
                 pose_offset=offset,
             )
-            chunks.append(transformed)
+            parts_pc.append(pc)
+            parts_pm.append(pm)
+            parts_tr.append(tr)
             offset += len(chunk)
             progress.update(len(chunk))
     finally:
         progress.close()
 
-    if not chunks:
-        return np.empty((0, len(library.template), 3), dtype=np.float32)
-    return np.concatenate(chunks)
+    if not parts_pc:
+        return PoseFeatures(
+            pose_centered=np.empty((0, n_atoms, 3), dtype=np.float32),
+            pose_mean=np.empty((0, 3), dtype=np.float32),
+            trace_per_pose=np.empty((0,), dtype=np.float32),
+            natoms=n_atoms,
+        )
+
+    return PoseFeatures(
+        pose_centered=np.concatenate(parts_pc),
+        pose_mean=np.concatenate(parts_pm),
+        trace_per_pose=np.concatenate(parts_tr),
+        natoms=n_atoms,
+    )
 
 
 def _pairwise_for_rows(
-    coordinates: np.ndarray,
+    features: PoseFeatures,
     start: int,
     stop: int,
 ) -> np.ndarray:
-    nposes = len(coordinates)
-    natoms = coordinates.shape[1]
+    nposes = len(features.pose_centered)
+    natoms = features.natoms
+    pose_centered = features.pose_centered
+    pose_mean = features.pose_mean
+    trace_per_pose = features.trace_per_pose
+
     result = np.empty((_pair_count_for_rows(start, stop, nposes),), dtype=np.float32)
     offset = 0
     for row in range(start, stop):
-        cols = coordinates[row + 1 :]
-        count = len(cols)
-        dif = cols - coordinates[row][None, :, :]
-        result[offset : offset + count] = np.sqrt(
-            np.einsum("nij,nij->n", dif, dif) / natoms
+        rest_count = nposes - (row + 1)
+        if rest_count <= 0:
+            continue
+        rest_pc = pose_centered[row + 1 :]
+        rest_pm = pose_mean[row + 1 :]
+        rest_tr = trace_per_pose[row + 1 :]
+
+        # Trace formula: cheap but suffers catastrophic cancellation when poses
+        # are nearly identical (rc_sd = trace_i + trace_j - 2*cross underflows to
+        # spurious small positives). Detect those pairs and recompute exactly.
+        cross = np.einsum("ak,nak->n", pose_centered[row], rest_pc)
+        rc_sd = trace_per_pose[row] + rest_tr - 2.0 * cross
+        mean_disp = rest_pm - pose_mean[row]
+        mean_disp_sq = np.einsum("ij,ij->i", mean_disp, mean_disp)
+
+        suspicious = rc_sd < TRACE_CANCEL_TOLERANCE * (trace_per_pose[row] + rest_tr)
+        if suspicious.any():
+            sus_idx = np.flatnonzero(suspicious)
+            dif_pc = rest_pc[sus_idx] - pose_centered[row]
+            rc_sd[sus_idx] = np.einsum("nij,nij->n", dif_pc, dif_pc)
+
+        total_sd = rc_sd + natoms * mean_disp_sq
+        result[offset : offset + rest_count] = np.sqrt(
+            np.maximum(total_sd, 0.0) / natoms
         )
-        offset += count
-    return result
+        offset += rest_count
+
+    return np.round(result, RMSD_DECIMALS).astype(np.float32, copy=False)
 
 
 def iter_pairwise_rmsd_chunks(
-    coordinates: np.ndarray,
+    features: PoseFeatures,
     *,
     pair_chunk_size: int = DEFAULT_PAIRWISE_CHUNK_SIZE,
     nprocs: int = 1,
     max_pending_chunks: int | None = None,
 ) -> Iterator[np.ndarray]:
     indexed_chunks = iter_indexed_pairwise_rmsd_chunks(
-        coordinates,
+        features,
         pair_chunk_size=pair_chunk_size,
         nprocs=nprocs,
         max_pending_chunks=max_pending_chunks,
@@ -329,7 +396,7 @@ def iter_pairwise_rmsd_chunks(
 
 
 def iter_indexed_pairwise_rmsd_chunks(
-    coordinates: np.ndarray,
+    features: PoseFeatures,
     *,
     pair_chunk_size: int = DEFAULT_PAIRWISE_CHUNK_SIZE,
     nprocs: int = 1,
@@ -338,12 +405,12 @@ def iter_indexed_pairwise_rmsd_chunks(
 ) -> Iterator[tuple[int, np.ndarray]]:
     if nprocs <= 1:
         yield from _iter_indexed_pairwise_rmsd_chunks_serial(
-            coordinates,
+            features,
             pair_chunk_size=pair_chunk_size,
         )
         return
     yield from _iter_indexed_pairwise_rmsd_chunks_parallel(
-        coordinates,
+        features,
         pair_chunk_size=pair_chunk_size,
         nprocs=nprocs,
         max_pending_chunks=max_pending_chunks,
@@ -352,36 +419,36 @@ def iter_indexed_pairwise_rmsd_chunks(
 
 
 def _iter_indexed_pairwise_rmsd_chunks_serial(
-    coordinates: np.ndarray,
+    features: PoseFeatures,
     *,
     pair_chunk_size: int,
 ) -> Iterator[tuple[int, np.ndarray]]:
-    nposes = len(coordinates)
+    nposes = len(features.pose_centered)
     for start, stop in _iter_row_ranges(nposes, pair_chunk_size):
         yield upper_triangular_offset(start, nposes), _pairwise_for_rows(
-            coordinates,
+            features,
             start,
             stop,
         )
 
 
-_WORKER_COORDINATES: np.ndarray | None = None
+_WORKER_FEATURES: PoseFeatures | None = None
 
 
-def _init_pairwise_worker(coordinates: np.ndarray) -> None:
-    global _WORKER_COORDINATES
-    _WORKER_COORDINATES = coordinates
+def _init_pairwise_worker(features: PoseFeatures) -> None:
+    global _WORKER_FEATURES
+    _WORKER_FEATURES = features
 
 
 def _run_pairwise_chunk_worker(row_range: tuple[int, int]) -> np.ndarray:
-    if _WORKER_COORDINATES is None:
+    if _WORKER_FEATURES is None:
         raise RuntimeError("Pairwise RMSD worker was not initialized")
     start, stop = row_range
-    return _pairwise_for_rows(_WORKER_COORDINATES, start, stop)
+    return _pairwise_for_rows(_WORKER_FEATURES, start, stop)
 
 
 def _iter_indexed_pairwise_rmsd_chunks_parallel(
-    coordinates: np.ndarray,
+    features: PoseFeatures,
     *,
     pair_chunk_size: int,
     nprocs: int,
@@ -389,7 +456,7 @@ def _iter_indexed_pairwise_rmsd_chunks_parallel(
     ordered: bool,
 ) -> Iterator[tuple[int, np.ndarray]]:
     ctx = mp.get_context("fork")
-    nposes = len(coordinates)
+    nposes = len(features.pose_centered)
     row_ranges = iter(_iter_row_ranges(nposes, pair_chunk_size))
     window = (
         int(max_pending_chunks)
@@ -402,7 +469,7 @@ def _iter_indexed_pairwise_rmsd_chunks_parallel(
         max_workers=int(nprocs),
         mp_context=ctx,
         initializer=_init_pairwise_worker,
-        initargs=(coordinates,),
+        initargs=(features,),
     ) as executor:
         pending: dict[cf.Future, tuple[int, int, int]] = {}
         completed: dict[int, tuple[int, np.ndarray]] = {}
@@ -461,10 +528,10 @@ def compute_pairwise_rmsd_with_library(
     nprocs: int = 1,
     max_pending_chunks: int | None = None,
 ) -> np.ndarray:
-    coordinates = load_pose_coordinates(reader, library=library)
+    features = load_pose_features(reader, library=library)
     chunks = list(
         iter_pairwise_rmsd_chunks(
-            coordinates,
+            features,
             pair_chunk_size=pair_chunk_size,
             nprocs=nprocs,
             max_pending_chunks=max_pending_chunks,
@@ -483,9 +550,9 @@ def iter_pairwise_rmsd_chunks_with_library(
     nprocs: int = 1,
     max_pending_chunks: int | None = None,
 ) -> Iterator[np.ndarray]:
-    coordinates = load_pose_coordinates(reader, library=library)
+    features = load_pose_features(reader, library=library)
     yield from iter_pairwise_rmsd_chunks(
-        coordinates,
+        features,
         pair_chunk_size=pair_chunk_size,
         nprocs=nprocs,
         max_pending_chunks=max_pending_chunks,
@@ -501,9 +568,9 @@ def iter_indexed_pairwise_rmsd_chunks_with_library(
     max_pending_chunks: int | None = None,
     ordered: bool = False,
 ) -> Iterator[tuple[int, np.ndarray]]:
-    coordinates = load_pose_coordinates(reader, library=library)
+    features = load_pose_features(reader, library=library)
     yield from iter_indexed_pairwise_rmsd_chunks(
-        coordinates,
+        features,
         pair_chunk_size=pair_chunk_size,
         nprocs=nprocs,
         max_pending_chunks=max_pending_chunks,
@@ -761,6 +828,18 @@ def main(argv: list[str] | None = None) -> int:
             pose_range=pose_range,
             rows_per_chunk=args.pose_chunksize,
         )
+        is_npy_output = (
+            args.outputfile is not None
+            and args.outputfile.suffix.lower() == ".npy"
+        )
+        pose_limit = MAX_POSES_NPY if is_npy_output else MAX_POSES_TEXT
+        if reader.selected_poses > pose_limit:
+            kind = "numpy" if is_npy_output else "text"
+            raise ValueError(
+                f"pairwise-rmsd refuses to process {reader.selected_poses} poses "
+                f"for {kind} output (hard maximum: {pose_limit}). "
+                "Use --pose-range to restrict the input."
+            )
         if args.order_array is not None and pose_range is not None:
             raise ValueError("--order-array cannot be combined with --pose-range")
         order_array = (
@@ -777,27 +856,27 @@ def main(argv: list[str] | None = None) -> int:
                 factory,
                 rows_per_chunk=args.rotamer_matrix_build_chunksize,
             )
-        coordinates = load_pose_coordinates(
+        features = load_pose_features(
             reader,
             library=library,
             show_progress=reader.selected_poses > args.pose_chunksize,
         )
-        total_pairs = upper_triangular_size(len(coordinates))
+        total_pairs = upper_triangular_size(len(features.pose_centered))
         show_pair_progress = total_pairs > args.chunksize
         if order_array is not None:
             indexed_chunks = iter_indexed_pairwise_rmsd_chunks(
-                coordinates,
+                features,
                 pair_chunk_size=args.chunksize,
                 nprocs=effective_nprocs,
                 max_pending_chunks=args.max_pending_chunks,
                 ordered=False,
             )
-            if args.outputfile is not None and args.outputfile.suffix.lower() == ".npy":
+            if is_npy_output:
                 write_ordered_npy_output_chunks(
                     args.outputfile,
                     indexed_chunks,
                     total_pairs=total_pairs,
-                    nposes=len(coordinates),
+                    nposes=len(features.pose_centered),
                     order_array=order_array,
                     show_progress=show_pair_progress,
                 )
@@ -805,7 +884,7 @@ def main(argv: list[str] | None = None) -> int:
                 ordered = collect_ordered_output_chunks(
                     indexed_chunks,
                     total_pairs=total_pairs,
-                    nposes=len(coordinates),
+                    nposes=len(features.pose_centered),
                     order_array=order_array,
                     show_progress=show_pair_progress,
                 )
@@ -816,9 +895,9 @@ def main(argv: list[str] | None = None) -> int:
                     stdout_limit=args.chunksize,
                     show_progress=False,
                 )
-        elif args.outputfile is not None and args.outputfile.suffix.lower() == ".npy":
+        elif is_npy_output:
             indexed_chunks = iter_indexed_pairwise_rmsd_chunks(
-                coordinates,
+                features,
                 pair_chunk_size=args.chunksize,
                 nprocs=effective_nprocs,
                 max_pending_chunks=args.max_pending_chunks,
@@ -832,7 +911,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         else:
             chunks = iter_pairwise_rmsd_chunks(
-                coordinates,
+                features,
                 pair_chunk_size=args.chunksize,
                 nprocs=effective_nprocs,
                 max_pending_chunks=args.max_pending_chunks,
