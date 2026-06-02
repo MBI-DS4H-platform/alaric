@@ -47,12 +47,14 @@ def _dinucleotide_sequence(seq: str) -> str:
 
 
 def _rotvecs_for(rotaconformers: np.ndarray) -> np.ndarray:
-    """Return (N, 3) float64 rotvec array from rotamer data."""
+    """Return (N, 3) float64 ATTRACT-JAX/SciPy rotvecs from rotamer data."""
     if rotaconformers.ndim == 2 and rotaconformers.shape[1] == 3:
-        return rotaconformers.astype(np.float64, copy=False)
+        return -rotaconformers.astype(np.float64, copy=False)
     if rotaconformers.ndim == 3 and rotaconformers.shape[1:] == (3, 3):
         from scipy.spatial.transform import Rotation
-        return Rotation.from_matrix(rotaconformers).as_rotvec().astype(np.float64)
+        return Rotation.from_matrix(
+            np.swapaxes(rotaconformers, -1, -2)
+        ).as_rotvec().astype(np.float64)
     raise ValueError(f"Unsupported rotamer shape {rotaconformers.shape}")
 
 

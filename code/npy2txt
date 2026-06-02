@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+
+import sys
+import numpy as np
+inp = np.load(sys.argv[1])
+assert inp.ndim == 1
+if np.issubdtype(inp.dtype, np.integer):
+    fmt = "%d"
+else:
+    fmt = "%.3f"
+assert len(inp) < 1_000_000_000
+np.savetxt(sys.stdout, inp, fmt=fmt)
