@@ -38,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Report the stacking angle and dihedral for one RNA nucleotide and "
-            "one protein aromatic residue, using the same convention as stack.py."
+            "one protein aromatic residue, using the same convention as anchor.py."
         )
     )
     parser.add_argument("rna_pdb", type=_existing_file, help="RNA PDB file.")

@@ -16,7 +16,7 @@ expected=$(awk '{print $1}' ground-truth/frag4-fwd.arc.CHECKSUM)
 
 run() {  # <outdir> <cache-size> <nprocs>
   rm -rf "$1"
-  python3 code/stack.py --sequence GU --protein pdbs/1b7f_dom2.pdb \
+  python3 code/anchor.py --sequence GU --protein pdbs/1b7f_dom2.pdb \
     --pdb-exclude 1b7f \
     --resid 214 --first \
     --angle 30 --dihedral 45 -45 \

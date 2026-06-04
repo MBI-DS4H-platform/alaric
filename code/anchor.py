@@ -116,7 +116,7 @@ def _dihedral_pair(values: Sequence[str]) -> tuple[float, float]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="stack",
+        prog="anchor",
         description="Create stacking-based initial poses from a protein and a dinucleotide library.",
     )
     parser.add_argument(

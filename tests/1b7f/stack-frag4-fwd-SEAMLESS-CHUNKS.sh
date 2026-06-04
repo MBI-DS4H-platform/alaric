@@ -15,8 +15,8 @@ for n in list(range(0,mx,inc)) + [mx]:
   if [ $first -gt 0 ]; then
     echo $first $last
 seamless-run -vvv -y --conda alaric --dry --write-remote-job "$deploymentdir/chunk$chunk" \
---metavar outdir=/ramscratch/$output -I code/stack.py.DEPS.txt \
-"""python -u code/stack.py --sequence GU --protein pdbs/1b7f_dom2.pdb \
+--metavar outdir=/ramscratch/$output -I code/anchor.py.DEPS.txt \
+"""python -u code/anchor.py --sequence GU --protein pdbs/1b7f_dom2.pdb \
   --pdb-exclude 1b7f \
   --resid 214 --first \
   --angle 25 --dihedral 45 -45 \

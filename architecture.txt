@@ -258,8 +258,7 @@ Actions overview
 ## A. Anchor
 
 Create initial fragment poses from stacking interaction.
-Prototype for 2 stackings, using "provisional" classifiier (from nucleotide-stacking-interaction): 
-crocodile-OLD/util/pseudo-crocodile-2stack.py
+Prototype for 2 stackings uses the local nucleotide-stacking interaction classifier.
 
 ## B. Determine conformer pairs
 
@@ -318,12 +317,12 @@ Concepts
 ========
 
 ## Config
-Config for SLURM mode or seamless mode must be present (~/.crocodile)
+Config for SLURM mode or seamless mode must be present in the alaric config directory.
 Fragment libraries are defined as checksum files. On the machine where the action is executed,
   there must be config where to find the files (unless seamless mode, which has its own mechanism).
 
 ## General action directory outline
-... (checksums, crocodile-init to create RUNNING status)
+... (checksums, init step to create RUNNING status)
 Pose filtering creates indices (uint32) into original directory, not poses!
 Action is nearly always "input dir" => "output dir", by name.
 Caching: input directories are inspected for checksum hits, beyond the input dir whose name is specified.
@@ -342,7 +341,7 @@ nP x 3 x uint16: the pose array P.
     conformer, rotamer, offset index into O
 
 bucket_size is recorded per file and is a per-dataset (uniform) parameter
-chosen at stack-write time via stack.py's --bucket-size flag (default 16).
+chosen at stack-write time via anchor.py's --bucket-size flag (default 16).
 Organize requires all source shards in a pose dir to share the same
 bucket_size; the value is propagated unchanged into the organized output.
 
@@ -409,4 +408,3 @@ into a connection list.
 ## Init and stats directories
 Init dir contains the input data (PDB file, RNA sequence)
 Stats directory contains stats about the action directories: number of poses, score distribution, RMSD distribution, etc.
-

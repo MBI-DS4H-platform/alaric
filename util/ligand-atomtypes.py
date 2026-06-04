@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Extract ATTRACT atom types from a reduced template ppdb.npy.
 
-Atom types are stored in the 'occupancy' field of the ppdb array,
-following the crocodile/WIP/protocols/get-atomtypes.py convention.
+Atom types are stored in the 'occupancy' field of the ppdb array.
 
 Usage:
     python3 ligand-atomtypes.py --sequence GU [OUTPUT_NPY]

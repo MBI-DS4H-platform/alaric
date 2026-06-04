@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 # Correctness gate: the organized .arc output of frag4-fwd/ and frag4-bwd/
-# must hash to the committed, crocodile-blessed checksums.
+# must hash to the committed alaric checksums.
 #
 # Run stack-frag4-fwd.sh and stack-frag4-bwd.sh first; this only verifies.
 #
-# The checksums in ground-truth/*.arc.CHECKSUM were blessed once against a
-# freshly regenerated, independent crocodile implementation (see
-# ground-truth/README.md). A mismatch means alaric output changed; it does
-# NOT by itself tell you which poses differ. To investigate, regenerate the
-# crocodile reference and decode both sides to sorted rows -- the exact
-# recipe is in ground-truth/README.md ("Debugging a mismatch").
+# The checksums in ground-truth/*.arc.CHECKSUM pin the canonical organized
+# alaric output. A mismatch means alaric output changed; it does NOT by
+# itself tell you which poses differ. To investigate, decode both outputs
+# to sorted rows -- see ground-truth/README.md ("Debugging a mismatch").
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 cd "$here"
