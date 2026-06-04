@@ -70,6 +70,13 @@ class LoadedFile:
         return _pack_pose_keys(poses)
 
 
+@dataclass
+class IdentityTask:
+    small: FileIndexEntry
+    other: FileIndexEntry
+    offsets: list[tuple[tuple[int, int, int], int, int]]
+
+
 def _row_tuple(row: np.ndarray) -> tuple[int, int, int]:
     return tuple(int(x) for x in row)
 
@@ -259,7 +266,8 @@ class _PrefetchingLoader:
 
     Refholders are indexed 0..n-1. At any time the holders for indices in a
     sliding window [current, current+window_ahead] are active; the loader
-    keeps in cache every path with refcount>0 and evicts the rest.
+    keeps in cache every path with refcount>0 and evicts the rest. A caller can
+    alternatively cap future readahead by unique path count.
     """
 
     def __init__(
@@ -269,12 +277,14 @@ class _PrefetchingLoader:
         path_to_entry: dict[Path, FileIndexEntry],
         *,
         window_ahead: int = 20,
+        max_readahead_paths: int | None = None,
         workers: int = _LOADER_WORKERS,
     ) -> None:
         self._refholder_paths = refholder_paths_fn
         self._n_items = n_items
         self._path_to_entry = path_to_entry
         self._window_ahead = window_ahead
+        self._max_readahead_paths = max_readahead_paths
         self._cache: dict[Path, LoadedFile] = {}
         self._refcount: dict[Path, int] = {}
         self._in_flight: set[Path] = set()
@@ -286,8 +296,11 @@ class _PrefetchingLoader:
             max_workers=workers, thread_name_prefix="arc-loader"
         )
         with self._lock:
-            for j in range(min(window_ahead + 1, n_items)):
-                self._add_refs(j)
+            if self._max_readahead_paths is None:
+                for j in range(min(window_ahead + 1, n_items)):
+                    self._add_refs(j)
+            else:
+                self._refresh_capped_refs(0)
             self._cond.notify_all()
         self._thread = threading.Thread(target=self._loader, daemon=True)
         self._thread.start()
@@ -303,6 +316,36 @@ class _PrefetchingLoader:
                 self._refcount.pop(p, None)
             else:
                 self._refcount[p] = c
+
+    def _refresh_capped_refs(self, current_idx: int) -> None:
+        target: dict[Path, int] = {}
+
+        def add_paths(paths: list[Path]) -> None:
+            for p in paths:
+                target[p] = target.get(p, 0) + 1
+
+        if current_idx >= self._n_items:
+            self._refcount = target
+            return
+
+        current_paths = self._refholder_paths(current_idx)
+        current_path_set = set(current_paths)
+        add_paths(current_paths)
+
+        assert self._max_readahead_paths is not None
+        future_paths: set[Path] = set()
+        for idx in range(current_idx + 1, self._n_items):
+            paths = self._refholder_paths(idx)
+            new_future_paths = [
+                p for p in paths
+                if p not in current_path_set and p not in future_paths
+            ]
+            if len(future_paths) + len(new_future_paths) > self._max_readahead_paths:
+                break
+            add_paths(paths)
+            future_paths.update(new_future_paths)
+
+        self._refcount = target
 
     def _make_callback(self, p: Path):
         def callback(future: concurrent.futures.Future) -> None:
@@ -363,12 +406,15 @@ class _PrefetchingLoader:
             return self._cache[path]
 
     def advance(self, idx: int) -> None:
-        """After processing idx: drop its refs and add refs for idx+window+1."""
+        """After processing idx, refresh the active current/prefetch refs."""
         with self._lock:
-            self._remove_refs(idx)
-            nxt = idx + self._window_ahead + 1
-            if nxt < self._n_items:
-                self._add_refs(nxt)
+            if self._max_readahead_paths is None:
+                self._remove_refs(idx)
+                nxt = idx + self._window_ahead + 1
+                if nxt < self._n_items:
+                    self._add_refs(nxt)
+            else:
+                self._refresh_capped_refs(idx + 1)
             self._cond.notify_all()
 
     def close(self) -> None:
@@ -388,7 +434,11 @@ def build_identity_set(
     entries1: list[FileIndexEntry],
     entries2: list[FileIndexEntry],
     common_offsets: dict[tuple[int, int, int], list[tuple[int, int, int]]],
+    *,
+    readahead: int = 20,
 ) -> dict[PoseKey, np.ndarray]:
+    if readahead < 0:
+        raise ValueError("--readahead must be non-negative")
     nposes1 = sum(e.nP for e in entries1 if e.M in common_offsets)
     nposes2 = sum(e.nP for e in entries2 if e.M in common_offsets)
     small_entries, other_entries = (
@@ -397,10 +447,7 @@ def build_identity_set(
     other_by_bucket = _index_by_bucket(other_entries)
     other_offset_entries = _build_offset_entries(other_entries, common_offsets)
 
-    WINDOW_AHEAD = 20
-
-    holders_for_entry: list[list[FileIndexEntry]] = [[] for _ in small_entries]
-    holder_paths_for_entry: list[set[Path]] = [set() for _ in small_entries]
+    tasks: list[IdentityTask] = []
     for i, entry in enumerate(small_entries):
         if entry.M not in common_offsets or entry.a_first is None:
             continue
@@ -413,17 +460,22 @@ def build_identity_set(
             continue
         candidates_set = {other.path for other in candidates}
         common_for_bucket = set(common_offsets[entry.M])
-        seen: set[Path] = set()
-        holders: list[FileIndexEntry] = []
+        groups: dict[
+            Path,
+            tuple[FileIndexEntry, list[tuple[tuple[int, int, int], int, int]]],
+        ] = {}
         for offset in entry.offset_to_index:
             if offset not in common_for_bucket:
                 continue
             for other in other_offset_entries.get((entry.M, offset), []):
-                if other.path in candidates_set and other.path not in seen:
-                    seen.add(other.path)
-                    holders.append(other)
-        holders_for_entry[i] = holders
-        holder_paths_for_entry[i] = seen
+                if other.path not in candidates_set:
+                    continue
+                group = groups.setdefault(other.path, (other, []))
+                group[1].append(
+                    (offset, entry.offset_to_index[offset], other.offset_to_index[offset])
+                )
+        for other, offsets in groups.values():
+            tasks.append(IdentityTask(entry, other, offsets))
 
     path_to_entry: dict[Path, FileIndexEntry] = {}
     for entry in small_entries:
@@ -432,51 +484,29 @@ def build_identity_set(
         path_to_entry[entry.path] = entry
 
     def refholder_paths(idx: int) -> list[Path]:
-        if idx < 0 or idx >= len(small_entries):
+        if idx < 0 or idx >= len(tasks):
             return []
-        if not holders_for_entry[idx]:
-            return []
-        paths = [small_entries[idx].path]
-        for other in holders_for_entry[idx]:
-            paths.append(other.path)
-        return paths
+        task = tasks[idx]
+        return [task.small.path, task.other.path]
 
     identity_parts: dict[PoseKey, list[np.ndarray]] = {}
     with _PrefetchingLoader(
-        refholder_paths, len(small_entries), path_to_entry, window_ahead=WINDOW_AHEAD
+        refholder_paths,
+        len(tasks),
+        path_to_entry,
+        max_readahead_paths=readahead,
     ) as loader:
-        for i, entry in enumerate(tqdm(small_entries, desc="Build identity set")):
+        for i, task in enumerate(tqdm(tasks, desc="Build identity set")):
             try:
-                holders = holders_for_entry[i]
-                if not holders:
-                    continue
+                loaded_entry = loader.wait_for(task.small.path)
+                loaded_other = loader.wait_for(task.other.path)
 
-                loaded_entry = loader.wait_for(entry.path)
-                common_for_bucket = set(common_offsets[entry.M])
-                holder_path_set = holder_paths_for_entry[i]
-
-                for offset, offset_index in entry.offset_to_index.items():
-                    if offset not in common_for_bucket:
-                        continue
-                    other_holders = [
-                        other
-                        for other in other_offset_entries.get((entry.M, offset), [])
-                        if other.path in holder_path_set
-                    ]
-                    if not other_holders:
-                        continue
+                for offset, offset_index, other_offset_index in task.offsets:
                     left_keys = loaded_entry.pose_keys(offset_index)
-                    other_parts = []
-                    for other in other_holders:
-                        loaded_other = loader.wait_for(other.path)
-                        other_parts.append(loaded_other.pose_keys(other.offset_to_index[offset]))
-                    if len(other_parts) == 1:
-                        right_keys = other_parts[0]
-                    else:
-                        right_keys = np.concatenate(other_parts)
+                    right_keys = loaded_other.pose_keys(other_offset_index)
                     overlap = _intersect_sorted_unique(left_keys, right_keys)
                     if len(overlap):
-                        identity_parts.setdefault((entry.M, offset), []).append(overlap)
+                        identity_parts.setdefault((task.small.M, offset), []).append(overlap)
             finally:
                 loader.advance(i)
     return {
@@ -574,8 +604,11 @@ def build_mapping(
     entries: list[FileIndexEntry],
     global_lookup: dict[PoseKey, tuple[int, np.ndarray]],
     *,
+    readahead: int = 20,
     desc: str = "Build mapping",
 ) -> np.ndarray:
+    if readahead < 0:
+        raise ValueError("--readahead must be non-negative")
     relevant_per_entry: list[list[tuple[int, tuple[int, np.ndarray]]]] = []
     for entry in entries:
         rel = [
@@ -593,7 +626,12 @@ def build_mapping(
         return []
 
     chunks: list[np.ndarray] = []
-    with _PrefetchingLoader(refholder_paths, len(entries), path_to_entry) as loader:
+    with _PrefetchingLoader(
+        refholder_paths,
+        len(entries),
+        path_to_entry,
+        window_ahead=readahead,
+    ) as loader:
         for i, entry in enumerate(tqdm(entries, desc=desc)):
             try:
                 relevant = relevant_per_entry[i]
@@ -635,6 +673,7 @@ def run_identity_filter(
     *,
     force: bool = False,
     max_poses_per_file: int = 100_000_000,
+    readahead: int = 20,
 ) -> dict[str, int]:
     print("Indexing pose directories...", file=sys.stderr)
     entries1 = _read_file_index(pose_dir1)
@@ -671,7 +710,12 @@ def run_identity_filter(
     print(f"Number of poses kept from pose directory 2: {kept_poses_2}", file=sys.stderr)
 
     _clean_output_dir(output_dir, force=force)
-    identity = build_identity_set(kept1, kept2, common_offsets)
+    identity = build_identity_set(
+        kept1,
+        kept2,
+        common_offsets,
+        readahead=readahead,
+    )
     total_identity_poses = int(sum(len(keys) for keys in identity.values()))
     print(f"Number of unique poses: {total_identity_poses}", file=sys.stderr)
     print("Writing output pose directory...", file=sys.stderr)
@@ -682,10 +726,10 @@ def run_identity_filter(
         max_poses_per_file=max_poses_per_file,
     )
     print("Building mapping array 1...", file=sys.stderr)
-    map1 = build_mapping(kept1, global_lookup)
+    map1 = build_mapping(kept1, global_lookup, readahead=readahead)
     print(f"Number of mapping rows for pose directory 1: {len(map1)}", file=sys.stderr)
     print("Building mapping array 2...", file=sys.stderr)
-    map2 = build_mapping(kept2, global_lookup)
+    map2 = build_mapping(kept2, global_lookup, readahead=readahead)
     print(f"Number of mapping rows for pose directory 2: {len(map2)}", file=sys.stderr)
     np.save(output_dir / "map-1.npy", map1)
     np.save(output_dir / "map-2.npy", map2)
@@ -728,6 +772,15 @@ def parse_args() -> argparse.Namespace:
         default=100_000_000,
         help="Maximum number of output poses per organized .arc file.",
     )
+    parser.add_argument(
+        "--readahead",
+        type=int,
+        default=20,
+        help=(
+            "Maximum number of additional future .arc files to prefetch while "
+            "building the identity set. Lower this on memory-constrained machines."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -739,6 +792,7 @@ def main() -> None:
         args.output_dir,
         force=args.force,
         max_poses_per_file=args.max_poses_per_file,
+        readahead=args.readahead,
     )
 
 
