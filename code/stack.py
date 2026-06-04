@@ -28,7 +28,6 @@ from stack_geometry import (
     residue_ring_atom_mask,
 )
 
-
 GRID_SPACING = sqrt(3) / 3
 LATERAL_SLOPE = 1.78966
 
@@ -242,7 +241,7 @@ and the values in between are eliminated.""",
         type=int,
         default=None,
         metavar="INDEX",
-        help="Restrict the search to a single 0-based conformer index.",
+        help="Restrict the search to a single 1-based conformer index.",
     )
     parser.add_argument(
         "--rotamer-range",
@@ -366,17 +365,17 @@ def _select_conformers(
     if len(available_indices) == 0:
         raise ValueError("No conformers available after exclusions")
     if specific_index is not None:
-        if specific_index < 0:
-            raise ValueError("--conformer must be non-negative")
-        if specific_index >= len(conformer_mask):
+        if specific_index < 1:
+            raise ValueError("--conformer must be positive")
+        if specific_index > len(conformer_mask):
             raise ValueError(
                 f"--conformer index {specific_index} out of range for library of size {len(conformer_mask)}"
             )
-        if not conformer_mask[specific_index]:
+        if not conformer_mask[specific_index - 1]:
             raise ValueError(
                 f"--conformer index {specific_index} is not available after exclusions"
             )
-        return np.array([specific_index], dtype=available_indices.dtype)
+        return np.array([specific_index - 1], dtype=available_indices.dtype)
     if index_range is None:
         return available_indices.copy()
 
@@ -384,7 +383,9 @@ def _select_conformers(
     if first <= 0:
         raise ValueError("--conformer-range FIRST must be positive")
     if last < first:
-        raise ValueError("--conformer-range LAST must be greater than or equal to FIRST")
+        raise ValueError(
+            "--conformer-range LAST must be greater than or equal to FIRST"
+        )
     if last > len(conformer_mask):
         raise ValueError(
             f"--conformer-range LAST index {last} out of range for library of size {len(conformer_mask)}"
@@ -393,7 +394,9 @@ def _select_conformers(
     requested = np.arange(first - 1, last, dtype=available_indices.dtype)
     selected = requested[conformer_mask[requested]]
     if len(selected) == 0:
-        raise ValueError("No conformers available in --conformer-range after exclusions")
+        raise ValueError(
+            "No conformers available in --conformer-range after exclusions"
+        )
     return selected
 
 
@@ -517,9 +520,7 @@ def _process_conformer(
         return total_candidates, total_surviving, reverse_table
 
     if config.selected_rotamer_positions is None:
-        passing_rotamers_raw = np.flatnonzero(angle_mask).astype(
-            np.int64, copy=False
-        )
+        passing_rotamers_raw = np.flatnonzero(angle_mask).astype(np.int64, copy=False)
     else:
         passing_rotamers_raw = local_rotamer_indices[angle_mask]
     if (
@@ -576,17 +577,14 @@ def _process_conformer(
                 - displacement_world[disp_chunk]
             )
 
-            center_z = np.abs(center_vec[:, 2])
             center_dis = np.linalg.norm(center_vec, axis=1)
             axial = np.abs(center_vec.dot(config.protein_plane))
             axial = np.maximum(0.0, np.minimum(center_dis - 0.001, axial))
-            lateral = np.sqrt(
-                np.maximum(0.0, center_dis * center_dis - axial * axial)
-            )
+            lateral = np.sqrt(np.maximum(0.0, center_dis * center_dis - axial * axial))
             center_dis_corrected = center_dis - lateral / LATERAL_SLOPE
 
-            mask_a = (center_z >= 2.3 - config.margin) & (
-                center_z <= 4.5 + config.margin
+            mask_a = (axial >= 2.3 - config.margin) & (
+                axial <= 4.5 + config.margin
             )
             mask_b = (center_dis_corrected >= 2.3 - config.margin) & (
                 center_dis_corrected <= 3.8 + config.margin
@@ -869,6 +867,7 @@ def _run(args: argparse.Namespace) -> int:
             mininterval=2.0,
         )
         if nprocs == 1:
+
             def update_progress(conformers: int, candidates: int) -> None:
                 conformer_pbar.update(conformers)
                 distance_pbar.update(candidates)
