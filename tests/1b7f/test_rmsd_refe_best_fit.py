@@ -7,8 +7,8 @@ import numpy as np
 
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[1]
-sys.path.insert(0, str(REPO / "code"))
+sys.path.insert(0, str(HERE / ".alaric"))
+sys.path.insert(0, str(HERE / ".util"))
 
 from library import config  # noqa: E402
 from parse_pdb import parse_pdb  # noqa: E402

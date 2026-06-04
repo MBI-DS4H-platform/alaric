@@ -8,6 +8,11 @@ import sys
 import numpy as np
 from tqdm import tqdm
 
+_HERE = Path(__file__).resolve().parent
+_UTIL_DIR = _HERE / "util"
+if str(_UTIL_DIR) not in sys.path:
+    sys.path.insert(0, str(_UTIL_DIR))
+
 from parse_pdb import atomic_dtype
 from poses import DEFAULT_POSE_CHUNK_SIZE, PoseChunk, PoseReader
 from rmsd import (

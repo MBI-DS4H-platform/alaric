@@ -16,14 +16,14 @@ expected=$(awk '{print $1}' ground-truth/frag4-fwd.arc.CHECKSUM)
 
 run() {  # <outdir> <cache-size> <nprocs>
   rm -rf "$1"
-  python3 code/anchor.py --sequence GU --protein pdbs/1b7f_dom2.pdb \
+  python3 .alaric/anchor.py --sequence GU --protein pdbs/1b7f_dom2.pdb \
     --pdb-exclude 1b7f \
     --resid 214 --first \
     --angle 30 --dihedral 45 -45 \
     --conformer-range 1 100 --rotamer-range 1 1000 \
     --cache-size "$2" --nprocs "$3" \
     --output "$1/"
-  python3 code/organize.py "$1/" --nprocs "$3" --compress
+  python3 .alaric/organize.py "$1/" --nprocs "$3" --compress
 }
 
 status=0

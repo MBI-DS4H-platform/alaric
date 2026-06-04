@@ -8,8 +8,8 @@ import numpy as np
 
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[1]
-sys.path.insert(0, str(REPO / "code"))
+sys.path.insert(0, str(HERE / ".alaric"))
+sys.path.insert(0, str(HERE / ".util"))
 
 from poses import PoseReader, pack_pool, write_arc_file  # noqa: E402
 from rmsd import GRID_SPACING  # noqa: E402
@@ -35,7 +35,7 @@ class FakeLibrary:
 
 
 def _load_pairwise_module():
-    path = REPO / "code" / "pairwise-rmsd.py"
+    path = HERE / ".util" / "pairwise-rmsd.py"
     spec = importlib.util.spec_from_file_location("pairwise_rmsd_script", path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)

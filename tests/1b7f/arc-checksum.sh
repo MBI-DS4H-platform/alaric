@@ -7,7 +7,7 @@
 # so zstd framing/version choices do not affect the hash.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-PYTHONPATH="$here/code" python3 - "$1" <<'PY'
+PYTHONPATH="$here/.alaric" python3 - "$1" <<'PY'
 import hashlib
 import sys
 

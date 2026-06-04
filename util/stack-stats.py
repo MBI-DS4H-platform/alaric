@@ -8,8 +8,8 @@ import sys
 
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-CODE_DIR = REPO_ROOT / "code"
+HERE = Path(__file__).resolve().parent
+CODE_DIR = HERE / ".alaric"
 if str(CODE_DIR) not in sys.path:
     sys.path.insert(0, str(CODE_DIR))
 

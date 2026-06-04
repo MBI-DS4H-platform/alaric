@@ -2,8 +2,8 @@
 # Copyright Sjoerd J. De Vries (INSERM)
 """Reduce a parsed-PDB npy file to ATTRACT bead coordinates and atom types.
 
-Reads a ppdb.npy produced by code/parse_pdb.py, applies the ATTRACT reduction
-defined in code/reduce.dat, and writes:
+Reads a ppdb.npy produced by alaric/parse_pdb.py, applies the ATTRACT reduction
+defined in alaric/reduce.dat, and writes:
   <output-prefix>-coor.npy       -- (nrbeads, 3) float32 bead coordinates
   <output-prefix>-atomtypes.npy  -- (nrbeads,)   int64   ATTRACT atom type
 
@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 
 _HERE = Path(__file__).resolve().parent
-_CODE = _HERE.parent / "code"
+_CODE = _HERE / ".alaric"
 _REDUCE_DAT = _CODE / "reduce.dat"
 
 

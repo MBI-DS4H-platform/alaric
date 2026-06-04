@@ -12,6 +12,11 @@ from typing import Iterator, NamedTuple
 import numpy as np
 from tqdm import tqdm
 
+_HERE = Path(__file__).resolve().parent
+_CODE_DIR = _HERE / ".alaric"
+if str(_CODE_DIR) not in sys.path:
+    sys.path.insert(0, str(_CODE_DIR))
+
 from poses import DEFAULT_POSE_CHUNK_SIZE, PoseChunk, PoseReader
 from rmsd import (
     DEFAULT_PARALLEL_MIN_POSES,

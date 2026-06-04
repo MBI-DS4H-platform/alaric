@@ -94,7 +94,7 @@ demand (it is intentionally not part of the permanent suite):
 PATH=/path/to/alaric-env/bin:$PATH   # python3 must be the alaric env
 
 # Decode current and expected alaric outputs to sorted rows and diff, e.g.:
-#    PYTHONPATH=alaric/code, discover_organized + decode_pool
+#    PYTHONPATH=tests/1b7f/.alaric, discover_organized + decode_pool
 #    column_stack((translations, conformer, rotamer)), then
 #    np.lexsort((c4, c3, c2, c1, c0)); diff the two TSVs.
 ```

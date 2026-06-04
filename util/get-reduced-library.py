@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 
 _HERE = Path(__file__).resolve().parent
-_CODE = _HERE.parent / "code"
+_CODE = _HERE / ".alaric"
 sys.path.insert(0, str(_CODE))
 
 from library import config

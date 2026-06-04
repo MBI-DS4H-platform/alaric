@@ -8,8 +8,8 @@ import numpy as np
 
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[1]
-sys.path.insert(0, str(REPO / "code"))
+sys.path.insert(0, str(HERE / ".alaric"))
+sys.path.insert(0, str(HERE / ".util"))
 
 from parse_pdb import atomic_dtype  # noqa: E402
 from poses import PoseReader, pack_pool, write_arc_file  # noqa: E402
@@ -36,7 +36,7 @@ class FakeLibrary:
 
 
 def _load_write_poses_pdb_module():
-    path = REPO / "code" / "write-poses-pdb.py"
+    path = HERE / ".alaric" / "write-poses-pdb.py"
     spec = importlib.util.spec_from_file_location("write_poses_pdb_script", path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)

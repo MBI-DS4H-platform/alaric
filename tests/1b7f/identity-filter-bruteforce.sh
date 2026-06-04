@@ -10,7 +10,7 @@ if [ ! -d frag4-bwd ]; then
 fi
 
 rm -rf frag4-identity
-python3 code/identity_filter.py frag4-fwd frag4-bwd frag4-identity
+python3 .alaric/identity_filter.py frag4-fwd frag4-bwd frag4-identity
 
 python3 - <<'PY'
 from pathlib import Path
@@ -18,7 +18,7 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, str(Path("code").resolve()))
+sys.path.insert(0, str(Path(".alaric")))
 from poses import discover_organized, read_arc_file
 
 
