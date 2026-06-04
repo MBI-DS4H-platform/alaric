@@ -18,8 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-_HERE = Path(__file__).resolve().parent
-_CODE = _HERE / ".alaric"
+_CODE = Path(__file__).with_name("alaric")
 _REDUCE_DAT = _CODE / "reduce.dat"
 
 

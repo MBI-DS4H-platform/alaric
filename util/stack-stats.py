@@ -8,10 +8,9 @@ import sys
 
 import numpy as np
 
-HERE = Path(__file__).resolve().parent
-CODE_DIR = HERE / ".alaric"
-if str(CODE_DIR) not in sys.path:
-    sys.path.insert(0, str(CODE_DIR))
+ALARIC_DIR = Path(__file__).with_name("alaric")
+if str(ALARIC_DIR) not in sys.path:
+    sys.path.insert(0, str(ALARIC_DIR))
 
 from parse_pdb import parse_pdb  # noqa: E402
 from stack_geometry import (  # noqa: E402

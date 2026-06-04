@@ -14,10 +14,9 @@ from typing import Iterator
 import numpy as np
 from tqdm import tqdm
 
-_HERE = Path(__file__).resolve().parent
-_CODE_DIR = _HERE / ".alaric"
-if str(_CODE_DIR) not in sys.path:
-    sys.path.insert(0, str(_CODE_DIR))
+_ALARIC_DIR = Path(__file__).with_name("alaric")
+if str(_ALARIC_DIR) not in sys.path:
+    sys.path.insert(0, str(_ALARIC_DIR))
 
 from poses import DEFAULT_POSE_CHUNK_SIZE, PoseChunk, PoseReader
 
@@ -781,7 +780,7 @@ def write_output_chunks(
                         "Refusing to stream more than one RMSD chunk to stdout; "
                         "use --outputfile or --pose-range"
                     )
-                np.savetxt(sys.stdout, track(chunk), fmt="%.6f")
+                np.savetxt(sys.stdout, track(chunk), fmt=f"%.{RMSD_DECIMALS}f")
         finally:
             progress.close()
         return
@@ -810,7 +809,7 @@ def write_output_chunks(
     try:
         with outputfile.open("w") as handle:
             for chunk in chunks:
-                np.savetxt(handle, track(chunk), fmt="%.3f")
+                np.savetxt(handle, track(chunk), fmt=f"%.{RMSD_DECIMALS}f")
     finally:
         progress.close()
 
