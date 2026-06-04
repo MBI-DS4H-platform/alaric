@@ -1,0 +1,7 @@
+action: anchor
+fragment: auto
+sequence: auto
+exclude: auto
+nucleotide: first
+protein: 1b7f_dom2
+resid: 214

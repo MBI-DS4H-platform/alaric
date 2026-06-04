@@ -1,0 +1,177 @@
+Design of the middle level
+==========================
+
+At the middle level, all data is organized into projects.
+A project consists of:
+- ./DATA
+- ./CACHE, subdivided in ./CACHE/parameters, ./CACHE/checksum and ./CACHE/results
+- All other folders, which are action dirs (normally starting with ./frag)
+
+
+Every fragment folder contains an alaric.yaml .
+Every alaric.yaml contains one field "type", which can be anchor, grow, etc.
+The other parameters are shown below per action type, with examples. 
+For "auto", the parentheses explain how it is determined.
+
+
+For merging actions, there is the following validation: both inputs must have the same fragment. 
+
+# List of actions
+
+## anchor
+
+fragment: 5 or auto (read from dirname "frag5-X")
+sequence: UU or auto (read sequence from ../DATA/sequence.txt or ../DATA/reference.pdb)
+exclude: 1b7f or auto (read from ../DATA/pdbcode.txt)
+protein: 1b7f or auto . In both cases, read from ../DATA, either 1b7f-aa.pdb or protein-aa.pdb for auto 
+resid: 123
+nucleotide: first or second
+dihedral: 45 -45  , or auto (read from ../DATA/anchor.yaml)
+angle: 30, or auto (read from ../DATA/anchor.yaml)
+
+## score
+
+This is a scoring action. This action dir can only be a score_input. Generates not poses but a 1D score.npy file
+sequence, protein, exclude: see "anchor"
+input: frag4-fwd-filtered . Name of action dir
+
+## rmsd
+
+This is a scoring action. This action dir can only be a score_input. Generates not poses but a 1D score.npy file
+The reference is not provided, it must be present as ../DATA/reference.pdb
+fragment, exclude: see "anchor"
+input: frag4-fwd-filtered . Name of action dir
+
+
+## score_add
+
+This is a scoring action. This action dir can only be a score_input. Generates not poses but a 1D score.npy file
+score_input1: name of scoring action dir
+score_input2: name of scoring action dir
+Both scoring dirs must have the same input
+
+
+## mask
+
+This action dir can only be a mask_input.
+Generates not poses but mask.py, a 1D boolean mask array OR a array of 0-based uint indices, whichever is smaller.
+input: name of action dir
+score_input: name of scoring action dir
+threshold: 0.23 or "auto" (try to extract from constraints.json)
+The score_input.input must be equal to the input
+
+
+## filter
+
+input: name of action dir
+score_input: name of scoring action dir
+threshold: 0.23 or "auto" (try to extract from constraints.json)
+mask_input: name of mask action dir. 
+score_input+threshold XOR mask_input must be defined.
+The score_input.input or mask_input.input must be equal to the input
+
+## grow
+
+fragment, sequence, exclude: see "anchor"
+input: frag4-fwd-filtered . Name of action dir
+direction: fwd or forward or bwd or backward, or auto (read from dirname "fragX-fwd")
+crmsd: 0.25 or auto (read the corresponding pair from constraints.json)
+ovrmsd: 0.75 or auto (read the corresponding pair from constraints.json)
+
+## identity
+
+This is a merging action
+input1: frag4-anchor1 . Name of action dir
+input2: frag4-anchor2. Name of action dir
+
+
+# alaric-sigil
+
+This command traverses all action dirs and calculates their sigil, stores it in sigil.txt
+
+If sigil.txt already exists and is different: 
+    - abort unless --force or --delete was specified
+    - If there is a result.txt: abort unless --delete was specified (which deletes the result.txt) 
+
+The sigil is of the form <first part>-<second part> , e.g. 12345678af-9876543aac. 
+It is calculated as follows:
+1. All auto parameters are filled in. Other load-bearing CLI parameters of underlying scripts are also filled in.
+   File parameters (PDB files directly read from DATA at runtime) are split:
+   - The filename goes in a parameter that has the parameter name prepended by double underscore
+   - The normal parameter name has the filename replaced by the Seamless checksum (SHA-256)4
+2. Dependencies (inputs) are removed. The result is organized as Seamless JSON (sorted keys, two spaces), without double underscore parameters.
+   The Seamless checksum  is computed on this. The first ten characters are the first part of the sigil.
+3. If there are no dependencies, the second part of the sigil is "null".
+4. If there are dependencies, their sigils are calculated. The dependency name-to-sigil dict is built, 
+organized as Seamless JSON, checksummed, and the first ten characters taken. This is the second part of the sigil. 
+5. The two dicts (including double underscore) are merged together and stored under ../CACHE/parameters/<SIGIL> ,
+
+# alaric-deploy
+
+This command takes two arguments: a deployer, and (optionally) an action dir (current directory is default). Must contain a sigil.
+This requires that result.txt is not present in the action dir. 
+Pre-checking: first look for the file ./CACHE/checksum/[SIGIL] and if it exists, copy it to result.txt and exit. 
+Chunk deployers insert a third parameter nchunks: alaric-deploy <chunk-deployer> nchunks [action dir].
+There are four deployers: local, local-chunk, remote, remote-chunk
+All deployers take a bash template from ./templates/[deployer]/[action].sh and fill in parameters.
+
+##  Local deployment
+
+
+The Alaric dir must be defined as ALARIC_DIR = the location of ./alaric/alaric (containing e.g. grow.py) 
+Local deployment writes this template as run.sh. 
+Input action dir parameters are inserted as  `../<action dir>`
+DATA file parameters are inserted as `../DATA/...`
+Output (pose dir, or e.g. score.npy inside the output dir) goes to ../CACHE/results/[SIGIL]/
+It will also write a check.sh, checking that the action dir result.txt correspond to that in the JSON of ../CACHE/parameters/[SIGIL] (sigil of the current action dir)
+run.sh will invoke ./check.sh.
+
+## Remote deployment
+
+Remote deployment requires four env variables:
+    ALARIC_REMOTE_HOST: remote server SSH host to scp to
+    ALARIC_REMOTE_DEPLOYMENT_DIR: the direction of the host to scp the run.sh and the files to
+    ALARIC_REMOTE_ALARIC_DIR: the location of ALARIC_DIR on the remote server
+    ALARIC_REMOTE_RESULT_DIR: where the remote host run.sh will write to 
+These four env vars should be constant (i.e. in .bashrc).
+A fifth one is convenient:  ALARIC_REMOTE_PROJECT_DIR
+
+First, DATA file parameters are copied to ALARIC_REMOTE_DEPLOYMENT_DIR/DATA/<checksum>.
+Then, a deployment dir ALARIC_REMOTE_DEPLOYMENT_DIR/[SIGIL] is created.
+If ALARIC_REMOTE_PROJECT_DIR exists, ALARIC_REMOTE_PROJECT_DIR/[action dir name] is created and symlinked to the previous dir.
+Within this dir, run.sh is written with parameters inserted. This goes slightly different from local deployment:
+Action dir input parameters are symlinked to ALARIC_REMOTE_RESULT_DIR/[input action dir sigil] 
+DATA file parameters are hardlinked to ../DATA/<checksum> as the specified filename (e.g. ./reference.pdb)
+Output (pose dir, or e.g. score.npy inside the output dir) goes to ALARIC_REMOTE_RESULT_DIR/[SIGIL]/
+The Alaric dir is inserted from ALARIC_REMOTE_ALARIC_DIR
+The check.sh is written as well.
+
+## Chunk deployment
+
+Chunk deployers generate N=1..nchunks chunkN.sh scripts. For grow.py, they generate an organize.sh script.
+For local deployment, they generate a run.sh that calls all chunkN.sh and then the organize.sh in tandem.
+In the templates, non-load-bearing parameters are present in commented-out form.
+In general, pose compression is always enabled (grow/anchor/organize).
+
+# alaric-result-clean
+
+Optionally takes an action dir (current directory is default). Must contain a sigil.
+Remove results from ./CACHE/results/[SIGIL]/* . If --all, also remove result.txt and ./CACHE/checksum/[SIGIL]
+
+# alaric-result-check
+
+Optionally takes an action dir (current directory is default). Must contain a sigil. Must not contain result.txt
+If run.sh defined: checks ./CACHE/checksum/[SIGIL] and copies the checksum into result.txt if exists.
+Otherwise: checks the remote result directory and copies the checksum into result.txt and ./CACHE/checksum/[SIGIL]
+
+# alaric-result-download
+
+Optionally takes an action dir (current directory is default). Must contain a sigil. ./CACHE/results/[SIGIL] must not exist.
+Checks the remote result directory and copies the checksum into result.txt and ./CACHE/checksum/[SIGIL]
+(if those exists, check that they match). Downloads the result into ./CACHE/results/[SIGIL]/*.
+
+# alaric-result-upload
+
+Optionally takes an action dir (current directory is default). Must contain a sigil. 
+result.txt, ./CACHE/checksum/[SIGIL] and ./CACHE/results/[SIGIL] must exist.
+Checks the remote result directory and copies the checksum and the results. 
