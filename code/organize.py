@@ -62,7 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--capacity",
         type=int,
-        default=2_000_000_000,
+        default=500_000_000,
         help="Per-worker memory budget in poses; peak in-memory ~ capacity * nprocs * 4 bytes.",
     )
     parser.add_argument("--max-poses-per-file", type=int, default=100_000_000)

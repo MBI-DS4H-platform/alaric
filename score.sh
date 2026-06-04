@@ -4,6 +4,7 @@ set -euo pipefail
 # score.sh — score alaric poses with attract-jax minfor
 #
 # Usage:
+#   bash score.sh [-x PDB] ... POSE_DIR SEQUENCE RECEPTOR_PDB NB_KERNEL [OUTPUT_NPY]
 #   bash score.sh [-x PDB] ... POSE_DIR POSE_START POSE_END SEQUENCE \
 #                 RECEPTOR_PDB NB_KERNEL [OUTPUT_NPY]
 #
@@ -12,8 +13,8 @@ set -euo pipefail
 #
 # Arguments:
 #   POSE_DIR         directory with poses-*.arc[.zst] files
-#   POSE_START       first pose (1-based, global across all shards)
-#   POSE_END         last pose  (1-based, end-inclusive)
+#   POSE_START       optional first pose (1-based, global across all shards)
+#   POSE_END         optional last pose  (1-based, end-inclusive)
 #   SEQUENCE         dinucleotide sequence, e.g. GU
 #   RECEPTOR_PDB     all-atom receptor PDB (e.g. 1b7f_dom2-aa.pdb); will be
 #                    parsed with parse_pdb.py and reduced to ATTRACT beads
@@ -21,6 +22,11 @@ set -euo pipefail
 #   OUTPUT_NPY       output energies .npy (default: energies.npy)
 
 exclude_pdbs=()
+usage() {
+  echo "Usage: bash score.sh [-x PDB] ... POSE_DIR SEQUENCE RECEPTOR_PDB NB_KERNEL [OUTPUT_NPY]" >&2
+  echo "   or: bash score.sh [-x PDB] ... POSE_DIR POSE_START POSE_END SEQUENCE RECEPTOR_PDB NB_KERNEL [OUTPUT_NPY]" >&2
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -x|--exclude)
@@ -33,13 +39,30 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-pose_dir=$1
-pose_start=$2
-pose_end=$3
-sequence=$4
-receptor_pdb=$5
-nb_kernel=$6
-output_file=${7:-energies.npy}
+pose_start=""
+pose_end=""
+case $# in
+  4|5)
+    pose_dir=$1
+    sequence=$2
+    receptor_pdb=$3
+    nb_kernel=$4
+    output_file=${5:-energies.npy}
+    ;;
+  6|7)
+    pose_dir=$1
+    pose_start=$2
+    pose_end=$3
+    sequence=$4
+    receptor_pdb=$5
+    nb_kernel=$6
+    output_file=${7:-energies.npy}
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac
 
 SCORE_BATCH_SIZE="${SCORE_BATCH_SIZE:-}"
 XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE:-false}"
@@ -60,7 +83,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-if (( pose_start > pose_end )); then
+if [[ -n "${pose_start}" && -n "${pose_end}" ]] && (( pose_start > pose_end )); then
   echo "POSE_START must be <= POSE_END" >&2
   exit 1
 fi
@@ -106,12 +129,17 @@ PYTHONPATH="${SCRIPT_DIR}/code${PYTHONPATH:+:${PYTHONPATH}}" \
 # --- Step 3: convert alaric arc poses → rotvec DOFs ---
 echo "Converting poses to rotvec DOFs..." >&2
 t_convert_start=$(date +%s%N)
-PYTHONPATH="${SCRIPT_DIR}/code${PYTHONPATH:+:${PYTHONPATH}}" \
-  "${PYTHON}" "${SCRIPT_DIR}/code/convert_poses.py" \
-  --pose-dir "${pose_dir}" \
-  --pose-range "${pose_start}" "${pose_end}" \
-  --sequence "${sequence}" \
+convert_cmd=(
+  "${PYTHON}" "${SCRIPT_DIR}/code/convert_poses.py"
+  --pose-dir "${pose_dir}"
+  --sequence "${sequence}"
   --output-prefix "${tmpdir}/poses"
+)
+if [[ -n "${pose_start}" && -n "${pose_end}" ]]; then
+  convert_cmd+=(--pose-range "${pose_start}" "${pose_end}")
+fi
+PYTHONPATH="${SCRIPT_DIR}/code${PYTHONPATH:+:${PYTHONPATH}}" \
+  "${convert_cmd[@]}"
 t_convert_end=$(date +%s%N)
 t_convert_ms=$(( (t_convert_end - t_convert_start) / 1000000 ))
 echo "convert_poses.py finished in ${t_convert_ms} ms" >&2

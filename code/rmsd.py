@@ -805,7 +805,7 @@ def write_output_chunks(
     try:
         with outputfile.open("w") as handle:
             for chunk in chunks:
-                np.savetxt(handle, track(chunk), fmt="%.6f")
+                np.savetxt(handle, track(chunk), fmt="%.3f")
     finally:
         progress.close()
 
