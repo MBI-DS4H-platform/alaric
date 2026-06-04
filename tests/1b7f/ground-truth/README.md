@@ -53,6 +53,48 @@ changed to deterministic first-index selection
 Equality means identical sorted physical pose rows -- independent of `.arc`
 file boundaries -- which is then frozen as the binary `.arc` checksum.
 
+## Re-bless on 2026-06-04: stacking-distance filter fix
+
+The original blessing above is **invalid for the `mask_a` axial-distance
+filter** and was replaced on 2026-06-04.
+
+Root cause: `stack.py`'s distance filter gated the axial stacking distance
+with `center_z = |center_vec[:, 2]|` (the raw lab-frame Z component) instead
+of the projection of `center_vec` onto the protein ring normal
+(`axial = |center_vec . protein_plane|`). The two are equal only when the
+protein ring normal happens to point along the lab Z axis; for a general
+complex the filter accepts/rejects the wrong poses, and the surviving pose
+count becomes a function of the input PDB's (arbitrary) orientation.
+
+Why the original blessing missed it: the cross-validation against crocodile
+was not independent *with respect to this bug* -- `crocodile/code/stack.py`
+contains the identical `center_z` line, so both implementations agreed on
+the wrong result and that agreement was frozen here.
+
+Physical validation of the fix (independent of any self-reference): on the
+full 1b7f frag6 stack (`UU`, dom1, resid 131, all conformers) the corrected
+filter recovers the `refe-best-fit` near-native pose
+(conformer 4005 / rotamer 17663 / grid (52,94,155), RMSD 0.749 A) that the
+old `center_z` filter discarded (its best was 1.343 A). See the project
+discussion of this fix; the corrected `mask_a` uses `axial`.
+
+Re-blessed checksums (corrected `axial` filter, same deterministic
+`--conformer-range 1 100 --rotamer-range 1 1000` selection):
+
+- `frag4-fwd`: 18,936,008 poses (was 16,536,049 under the bug; resid 214
+  ring normal is far from lab Z, so the effect is large, +14.7%).
+- `frag4-bwd`: 19,095,353 poses (was 18,837,845 under the bug; resid 256
+  ring normal is closer to lab Z, so the effect is small, +1.4%).
+
+The corrected output is deterministic: two independent regenerations
+produced identical checksums. Note this frag4 subset test
+(`--conformer-range 1 100`) is a byte-level regression guard and does *not*
+itself exercise native-pose recovery (the frag4 native conformer is outside
+range 1..100); the native-pose anchor is the frag6 full run described above.
+
+If you ever re-derive these from crocodile, patch crocodile's
+`center_z` -> `axial` first, or the old (buggy) checksums will return.
+
 ## Debugging a mismatch
 
 `compare-ground-truth.sh` / `stack-frag4-determinism.sh` only report
