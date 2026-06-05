@@ -158,7 +158,7 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
                 "input_result_python": python_path(dep_result_path(p["input"], location)),
                 "sequence": q(p["sequence"]),
                 "protein_path": data_file_path(p["__protein"], location),
-                "nb_kernel": q(p.get("nb_kernel", "jax")),
+                "nb_kernel": q(p.get("nb_kernel", "compiled")),
                 "score_output_path": shell_path(f"{output_dir}/score.npy"),
             }
         )

@@ -124,7 +124,9 @@ def normalize_action(name: str, path: Path, data: dict[str, Any]) -> ActionSpec:
         else:
             raise SchemaError(f"{path}: direction must be fwd/forward/bwd/backward/auto")
     if action == "score":
-        data.setdefault("nb_kernel", "jax")
+        data.setdefault("nb_kernel", "compiled")
+        if data["nb_kernel"] not in {"compiled", "jax"}:
+            raise SchemaError(f"{path}: nb_kernel must be compiled or jax")
     if action == "rmsd":
         data.setdefault("reference", "reference.pdb")
     if action == "filter":

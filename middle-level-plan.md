@@ -79,7 +79,7 @@ Auto-resolution rules, field by field:
 
 Non-auto defaults:
 - `margin` default `0.5`
-- `nb_kernel` default `jax`
+- `nb_kernel` default `compiled`
 - `rmsd.reference` default `reference.pdb`
 
 Cross-action validation:

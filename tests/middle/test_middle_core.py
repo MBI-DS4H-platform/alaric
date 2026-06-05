@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT))
 
 from alaric.mask import main as mask_main
 from alaric.middle.checksum import byte_checksum, write_array_sidecar
-from alaric.middle.deploy import deploy, generate_chunk_files
+from alaric.middle.deploy import deploy, generate_chunk_files, generate_run_sh
 from alaric.middle.graph import ActionGraph
 from alaric.middle.project import Project
 from alaric.middle.sigil import compute_project_sigils
@@ -129,6 +129,46 @@ def test_deploy_score_chunk_emits_independent_chunk_and_organize_scripts(tmp_pat
     assert "bash ./organize.sh" in run_sh
     # The per-chunk body must NOT be inlined into run.sh.
     assert "PoseReader.get_nposes" not in run_sh
+
+
+def test_score_deploy_defaults_to_compiled_kernel(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    project = Project.discover(tmp_path)
+    compute_project_sigils(project)
+
+    d = tmp_path / "frag4-score"
+    deploy("local", d)
+    body = (d / "run.sh").read_text()
+    assert "\n  compiled \\\n" in body
+    assert "\n  jax \\\n" not in body
+
+
+def test_score_chunk_deploy_defaults_to_compiled_kernel(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    project = Project.discover(tmp_path)
+    compute_project_sigils(project)
+
+    d = tmp_path / "frag4-score"
+    deploy("local-chunk", d, nchunks=2)
+    body = (d / "chunk1.sh").read_text()
+    assert "\n  compiled \\\n" in body
+    assert "\n  jax \\\n" not in body
+
+
+def test_remote_score_deploy_defaults_to_compiled_kernel(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    project = Project.discover(tmp_path)
+    compute_project_sigils(project)
+    action = ActionGraph(project).build()["frag4-score"]
+
+    body = generate_run_sh(project, action, "remote")
+    assert "\n  compiled \\\n" in body
+    assert "\n  jax \\\n" not in body
+
+    files = generate_chunk_files(project, action, "remote-chunk", nchunks=2)
+    chunk = files["chunk1.sh"]
+    assert "\n  compiled \\\n" in chunk
+    assert "\n  jax \\\n" not in chunk
 
 
 def test_remote_chunk_python_paths_are_expandvars_compatible(tmp_path: Path) -> None:
