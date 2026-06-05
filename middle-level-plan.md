@@ -216,39 +216,42 @@ on disk compressed**, but **~4× larger when decompressed** (hundreds of GB to >
 over potentially **millions of shard files**. Naively writing/reading that on a shared
 NFS/Lustre filesystem is catastrophic (metadata storms, partition exhaustion, slow random
 I/O); and any node-local scratch sized for the data must account for the **~4× decompression
-expansion** (next point). The remote deployer must therefore stage
-through **node-local scratch** and touch the shared FS as little as possible. Add an env var
-`ALARIC_REMOTE_SCRATCH_DIR` (node-local fast scratch, e.g. `$TMPDIR` / `/scratch` /
-`/ramscratch`; the experimental scripts used `/ramscratch`). The shared
-`ALARIC_REMOTE_RESULT_DIR` receives **only the final organized output**.
+expansion**.
 
-Remote run.sh strategy (anchor/grow producers):
-1. **Write unorganized shards to `$ALARIC_REMOTE_SCRATCH_DIR/<SIGIL>/`, never directly to
-   NFS.** Pass it as the backend `--output`.
-2. Use **`--unorganized-subdirs`** (anchor/grow) so shards are `unorganized-PID/RANDOM.arc.zst`
-   per-PID subdirs, avoiding a single directory with millions of entries (NFS metadata
-   killer).
-3. Tune **`--cache-size`** up to flush fewer/larger shards (fewer files), bounded by node
-   RAM; `--poselock` (anchor) caps concurrent pack/sort sections to bound memory.
-4. **Organize on the compute node.** If shards are already local, organize reads them in
-   place; if they had to live on NFS, use **`organize.py --local-tempdir`** (copy + decompress
-   shards into local scratch, read from there — read-once instead of random NFS reads). **Size
-   scratch for the decompressed footprint (~6 B/pose, ~4× the on-disk compressed size).** Use
-   **`--local-stagedir`** when the target partition cannot hold organized + unorganized
-   simultaneously (writes organized output to local scratch, deletes unorganized, then moves
-   it in). **Caveat:** `--local-stagedir` is non-atomic — a crash between unorganized-delete
-   and staged-commit loses both; recovery means regenerating shards from upstream. Tune
-   `--capacity` (peak RAM ≈ `capacity * nprocs * 4` bytes) and `--chunk-poses` to the node.
-5. **Only the final organized pose dir** (`poses-*.arc.zst`, plus adjacent `.INDEX` and
-   `.CHECKSUM` sidecars) is moved/rsync'd to `ALARIC_REMOTE_RESULT_DIR/<SIGIL>/` via the
-   partial-name→final-name protocol; scratch is then discarded.
+**Critical constraint — the unorganized pool lives on the SHARED FS, not node-local
+scratch.** Each `chunkN.sh` is an independent job (e.g. one `sbatch` per chunk), so the
+sibling chunks and the organize job run on **different nodes**. Node-local
+`ALARIC_REMOTE_SCRATCH_DIR` is therefore **not visible** across them — it cannot hold the
+shared unorganized pool. The pool is written to the shared
+`ALARIC_REMOTE_RESULT_DIR/<SIGIL>.partial/`, and atomically renamed to `<SIGIL>/` once
+organized. `ALARIC_REMOTE_SCRATCH_DIR` (e.g. `/scratch` / `/ramscratch`) is used **only by
+the organize step** for `--local-tempdir` / `--local-stagedir` staging (organize honors
+`$TMPDIR`).
 
-All of the above (`--output` target, `--unorganized-subdirs`, `--cache-size`, `--poselock`,
-`--local-tempdir`, `--local-stagedir`, `--capacity`, `--chunk-poses`) are **non-load-bearing**
-— organize canonicalizes the result, so none of them changes the checksum (with bucket-size
-and max-poses-per-file still pinned). They belong in the template as commented-out / env-tunable
-knobs, not in the sigil. The local deployer may use the same scratch strategy via `$TMPDIR`
-when a workstation's working partition is tight.
+Remote strategy (anchor/grow producers):
+1. **Each `chunkN.sh` writes unorganized shards to the shared
+   `$ALARIC_REMOTE_RESULT_DIR/<SIGIL>.partial/`** (`--output`). Different chunks run as
+   different processes/nodes; `--unorganized-subdirs` gives each a `unorganized-PID/` subdir
+   so there are no collisions and no single directory with millions of entries (NFS metadata
+   killer). `--unorganized-subdirs` is active by default.
+2. NFS-friendliness is tuned via **commented, non-load-bearing knobs** in the template
+   (`--cache-size` ↑ → fewer/larger shards; `--nprocs`; `--poselock`).
+3. **`organize.sh`** organizes `<SIGIL>.partial/` in place, then the result is atomically
+   renamed to `<SIGIL>/` (+ `.INDEX`/`.CHECKSUM` sidecars). To minimize NFS I/O, the
+   template ships **commented** `--local-tempdir` (copy+decompress shards into node-local
+   scratch, read-once) and `--local-stagedir` (write organized output to scratch, then move
+   in — non-atomic; crash loses both), with a commented `export TMPDIR="$ALARIC_REMOTE_SCRATCH_DIR"`
+   to point that staging at node-local scratch. Size scratch for the decompressed footprint
+   (~6 B/pose, ~4× on-disk).
+
+**Non-load-bearing knobs must be present in the chunk templates in commented-out form**
+(spec: middle-level.txt:153), via a bash array expanded with the `set -u`-safe idiom
+`${opts[@]+"${opts[@]}"}` (older HPC bash errors on empty `"${opts[@]}"`). The set
+(`--unorganized-subdirs` [active], `--cache-size`, `--poselock`, `--nprocs`,
+`--local-tempdir`, `--local-stagedir`, `--capacity`, `--chunk-poses`) is non-load-bearing —
+organize canonicalizes the result, so none changes the checksum (bucket-size and
+max-poses-per-file stay pinned, active). The local deployer keeps its pool under
+`CACHE/results/<SIGIL>` and may use `$TMPDIR` staging when a workstation partition is tight.
 
 Sigil and lifecycle invariants:
 - Sigil part 1: resolved load-bearing params excluding dependency fields and `__file` metadata
