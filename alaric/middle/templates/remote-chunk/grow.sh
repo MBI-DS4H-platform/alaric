@@ -13,6 +13,11 @@ print(PoseReader.get_nposes(os.path.expandvars({{ input_result_python }})))
 PY
 )
 read FIRST LAST < <(chunk_range "$TOTAL" "$IDX" "$NCHUNKS")
+# Non-load-bearing tuning knobs (uncomment to override; they never change the result):
+grow_opts=(
+#  --nprocs 8
+#  --cache-size 100000000
+)
 {{ python }} {{ alaric_dir }}/grow.py \
   --source-poses {{ input_result_path }} \
   --source-sequence {{ source_sequence }} \
@@ -25,6 +30,6 @@ read FIRST LAST < <(chunk_range "$TOTAL" "$IDX" "$NCHUNKS")
   --bucket-size 16 \
   --pose-range "$FIRST" "$LAST" \
   --unorganized-subdirs \
-  ${ALARIC_GROW_EXTRA_ARGS:-}
+  ${grow_opts[@]+"${grow_opts[@]}"}
 ### ORGANIZE ###
 {{ organize_command }}

@@ -8,6 +8,12 @@ chunk_range() {
 }
 TOTAL={{ nconformers }}
 read FIRST LAST < <(chunk_range "$TOTAL" "$IDX" "$NCHUNKS")
+# Non-load-bearing tuning knobs (uncomment to override; they never change the result):
+anchor_opts=(
+#  --nprocs 8
+#  --cache-size 100000000
+#  --poselock 4
+)
 {{ python }} {{ alaric_dir }}/anchor.py \
   --protein {{ protein_path }} \
   --resid {{ resid }} \
@@ -21,6 +27,6 @@ read FIRST LAST < <(chunk_range "$TOTAL" "$IDX" "$NCHUNKS")
   --bucket-size 16 \
   --conformer-range "$FIRST" "$LAST" \
   --unorganized-subdirs \
-  ${ALARIC_ANCHOR_EXTRA_ARGS:-}
+  ${anchor_opts[@]+"${anchor_opts[@]}"}
 ### ORGANIZE ###
 {{ organize_command }}

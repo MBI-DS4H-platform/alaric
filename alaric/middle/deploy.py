@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from .backend import render_template, template_context
+from .checksum import byte_checksum
 from .errors import MiddleError
 from .graph import ActionGraph
 from .project import Project
@@ -19,8 +20,6 @@ from .schema import DEPENDENCY_FIELDS, OUTPUT_KIND
 #   grow                 -> source poses (--pose-range)
 #   score                -> source poses (POSE_START/POSE_END)
 CHUNKABLE = {"anchor", "anchor-test", "grow", "score"}
-# Pose-producing actions whose output dir is staged through scratch on remote.
-_POSE_ACTIONS = {"anchor", "anchor-test", "grow"}
 # Separates the per-chunk body from the organize/finalize body in chunk templates.
 ORGANIZE_DELIM = "### ORGANIZE ###"
 # Remote env vars that are defined in the *local* deployer environment and must be
@@ -132,19 +131,22 @@ def _prologue(local: bool, sigil: str) -> list[str]:
 
 
 def _compute_dirs(action: ResolvedAction, sigil: str, local: bool) -> tuple[str, str, list[str]]:
-    """Return (output_dir, final_dir, setup_lines)."""
+    """Return (output_dir, final_dir, setup_lines).
+
+    Remote: the (unorganized) output pool lives on the **shared** result filesystem at
+    ``$ALARIC_REMOTE_RESULT_DIR/<sigil>.partial`` — NOT on ``$ALARIC_REMOTE_SCRATCH_DIR``,
+    which is node-local and therefore not visible to the other SLURM nodes that run the
+    sibling chunk jobs and the organize job. The organize step stages *its own* reads/writes
+    to node-local scratch via ``--local-tempdir`` / ``--local-stagedir`` (commented knobs).
+    The completed pool is atomically renamed ``.partial`` -> final.
+    """
     if local:
         output_dir = f"../CACHE/results/{sigil}"
         setup = [f"rm -rf {output_dir}", f"mkdir -p {output_dir} ../CACHE/checksum"]
         return output_dir, output_dir, setup
     final_dir = f"${{ALARIC_REMOTE_RESULT_DIR:?}}/{sigil}"
-    if action.action in _POSE_ACTIONS:
-        scratch = f"${{ALARIC_REMOTE_SCRATCH_DIR:-${{TMPDIR:-/tmp}}}}/{sigil}"
-        output_dir = scratch
-        setup = [f"rm -rf {scratch} {final_dir}.partial", f"mkdir -p {scratch} ${{ALARIC_REMOTE_RESULT_DIR:?}}"]
-    else:
-        output_dir = f"${{ALARIC_REMOTE_RESULT_DIR:?}}/{sigil}.partial"
-        setup = [f"rm -rf {output_dir} {final_dir}", f"mkdir -p {output_dir} ${{ALARIC_REMOTE_RESULT_DIR:?}}"]
+    output_dir = f"{final_dir}.partial"
+    setup = [f"rm -rf {output_dir} {final_dir}", f"mkdir -p {output_dir} ${{ALARIC_REMOTE_RESULT_DIR:?}}"]
     return output_dir, final_dir, setup
 
 
@@ -174,26 +176,15 @@ def _finalize_lines(
     lines = [_sidecar_command(result_kind, output_dir, sigil, local=local, alaric_dir=alaric_dir)]
     if local:
         return lines
-    if action.action in _POSE_ACTIONS:
+    # output_dir is "<final>.partial"; atomically promote it (and its pose sidecars) to final.
+    if result_kind == "pose":
         lines.extend(
             [
-                f"mv {output_dir}.INDEX {final_dir}.partial.INDEX",
-                f"mv {output_dir}.CHECKSUM {final_dir}.partial.CHECKSUM",
-                f"mv {output_dir} {final_dir}.partial",
-                f"mv {final_dir}.partial {final_dir}",
-                f"mv {final_dir}.partial.INDEX {final_dir}.INDEX",
-                f"mv {final_dir}.partial.CHECKSUM {final_dir}.CHECKSUM",
+                f"mv {output_dir}.INDEX {final_dir}.INDEX",
+                f"mv {output_dir}.CHECKSUM {final_dir}.CHECKSUM",
             ]
         )
-    else:
-        if result_kind == "pose":
-            lines.extend(
-                [
-                    f"mv {output_dir}.INDEX {final_dir}.INDEX",
-                    f"mv {output_dir}.CHECKSUM {final_dir}.CHECKSUM",
-                ]
-            )
-        lines.append(f"mv {output_dir} {final_dir}")
+    lines.append(f"mv {output_dir} {final_dir}")
     return lines
 
 
@@ -339,6 +330,35 @@ def _clear_stale_scripts(action_dir: Path) -> None:
             old.unlink()
 
 
+def _remote_push(*, host: str, action, sigil: str, files: dict[str, str], file_fields: dict[str, Path]) -> None:
+    """Ship the generated scripts and DATA file params to the remote.
+
+    DATA is a **global, content-addressed store** shared by every project/deployment:
+    ``$ALARIC_REMOTE_DEPLOYMENT_DIR/DATA/<checksum>``. Each file param is uploaded there only
+    if its checksum blob is not already present (dedup), uploaded atomically (temp + rename),
+    and then **hardlinked** into this action's deployment dir under its filename — which the
+    generated scripts reference as ``./<filename>``.
+    """
+    deploy_root = os.environ["ALARIC_REMOTE_DEPLOYMENT_DIR"].rstrip("/")
+    dest = f"{deploy_root}/{sigil}"
+    global_data = f"{deploy_root}/DATA"
+
+    subprocess.run(["ssh", host, "mkdir", "-p", dest, global_data], check=True)
+    payload = [str(action.path / name) for name in files]
+    subprocess.run(["scp", *payload, f"{host}:{dest}/"], check=True)
+
+    for field, src_path in sorted(file_fields.items()):
+        checksum = byte_checksum(src_path)
+        blob = f"{global_data}/{checksum}"
+        present = subprocess.run(["ssh", host, "test", "-e", blob]).returncode == 0
+        if not present:
+            tmp = f"{blob}.{os.getpid()}.partial"
+            subprocess.run(["scp", str(src_path), f"{host}:{tmp}"], check=True)
+            subprocess.run(["ssh", host, "mv", "-f", tmp, blob], check=True)
+        # Hardlink the content-addressed blob into the deployment dir under its filename.
+        subprocess.run(["ssh", host, "ln", "-f", blob, f"{dest}/{src_path.name}"], check=True)
+
+
 def deploy(deployer: str, action_dir: str | Path = ".", nchunks: int | None = None) -> None:
     if deployer not in {"local", "local-chunk", "remote", "remote-chunk"}:
         raise MiddleError(f"unsupported deployer: {deployer}")
@@ -385,24 +405,7 @@ def deploy(deployer: str, action_dir: str | Path = ".", nchunks: int | None = No
         os.chmod(path, 0o755)
 
     if is_remote:
-        host = os.environ["ALARIC_REMOTE_HOST"]
-        deploy_root = os.environ["ALARIC_REMOTE_DEPLOYMENT_DIR"].rstrip("/")
-        dest = f"{deploy_root}/{sigil}"
-        data_dest = f"{deploy_root}/DATA"
-        # DATA file params (PDBs) the scripts reference as ../DATA/<filename>. They live in
-        # the local project's DATA/ and must be shipped to the remote deployment DATA/.
-        data_files = []
-        for key, value in resolved_action.params.items():
-            if not key.startswith("__"):
-                continue
-            src = project.data_dir / str(value)
-            if src.is_file():
-                data_files.append(str(src))
-        subprocess.run(["ssh", host, "mkdir", "-p", dest, data_dest], check=True)
-        payload = [str(action.path / name) for name in files]
-        subprocess.run(["scp", *payload, f"{host}:{dest}/"], check=True)
-        if data_files:
-            subprocess.run(["scp", *data_files, f"{host}:{data_dest}/"], check=True)
+        _remote_push(host=os.environ["ALARIC_REMOTE_HOST"], action=action, sigil=sigil, files=files, file_fields=resolved_action.file_fields)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -13,6 +13,8 @@ print(PoseReader.get_nposes(os.path.expandvars({{ input_result_python }})))
 PY
 )
 read FIRST LAST < <(chunk_range "$TOTAL" "$IDX" "$NCHUNKS")
+# Non-load-bearing tuning knobs (uncomment to override; they never change the result):
+#   export SCORE_BATCH_SIZE=100000
 mkdir -p "$PWD/chunks/chunk-${IDX}"
 bash {{ alaric_dir }}/score.sh \
   {{ score_exclude_args }} \

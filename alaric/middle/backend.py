@@ -45,6 +45,19 @@ def result_file(dep: ResolvedAction, location: str) -> str:
     return base
 
 
+def data_file_path(filename: str, location: str) -> str:
+    """Path to a DATA file param in a generated script.
+
+    Local: read straight from the project's ``DATA/`` dir. Remote: the deployer uploads the
+    file to a content-addressed global store (``$DEPLOYMENT_DIR/DATA/<checksum>``) and
+    hardlinks it into the deployment dir under its filename, so the script references it
+    relative to its own cwd.
+    """
+    if location == "remote":
+        return q(f"./{filename}")
+    return q(f"../DATA/{filename}")
+
+
 def exclude_args(values: list[str], flag: str = "--pdb-exclude") -> str:
     if not values:
         return ""
@@ -60,9 +73,21 @@ def python_bin() -> str:
 
 
 def organize_command(alaric_dir: str, output_dir: str) -> str:
+    # --compress and --max-poses-per-file are kept active (compression always on; max-poses
+    # is the pinned, non-load-bearing layout knob). The remaining non-load-bearing knobs are
+    # present but commented; uncommenting them never changes the canonical result.
     return (
+        "# Non-load-bearing organize knobs (uncomment to tune; never change the result):\n"
+        '#   export TMPDIR="${ALARIC_REMOTE_SCRATCH_DIR:?}"   # stage --local-* to node-local scratch\n'
+        "organize_opts=(\n"
+        "#  --local-tempdir       # copy+decompress shards to local scratch before reading (fewer NFS reads)\n"
+        "#  --local-stagedir      # write organized output to local scratch, then move it in (tight partitions)\n"
+        "#  --nprocs 8\n"
+        "#  --capacity 500000000\n"
+        "#  --chunk-poses 1000000\n"
+        ")\n"
         f"{python_bin()} {alaric_dir}/organize.py {shell_path(output_dir)} "
-        "--compress --max-poses-per-file 100000000 ${ALARIC_ORGANIZE_EXTRA_ARGS:-}"
+        '--compress --max-poses-per-file 100000000 ${organize_opts[@]+"${organize_opts[@]}"}'
     )
 
 
@@ -79,7 +104,7 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
         dihedral = p["dihedral"]
         context.update(
             {
-                "protein_path": q(f"../DATA/{p['__protein']}"),
+                "protein_path": data_file_path(p["__protein"], location),
                 "resid": q(p["resid"]),
                 "sequence": q(p["sequence"]),
                 "dihedral_args": dihedral if isinstance(dihedral, str) else " ".join(q(v) for v in dihedral),
@@ -115,7 +140,7 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
                 "input_result_path": shell_path(dep_result_path(p["input"], location)),
                 "input_result_python": python_path(dep_result_path(p["input"], location)),
                 "sequence": q(p["sequence"]),
-                "protein_path": q(f"../DATA/{p['__protein']}"),
+                "protein_path": data_file_path(p["__protein"], location),
                 "nb_kernel": q(p.get("nb_kernel", "jax")),
                 "score_output_path": shell_path(f"{output_dir}/score.npy"),
             }
@@ -124,7 +149,7 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
         context.update(
             {
                 "input_result_path": shell_path(dep_result_path(p["input"], location)),
-                "reference_path": q(f"../DATA/{p['__reference']}"),
+                "reference_path": data_file_path(p["__reference"], location),
                 "fragment": q(p["fragment"]),
                 "score_output_path": shell_path(f"{output_dir}/score.npy"),
                 "exclude_args": exclude_args(p.get("exclude", [])),
