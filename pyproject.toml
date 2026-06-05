@@ -4,15 +4,15 @@ version = "0.1.0"
 description = "RNA fragment docking and scoring pipeline"
 requires-python = ">=3.13"
 dependencies = [
-    "numpy>=2.0",
+    "numpy",
     "scipy",
     "zstandard",
     "ruamel.yaml",
     "tqdm",
     "biopython",
     "pyyaml",
-    "jax",
     "seamless-core>=0.1.4",
+    "sortednp",
 ]
 
 [project.scripts]
