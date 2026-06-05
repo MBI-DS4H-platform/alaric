@@ -2,4 +2,5 @@
   {{ input1_result_path }} \
   {{ input2_result_path }} \
   {{ output_path }} \
-  --force
+  --force \
+  --compress

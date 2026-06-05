@@ -12,6 +12,7 @@ sys.path.insert(0, str(HERE / ".alaric"))
 
 from organize import organize_pose_dir  # noqa: E402
 from poses import HEADER_SIZE, discover_organized, pack_pool, read_arc_file, write_arc_file  # noqa: E402
+from identity_filter import write_identity_pose_dir  # noqa: E402
 
 
 def test_compressed_organized_arc_records_frame_content_size(tmp_path: Path) -> None:
@@ -42,3 +43,35 @@ def test_compressed_organized_arc_records_frame_content_size(tmp_path: Path) -> 
         _M, O, _C, P, _bucket_size = read_arc_file(path)
         expected_size = HEADER_SIZE + 10 * len(O) + 6 * len(P)
         assert zstd.frame_content_size(path.read_bytes()) == expected_size
+
+
+def test_identity_filter_can_write_compressed_pose_output(tmp_path: Path) -> None:
+    pose_dir = tmp_path / "identity"
+    identity = {
+        ((0, 0, 0), (0, 0, 0)): np.array([0, 1], dtype=np.uint32),
+        ((0, 0, 0), (1, 0, 0)): np.array([2], dtype=np.uint32),
+    }
+
+    lookup = write_identity_pose_dir(
+        identity,
+        pose_dir,
+        bucket_size=16,
+        max_poses_per_file=100,
+        compress=True,
+    )
+
+    organized = discover_organized(pose_dir)
+    assert [path.name for path in organized] == ["poses-1.arc.zst"]
+    M, O, C, P, bucket_size = read_arc_file(organized[0])
+    np.testing.assert_array_equal(M, np.array([0, 0, 0], dtype=np.int16))
+    np.testing.assert_array_equal(
+        O,
+        np.array([[0, 0, 0], [1, 0, 0]], dtype=np.int16),
+    )
+    np.testing.assert_array_equal(C, np.array([2, 1], dtype=np.uint32))
+    np.testing.assert_array_equal(
+        P,
+        np.array([[0, 0, 0], [0, 1, 0], [0, 2, 1]], dtype=np.uint16),
+    )
+    assert bucket_size == 16
+    assert lookup[((0, 0, 0), (1, 0, 0))][0] == 2

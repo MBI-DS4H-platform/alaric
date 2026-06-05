@@ -532,6 +532,7 @@ def write_identity_pose_dir(
     *,
     bucket_size: int,
     max_poses_per_file: int,
+    compress: bool = False,
 ) -> dict[PoseKey, tuple[int, np.ndarray]]:
     if max_poses_per_file <= 0 or max_poses_per_file > MAX_NP:
         raise ValueError("--max-poses-per-file must be in 1..2**32-1")
@@ -555,13 +556,15 @@ def write_identity_pose_dir(
                 for keys, offset_index in current_parts
             ]
             P = np.concatenate(P_parts, axis=0) if P_parts else np.empty((0, 3), dtype=np.uint16)
+            suffix = ".arc.zst" if compress else ".arc"
             write_arc_file(
-                output_dir / f"poses-{file_index}.arc",
+                output_dir / f"poses-{file_index}{suffix}",
                 np.array(M, dtype=np.int16),
                 np.array(current_offsets, dtype=np.int16),
                 np.array(current_counts, dtype=np.uint32),
                 P,
                 bucket_size=bucket_size,
+                zstd=compress,
             )
             file_index += 1
             current_offsets = []
@@ -674,6 +677,7 @@ def run_identity_filter(
     force: bool = False,
     max_poses_per_file: int = 100_000_000,
     readahead: int = 20,
+    compress: bool = False,
 ) -> dict[str, int]:
     print("Indexing pose directories...", file=sys.stderr)
     entries1 = _read_file_index(pose_dir1)
@@ -724,6 +728,7 @@ def run_identity_filter(
         output_dir,
         bucket_size=bucket_size1,
         max_poses_per_file=max_poses_per_file,
+        compress=compress,
     )
     print("Building mapping array 1...", file=sys.stderr)
     map1 = build_mapping(kept1, global_lookup, readahead=readahead)
@@ -781,6 +786,11 @@ def parse_args() -> argparse.Namespace:
             "building the identity set. Lower this on memory-constrained machines."
         ),
     )
+    parser.add_argument(
+        "--compress",
+        action="store_true",
+        help="Write output organized poses-*.arc.zst files instead of poses-*.arc.",
+    )
     return parser.parse_args()
 
 
@@ -793,6 +803,7 @@ def main() -> None:
         force=args.force,
         max_poses_per_file=args.max_poses_per_file,
         readahead=args.readahead,
+        compress=args.compress,
     )
 
 
