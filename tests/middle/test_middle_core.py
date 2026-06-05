@@ -37,6 +37,7 @@ def _write_project(root: Path) -> None:
     (data / "anchor.yaml").write_text("angle: 30\ndihedral: 45 -45\n")
     (data / "pdbcode.txt").write_text("1abc\n")
     (data / "dom-aa.pdb").write_text("HEADER test\n")
+    (data / "dom.pdb").write_text("HEADER test plain\n")
 
     def action(name: str, spec: dict) -> None:
         path = root / name

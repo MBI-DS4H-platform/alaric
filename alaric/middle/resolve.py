@@ -103,9 +103,17 @@ def resolve_exclude(project: Project, value: Any) -> list[str]:
     raise ResolveError("cannot resolve exclude:auto")
 
 
-def resolve_protein(project: Project, value: Any) -> tuple[str, Path]:
+def resolve_protein(project: Project, value: Any, *, all_atom: bool) -> tuple[str, Path]:
+    """Resolve a protein name to its DATA file.
+
+    ``all_atom=True`` selects ``<name>-aa.pdb`` (all heavy atoms, for ATTRACT scoring);
+    ``all_atom=False`` selects the plain ``<name>.pdb`` (original residue numbering, which
+    anchor's ``--resid`` refers to). The required file must exist — there is deliberately no
+    fallback to the other variant, since they carry different residue numbering.
+    """
     name = "protein" if value == "auto" else str(value)
-    path = project.data_dir / f"{name}-aa.pdb"
+    suffix = "-aa.pdb" if all_atom else ".pdb"
+    path = project.data_dir / f"{name}{suffix}"
     if not path.is_file():
         raise ResolveError(f"protein file not found: {path}")
     return name, path
@@ -177,12 +185,11 @@ def resolve_action(
     if p.get("exclude") == "auto" or "exclude" in p:
         p["exclude"] = resolve_exclude(project, p["exclude"])
     if "protein" in p:
-        protein, path = resolve_protein(project, p["protein"])
+        # anchor stacks on a residue selected by --resid in the ORIGINAL numbering, so it
+        # needs the plain <name>.pdb; scoring needs the all-atom <name>-aa.pdb. No fallback.
+        all_atom = action not in {"anchor", "anchor-test"}
+        protein, path = resolve_protein(project, p["protein"], all_atom=all_atom)
         p["protein"] = protein
-        if action in {"anchor", "anchor-test"}:
-            full_residue_path = project.data_dir / f"{protein}.pdb"
-            if full_residue_path.is_file():
-                path = full_residue_path
         p["__protein"] = path.name
         files["protein"] = path
     if action in {"anchor", "anchor-test"}:
