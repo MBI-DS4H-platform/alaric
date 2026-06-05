@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shlex
+import re
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,14 @@ def shell_path(value: str | Path) -> str:
     if "$" in text:
         return text
     return q(text)
+
+
+_SHELL_REQUIRED_VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):\?\}")
+
+
+def python_path(value: str | Path) -> str:
+    text = _SHELL_REQUIRED_VAR.sub(r"${\1}", str(value))
+    return repr(text)
 
 
 def dep_result_path(dep: ResolvedAction, location: str) -> str:
@@ -64,7 +73,7 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
         "alaric_dir": alaric_dir,
         "python": python_bin(),
         "output_path": shell_path(output_dir),
-        "output_path_python": repr(output_dir),
+        "output_path_python": python_path(output_dir),
     }
     if action.action in {"anchor", "anchor-test"}:
         dihedral = p["dihedral"]
@@ -88,7 +97,7 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
         context.update(
             {
                 "input_result_path": shell_path(dep_result_path(source, location)),
-                "input_result_python": repr(dep_result_path(source, location)),
+                "input_result_python": python_path(dep_result_path(source, location)),
                 "source_sequence": q(final_sequence(source)),
                 "target_sequence": q(p["sequence"]),
                 "direction": q(p["direction"]),
@@ -104,7 +113,7 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
             {
                 "score_exclude_args": score_exclude_args(p.get("exclude", [])),
                 "input_result_path": shell_path(dep_result_path(p["input"], location)),
-                "input_result_python": repr(dep_result_path(p["input"], location)),
+                "input_result_python": python_path(dep_result_path(p["input"], location)),
                 "sequence": q(p["sequence"]),
                 "protein_path": q(f"../DATA/{p['__protein']}"),
                 "nb_kernel": q(p.get("nb_kernel", "jax")),
