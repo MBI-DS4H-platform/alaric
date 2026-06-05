@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT))
 
 from alaric.mask import main as mask_main
 from alaric.middle.checksum import byte_checksum, write_array_sidecar
-from alaric.middle.deploy import deploy, generate_run_sh
+from alaric.middle.deploy import deploy, generate_chunk_files
 from alaric.middle.graph import ActionGraph
 from alaric.middle.project import Project
 from alaric.middle.sigil import compute_project_sigils
@@ -101,15 +101,33 @@ def test_sigil_is_deterministic_and_writes_parameters(tmp_path: Path) -> None:
     assert (tmp_path / "CACHE" / "parameters" / first["frag4-score"]).is_file()
 
 
-def test_deploy_score_chunk_script_discovers_and_concatenates(tmp_path: Path) -> None:
+def test_deploy_score_chunk_emits_independent_chunk_and_organize_scripts(tmp_path: Path) -> None:
     _write_project(tmp_path)
     project = Project.discover(tmp_path)
     compute_project_sigils(project)
-    deploy("local-chunk", tmp_path / "frag4-score", nchunks=3)
-    run_sh = (tmp_path / "frag4-score" / "run.sh").read_text()
-    assert "PoseReader.get_nposes" in run_sh
-    assert '"$FIRST"' in run_sh and '"$LAST"' in run_sh
-    assert "np.concatenate" in run_sh
+    d = tmp_path / "frag4-score"
+    deploy("local-chunk", d, nchunks=3)
+
+    # Each chunk is an independent, parallel-runnable script that discovers its own range.
+    for i in (1, 2, 3):
+        body = (d / f"chunk{i}.sh").read_text()
+        assert f"IDX={i}" in body
+        assert "PoseReader.get_nposes" in body
+        assert '"$FIRST"' in body and '"$LAST"' in body
+        assert "np.concatenate" not in body
+
+    # The organize step (concatenation) lives in its own script.
+    organize = (d / "organize.sh").read_text()
+    assert "np.concatenate" in organize
+
+    # run.sh is only a convenience wrapper: chunks one-by-one, then organize.
+    run_sh = (d / "run.sh").read_text()
+    assert "./check.sh" in run_sh
+    for i in (1, 2, 3):
+        assert f"bash ./chunk{i}.sh" in run_sh
+    assert "bash ./organize.sh" in run_sh
+    # The per-chunk body must NOT be inlined into run.sh.
+    assert "PoseReader.get_nposes" not in run_sh
 
 
 def test_remote_chunk_python_paths_are_expandvars_compatible(tmp_path: Path) -> None:
@@ -118,10 +136,11 @@ def test_remote_chunk_python_paths_are_expandvars_compatible(tmp_path: Path) -> 
     compute_project_sigils(project)
     action = ActionGraph(project).build()["frag4-score"]
 
-    run_sh = generate_run_sh(project, action, "remote-chunk", nchunks=3)
+    files = generate_chunk_files(project, action, "remote-chunk", nchunks=3)
+    body = "\n".join(files.values())
 
-    assert "os.path.expandvars('${ALARIC_REMOTE_RESULT_DIR}/" in run_sh
-    assert "os.path.expandvars('${ALARIC_REMOTE_RESULT_DIR:?}" not in run_sh
+    assert "os.path.expandvars('${ALARIC_REMOTE_RESULT_DIR}/" in body
+    assert "os.path.expandvars('${ALARIC_REMOTE_RESULT_DIR:?}" not in body
 
 
 def test_score_add_and_mask_validate_shapes(tmp_path: Path) -> None:

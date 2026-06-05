@@ -1,4 +1,5 @@
 NCHUNKS={{ nchunks }}
+IDX={{ chunk_index }}
 chunk_range() {
   local total=$1 idx=$2 n=$3
   local first=$(( (total * (idx - 1)) / n + 1 ))
@@ -11,20 +12,18 @@ import os
 print(PoseReader.get_nposes(os.path.expandvars({{ input_result_python }})))
 PY
 )
-mkdir -p "$PWD/chunks"
-for IDX in $(seq 1 "$NCHUNKS"); do
-  read FIRST LAST < <(chunk_range "$TOTAL" "$IDX" "$NCHUNKS")
-  mkdir -p "$PWD/chunks/chunk-${IDX}"
-  bash {{ alaric_dir }}/score.sh \
-    {{ score_exclude_args }} \
-    {{ input_result_path }} \
-    "$FIRST" \
-    "$LAST" \
-    {{ sequence }} \
-    {{ protein_path }} \
-    {{ nb_kernel }} \
-    "$PWD/chunks/chunk-${IDX}/score.npy"
-done
+read FIRST LAST < <(chunk_range "$TOTAL" "$IDX" "$NCHUNKS")
+mkdir -p "$PWD/chunks/chunk-${IDX}"
+bash {{ alaric_dir }}/score.sh \
+  {{ score_exclude_args }} \
+  {{ input_result_path }} \
+  "$FIRST" \
+  "$LAST" \
+  {{ sequence }} \
+  {{ protein_path }} \
+  {{ nb_kernel }} \
+  "$PWD/chunks/chunk-${IDX}/score.npy"
+### ORGANIZE ###
 {{ python }} - <<"PY"
 from pathlib import Path
 import os
