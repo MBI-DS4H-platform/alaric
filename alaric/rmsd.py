@@ -14,7 +14,7 @@ from typing import Iterator
 import numpy as np
 from tqdm import tqdm
 
-_ALARIC_DIR = Path(__file__).with_name("alaric")
+_ALARIC_DIR = Path(__file__).resolve().parent
 if str(_ALARIC_DIR) not in sys.path:
     sys.path.insert(0, str(_ALARIC_DIR))
 

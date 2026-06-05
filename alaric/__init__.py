@@ -1,0 +1,1 @@
+"""Alaric Python package."""
