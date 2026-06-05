@@ -16,11 +16,11 @@ scoring/
 tests/*/ground-truth/*/energies.npy
 
 # Generated pose-pool outputs from local stack/grow runs.
-frag4-bwd/
-frag4-fwd/
-frag4-merged/
-frag4-identity/
-frag4-det-*/
+tests/1b7f/frag4-bwd/
+tests/1b7f/frag4-fwd/
+tests/1b7f/frag4-merged/
+tests/1b7f/frag4-identity/
+tests/1b7f/frag4-det-*/
 poses-*.arc
 poses-*.arc.zst
 unorganized-*.arc
