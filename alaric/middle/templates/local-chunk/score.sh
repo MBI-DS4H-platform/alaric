@@ -7,7 +7,8 @@ chunk_range() {
 }
 TOTAL=$({{ python }} - <<"PY"
 from poses import PoseReader
-print(PoseReader.get_nposes({{ input_result_python }}))
+import os
+print(PoseReader.get_nposes(os.path.expandvars({{ input_result_python }})))
 PY
 )
 mkdir -p "$PWD/chunks"
@@ -26,10 +27,11 @@ for IDX in $(seq 1 "$NCHUNKS"); do
 done
 {{ python }} - <<"PY"
 from pathlib import Path
+import os
 import numpy as np
 chunks = sorted(Path("chunks").glob("chunk-*"), key=lambda p: int(p.name.split("-")[1]))
 arrays = [np.load(p / "score.npy") for p in chunks]
-out = Path({{ output_path_python }})
+out = Path(os.path.expandvars({{ output_path_python }}))
 out.mkdir(parents=True, exist_ok=True)
 np.save(out / "score.npy", np.concatenate(arrays) if arrays else np.empty((0,), dtype=float))
 PY

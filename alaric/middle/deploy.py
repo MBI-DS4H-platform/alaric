@@ -140,7 +140,8 @@ def generate_run_sh(project: Project, action: ResolvedAction, deployer: str, nch
                 location=location,
             )
         )
-    lines.append(_sidecar_command(_result_output_kind(action), output_dir, sigil, local=local))
+    result_kind = _result_output_kind(action)
+    lines.append(_sidecar_command(result_kind, output_dir, sigil, local=local))
     if not local:
         if action.action in {"anchor", "anchor-test", "grow"}:
             lines.extend(
@@ -154,6 +155,13 @@ def generate_run_sh(project: Project, action: ResolvedAction, deployer: str, nch
                 ]
             )
         else:
+            if result_kind == "pose":
+                lines.extend(
+                    [
+                        f"mv {output_dir}.INDEX {final_dir}.INDEX",
+                        f"mv {output_dir}.CHECKSUM {final_dir}.CHECKSUM",
+                    ]
+                )
             lines.extend([f"mv {output_dir} {final_dir}"])
     lines.append("")
     return "\n".join(lines)

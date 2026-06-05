@@ -7,7 +7,8 @@ chunk_range() {
 }
 TOTAL=$({{ python }} - <<"PY"
 from poses import PoseReader
-print(PoseReader.get_nposes({{ input_result_python }}))
+import os
+print(PoseReader.get_nposes(os.path.expandvars({{ input_result_python }})))
 PY
 )
 for IDX in $(seq 1 "$NCHUNKS"); do
