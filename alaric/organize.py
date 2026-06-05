@@ -29,6 +29,7 @@ from tqdm import tqdm
 from poses import (
     ARC_SUFFIX,
     ARC_ZSTD_SUFFIX,
+    HEADER_SIZE,
     MAGIC,
     MAX_NO,
     MAX_NP,
@@ -390,6 +391,10 @@ def _write_bucket(
     return sorted_origins
 
 
+def _arc_uncompressed_size(n_offsets: int, n_poses: int) -> int:
+    return HEADER_SIZE + 10 * int(n_offsets) + 6 * int(n_poses)
+
+
 def _sort_bucket_with_origins(
     bucket: np.ndarray,
     origins: np.ndarray | None,
@@ -500,7 +505,10 @@ def _write_group_layout(
         compressor = None
         if compress:
             assert zstd is not None
-            compressor = zstd.ZstdCompressor().stream_writer(raw_handle)
+            compressor = zstd.ZstdCompressor().stream_writer(
+                raw_handle,
+                size=_arc_uncompressed_size(len(O), int(C.sum(dtype=np.uint64))),
+            )
             output_handle = compressor
         try:
             _write_arc_header(

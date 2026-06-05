@@ -26,5 +26,5 @@ poses-*.arc.zst
 unorganized-*.arc
 unorganized-*.arc.zst
 .ORGANIZED-DONE
-tests/1b7f-project-anchor-test-run
-tests/1b7f-project-anchor-test-run-1000
+tests/1b7f-project-*/
+alaric.egg-info/

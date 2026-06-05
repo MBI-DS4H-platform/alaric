@@ -23,6 +23,10 @@ alaric-result-check = "alaric.middle.result:check_main"
 alaric-result-download = "alaric.middle.result:download_main"
 alaric-result-upload = "alaric.middle.result:upload_main"
 
+[tool.setuptools.packages.find]
+include = ["alaric*"]
+exclude = ["fraglib*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

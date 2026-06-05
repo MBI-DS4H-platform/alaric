@@ -12,6 +12,13 @@ def q(value: str | Path | int | float) -> str:
     return shlex.quote(str(value))
 
 
+def shell_path(value: str | Path) -> str:
+    text = str(value)
+    if "$" in text:
+        return text
+    return q(text)
+
+
 def dep_result_path(dep: ResolvedAction, location: str) -> str:
     sigil = (dep.path / "sigil.txt").read_text().strip()
     if location == "remote":
@@ -45,7 +52,7 @@ def python_bin() -> str:
 
 def organize_command(alaric_dir: str, output_dir: str) -> str:
     return (
-        f"{python_bin()} {alaric_dir}/organize.py {q(output_dir)} "
+        f"{python_bin()} {alaric_dir}/organize.py {shell_path(output_dir)} "
         "--compress --max-poses-per-file 100000000 ${ALARIC_ORGANIZE_EXTRA_ARGS:-}"
     )
 
@@ -56,7 +63,8 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
         "action": action.action,
         "alaric_dir": alaric_dir,
         "python": python_bin(),
-        "output_path": q(output_dir),
+        "output_path": shell_path(output_dir),
+        "output_path_python": repr(output_dir),
     }
     if action.action in {"anchor", "anchor-test"}:
         dihedral = p["dihedral"]
@@ -79,7 +87,8 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
         source = p["input"]
         context.update(
             {
-                "input_result_path": q(dep_result_path(source, location)),
+                "input_result_path": shell_path(dep_result_path(source, location)),
+                "input_result_python": repr(dep_result_path(source, location)),
                 "source_sequence": q(final_sequence(source)),
                 "target_sequence": q(p["sequence"]),
                 "direction": q(p["direction"]),
@@ -94,55 +103,56 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
         context.update(
             {
                 "score_exclude_args": score_exclude_args(p.get("exclude", [])),
-                "input_result_path": q(dep_result_path(p["input"], location)),
+                "input_result_path": shell_path(dep_result_path(p["input"], location)),
+                "input_result_python": repr(dep_result_path(p["input"], location)),
                 "sequence": q(p["sequence"]),
                 "protein_path": q(f"../DATA/{p['__protein']}"),
                 "nb_kernel": q(p.get("nb_kernel", "jax")),
-                "score_output_path": q(f"{output_dir}/score.npy"),
+                "score_output_path": shell_path(f"{output_dir}/score.npy"),
             }
         )
     elif action.action == "rmsd":
         context.update(
             {
-                "input_result_path": q(dep_result_path(p["input"], location)),
+                "input_result_path": shell_path(dep_result_path(p["input"], location)),
                 "reference_path": q(f"../DATA/{p['__reference']}"),
                 "fragment": q(p["fragment"]),
-                "score_output_path": q(f"{output_dir}/score.npy"),
+                "score_output_path": shell_path(f"{output_dir}/score.npy"),
                 "exclude_args": exclude_args(p.get("exclude", [])),
             }
         )
     elif action.action == "score_add":
         context.update(
             {
-                "score_input1_path": q(result_file(p["score_input1"], location)),
-                "score_input2_path": q(result_file(p["score_input2"], location)),
-                "score_output_path": q(f"{output_dir}/score.npy"),
+                "score_input1_path": shell_path(result_file(p["score_input1"], location)),
+                "score_input2_path": shell_path(result_file(p["score_input2"], location)),
+                "score_output_path": shell_path(f"{output_dir}/score.npy"),
             }
         )
     elif action.action == "mask":
         context.update(
             {
-                "score_input_path": q(result_file(p["score_input"], location)),
+                "score_input_path": shell_path(result_file(p["score_input"], location)),
                 "threshold": q(p["threshold"]),
-                "mask_output_path": q(f"{output_dir}/mask.npy"),
+                "mask_output_path": shell_path(f"{output_dir}/mask.npy"),
             }
         )
     elif action.action == "filter":
-        context["input_result_path"] = q(dep_result_path(p["input"], location))
+        context["input_result_path"] = shell_path(dep_result_path(p["input"], location))
         context["filter_mode"] = "mask" if "mask_input" in p else "score"
         if "mask_input" in p:
-            context["mask_input_path"] = q(result_file(p["mask_input"], location))
+            context["mask_input_path"] = shell_path(result_file(p["mask_input"], location))
             context["score_input_path"] = '""'
             context["threshold"] = '""'
         else:
-            context["score_input_path"] = q(result_file(p["score_input"], location))
+            context["score_input_path"] = shell_path(result_file(p["score_input"], location))
             context["threshold"] = q(p["threshold"])
             context["mask_input_path"] = '""'
     elif action.action == "identity":
         context.update(
             {
-                "input1_result_path": q(dep_result_path(p["input1"], location)),
-                "input2_result_path": q(dep_result_path(p["input2"], location)),
+                "input1_result_path": shell_path(dep_result_path(p["input1"], location)),
+                "input2_result_path": shell_path(dep_result_path(p["input2"], location)),
             }
         )
     return context
