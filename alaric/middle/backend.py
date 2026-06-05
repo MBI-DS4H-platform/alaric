@@ -72,23 +72,40 @@ def python_bin() -> str:
     return '"${PYTHON:-python}"'
 
 
-def organize_command(alaric_dir: str, output_dir: str) -> str:
+def organize_command(alaric_dir: str, output_dir: str, location: str) -> str:
     # --compress and --max-poses-per-file are kept active (compression always on; max-poses
     # is the pinned, non-load-bearing layout knob). The remaining non-load-bearing knobs are
     # present but commented; uncommenting them never changes the canonical result.
-    return (
-        "# Non-load-bearing organize knobs (uncomment to tune; never change the result):\n"
-        '#   export TMPDIR="${ALARIC_REMOTE_SCRATCH_DIR:?}"   # stage --local-* to node-local scratch\n'
-        "organize_opts=(\n"
-        "#  --local-tempdir       # copy+decompress shards to local scratch before reading (fewer NFS reads)\n"
-        "#  --local-stagedir      # write organized output to local scratch, then move it in (tight partitions)\n"
-        "#  --nprocs 8\n"
-        "#  --capacity 500000000\n"
-        "#  --chunk-poses 1000000\n"
-        ")\n"
+    #
+    # On remote (the pool lives on a network FS), --local-tempdir and --local-stagedir are
+    # **active by default**: organize reads the unorganized shards from node-local scratch
+    # (--local-tempdir) and writes the organized output to node-local scratch (--local-stagedir),
+    # then bulk-moves it onto the FS — so NFS is touched only for the initial shard read and
+    # the final move, not random I/O during bucketing. TMPDIR points that staging at
+    # node-local scratch (size it for the decompressed input ~6 B/pose plus the organized
+    # output). NB: --local-stagedir is non-atomic (a crash between deleting the unorganized
+    # shards and committing the staged output loses both — fine for a regenerable chunk pool).
+    remote = location == "remote"
+    lines: list[str] = []
+    if remote:
+        lines.append('export TMPDIR="${ALARIC_REMOTE_SCRATCH_DIR:-${TMPDIR:-/tmp}}"')
+    lines.append("# Non-load-bearing organize knobs (uncomment to tune; never change the result):")
+    lines.append("organize_opts=(")
+    if remote:
+        lines.append("  --local-tempdir         # read shards from node-local scratch (avoids random NFS reads)")
+        lines.append("  --local-stagedir        # write organized output to node-local scratch, then bulk-move to the FS")
+    else:
+        lines.append("#  --local-tempdir")
+        lines.append("#  --local-stagedir")
+    lines.append("#  --nprocs 8")
+    lines.append("#  --capacity 500000000")
+    lines.append("#  --chunk-poses 1000000")
+    lines.append(")")
+    lines.append(
         f"{python_bin()} {alaric_dir}/organize.py {shell_path(output_dir)} "
         '--compress --max-poses-per-file 100000000 ${organize_opts[@]+"${organize_opts[@]}"}'
     )
+    return "\n".join(lines)
 
 
 def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str, location: str) -> dict[str, Any]:
@@ -114,7 +131,7 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
                 "nconformers": q(p.get("nconformers", "")),
                 "exclude_args": exclude_args(p.get("exclude", [])),
                 "exclude_python": repr(p.get("exclude", [])),
-                "organize_command": organize_command(alaric_dir, output_dir),
+                "organize_command": organize_command(alaric_dir, output_dir, location),
             }
         )
     elif action.action == "grow":
@@ -130,7 +147,7 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
                 "ovrmsd": q(p["ovrmsd"]),
                 "exclude_args": exclude_args(p.get("exclude", [])),
                 "exclude_python": repr(p.get("exclude", [])),
-                "organize_command": organize_command(alaric_dir, output_dir),
+                "organize_command": organize_command(alaric_dir, output_dir, location),
             }
         )
     elif action.action == "score":

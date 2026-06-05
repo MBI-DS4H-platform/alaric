@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -60,21 +62,42 @@ def write_array_sidecar(path: Path) -> str:
 
 
 def pose_member_checksum(path: Path) -> str:
+    # Trust the inline sidecar organize.py writes next to each member (sha256 of the
+    # uncompressed .arc content) — this avoids re-reading/re-decompressing the (large) pose
+    # file. Fall back to computing it for pose dirs produced without the sidecar.
+    base, _suffix = strip_compression_suffix(path.name)
+    sidecar = path.with_name(base + ".CHECKSUM")
+    if sidecar.is_file():
+        return read_sidecar(sidecar)
     return byte_checksum(path)
 
 
 def pose_index(pose_dir: Path) -> dict[str, str]:
-    members: dict[str, str] = {}
-    for path in sorted(pose_dir.rglob("*"), key=lambda p: p.as_posix()):
-        if not path.is_file():
-            continue
-        if path.name.startswith("poses-") and (
-            path.name.endswith(".arc") or path.name.endswith(".arc.zst")
-        ):
-            rel = path.relative_to(pose_dir).as_posix()
-            logical_name, _suffix = strip_compression_suffix(rel)
-            members[logical_name] = pose_member_checksum(path)
-    return members
+    paths = [
+        path
+        for path in sorted(pose_dir.rglob("*"), key=lambda p: p.as_posix())
+        if path.is_file()
+        and path.name.startswith("poses-")
+        and (path.name.endswith(".arc") or path.name.endswith(".arc.zst"))
+    ]
+
+    def _member(path: Path) -> tuple[str, str]:
+        rel = path.relative_to(pose_dir).as_posix()
+        logical_name, _suffix = strip_compression_suffix(rel)
+        return logical_name, pose_member_checksum(path)
+
+    # The members are independent files; for a large organized pose dir on a network FS this
+    # checksum pass dominates organize.sh's post-organize time. zstd decompression and
+    # hashlib both release the GIL, so a thread pool gives real parallelism (CPU) and overlaps
+    # NFS reads. ``ThreadPoolExecutor.map`` preserves input order, and ``serialize(plain)``
+    # sorts keys anyway, so the resulting INDEX is byte-identical to the serial version.
+    # Worker count follows os.cpu_count(), which honors the SLURM allocation via the
+    # PYTHON_CPU_COUNT exported in the generated scripts.
+    workers = min(len(paths), max(1, os.cpu_count() or 1))
+    if workers <= 1:
+        return dict(_member(path) for path in paths)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        return dict(executor.map(_member, paths))
 
 
 def write_pose_sidecars(pose_dir: Path) -> str:

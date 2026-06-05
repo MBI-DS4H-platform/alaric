@@ -9,6 +9,7 @@ consumers.
 from __future__ import annotations
 
 import argparse
+import hashlib
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
@@ -450,6 +451,34 @@ def _build_layout_groups(
     return groups
 
 
+class _HashingWriter:
+    """Tee writes to an inner handle while sha256-ing the (uncompressed) bytes.
+
+    Wrapping the write handle (the zstd stream-writer for ``.arc.zst``, or the raw file for
+    ``.arc``) captures the uncompressed ``.arc`` content in the same pass that writes the
+    file, so organize can emit a ``poses-X.arc.CHECKSUM`` sidecar without a second read. The
+    value is the zstd-transparent member checksum the middle level expects (plain sha256 of
+    the uncompressed bytes), so result/INDEX checksums are unchanged.
+    """
+
+    __slots__ = ("_inner", "hasher")
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+        self.hasher = hashlib.sha256()
+
+    def write(self, data) -> int:
+        self.hasher.update(data)
+        return self._inner.write(data)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def _arc_checksum_path(pose_dir: Path, file_index: int) -> Path:
+    return pose_dir / f"poses-{file_index}.arc.CHECKSUM"
+
+
 def _write_group_layout(
     pose_dir: Path,
     layout: OutputLayout,
@@ -510,9 +539,10 @@ def _write_group_layout(
                 size=_arc_uncompressed_size(len(O), int(C.sum(dtype=np.uint64))),
             )
             output_handle = compressor
+        writer = _HashingWriter(output_handle)
         try:
             _write_arc_header(
-                output_handle,
+                writer,
                 M,
                 O,
                 C,
@@ -535,7 +565,7 @@ def _write_group_layout(
                 elif len(bucket) == segment.count and segment.start == 0:
                     out_bucket = bucket
                     out_origins = _write_bucket(
-                        output_handle,
+                        writer,
                         offset_id,
                         out_bucket,
                         chunk_poses=chunk_poses,
@@ -566,7 +596,7 @@ def _write_group_layout(
                 if len(out_bucket) != int(C[offset_id]):
                     raise ValueError(f"layout count mismatch for {key}")
                 sorted_origins = _write_bucket(
-                    output_handle,
+                    writer,
                     offset_id,
                     out_bucket,
                     chunk_poses=chunk_poses,
@@ -594,6 +624,11 @@ def _write_group_layout(
     finally:
         if tmp_path.exists():
             tmp_path.unlink()
+    # Emit the per-member checksum sidecar (sha256 of the uncompressed .arc content,
+    # captured inline above) so the result-checksum step need not re-read the poses.
+    _arc_checksum_path(dest.parent, layout.file_index).write_text(
+        writer.hasher.hexdigest() + "\n"
+    )
     return layout.file_index
 
 
@@ -1047,6 +1082,11 @@ def _commit_staged_organized(stagedir: Path, pose_dir: Path) -> None:
         return
     for src in organized:
         shutil.move(str(src), str(pose_dir / src.name))
+        # Carry the per-member checksum sidecar along with its pose file.
+        base = src.name[:-4] if src.name.endswith(".zst") else src.name
+        sidecar = src.with_name(base + ".CHECKSUM")
+        if sidecar.is_file():
+            shutil.move(str(sidecar), str(pose_dir / sidecar.name))
 
 
 def organize_pose_dir(
