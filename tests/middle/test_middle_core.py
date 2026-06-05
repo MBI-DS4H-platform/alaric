@@ -13,7 +13,8 @@ sys.path.insert(0, str(ROOT))
 
 from alaric.mask import main as mask_main
 from alaric.middle.checksum import byte_checksum, write_array_sidecar
-from alaric.middle.deploy import deploy
+from alaric.middle.deploy import deploy, generate_run_sh
+from alaric.middle.graph import ActionGraph
 from alaric.middle.project import Project
 from alaric.middle.sigil import compute_project_sigils
 from alaric.score_add import main as score_add_main
@@ -109,6 +110,18 @@ def test_deploy_score_chunk_script_discovers_and_concatenates(tmp_path: Path) ->
     assert "PoseReader.get_nposes" in run_sh
     assert '"$FIRST"' in run_sh and '"$LAST"' in run_sh
     assert "np.concatenate" in run_sh
+
+
+def test_remote_chunk_python_paths_are_expandvars_compatible(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    project = Project.discover(tmp_path)
+    compute_project_sigils(project)
+    action = ActionGraph(project).build()["frag4-score"]
+
+    run_sh = generate_run_sh(project, action, "remote-chunk", nchunks=3)
+
+    assert "os.path.expandvars('${ALARIC_REMOTE_RESULT_DIR}/" in run_sh
+    assert "os.path.expandvars('${ALARIC_REMOTE_RESULT_DIR:?}" not in run_sh
 
 
 def test_score_add_and_mask_validate_shapes(tmp_path: Path) -> None:
