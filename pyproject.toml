@@ -2,7 +2,7 @@
 name = "alaric"
 version = "0.1.0"
 description = "RNA fragment docking and scoring pipeline"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 dependencies = [
     "numpy>=2.0",
     "scipy",
@@ -22,10 +22,6 @@ alaric-result-clean = "alaric.middle.result:clean_main"
 alaric-result-check = "alaric.middle.result:check_main"
 alaric-result-download = "alaric.middle.result:download_main"
 alaric-result-upload = "alaric.middle.result:upload_main"
-
-[tool.setuptools.packages.find]
-include = ["alaric*"]
-exclude = ["fraglib*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -127,6 +127,18 @@ def _prologue(local: bool, sigil: str) -> list[str]:
         lines.append('cd "$(dirname "$0")"')
     else:
         lines.append(f'cd "${{ALARIC_REMOTE_DEPLOYMENT_DIR:?}}/{sigil}"')
+        # Honor a SLURM core reservation (e.g. `sbatch -c N`). `--nprocs` defaults to
+        # os.cpu_count(), which reports the whole node; Python >=3.13 lets PYTHON_CPU_COUNT
+        # override os.cpu_count(), so the backends pick up the allocation, not the node.
+        lines.extend(
+            [
+                'if [ -n "${SLURM_CPUS_PER_TASK:-}" ]; then',
+                '  export PYTHON_CPU_COUNT="${SLURM_CPUS_PER_TASK}"',
+                'elif [ -n "${SLURM_CPUS_ON_NODE:-}" ]; then',
+                '  export PYTHON_CPU_COUNT="${SLURM_CPUS_ON_NODE}"',
+                "fi",
+            ]
+        )
     return lines
 
 
