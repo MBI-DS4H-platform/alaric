@@ -25,7 +25,12 @@ _POSE_ACTIONS = {"anchor", "anchor-test", "grow"}
 ORGANIZE_DELIM = "### ORGANIZE ###"
 # Remote env vars that are defined in the *local* deployer environment and must be
 # baked into the generated remote scripts (they are not defined on the remote host).
-_REMOTE_ENV_VARS = ("ALARIC_REMOTE_ALARIC_DIR", "ALARIC_REMOTE_RESULT_DIR", "ALARIC_REMOTE_SCRATCH_DIR")
+_REMOTE_ENV_VARS = (
+    "ALARIC_REMOTE_ALARIC_DIR",
+    "ALARIC_REMOTE_DEPLOYMENT_DIR",
+    "ALARIC_REMOTE_RESULT_DIR",
+    "ALARIC_REMOTE_SCRATCH_DIR",
+)
 
 
 def _repo_alaric_dir() -> Path:
@@ -110,6 +115,22 @@ def _remote_env_header(local: bool) -> list[str]:
     return lines
 
 
+def _prologue(local: bool, sigil: str) -> list[str]:
+    """Shebang + strict mode + env baking + a SLURM-safe cd to the action dir.
+
+    ``cd "$(dirname "$0")"`` is unreliable under SLURM (sbatch copies the script to a spool
+    dir, so ``$0`` no longer points at the deployment dir). On remote we therefore cd to the
+    absolute deployment dir baked from the local ``ALARIC_REMOTE_DEPLOYMENT_DIR``.
+    """
+    lines = ["#!/usr/bin/env bash", "set -euo pipefail"]
+    lines.extend(_remote_env_header(local))
+    if local:
+        lines.append('cd "$(dirname "$0")"')
+    else:
+        lines.append(f'cd "${{ALARIC_REMOTE_DEPLOYMENT_DIR:?}}/{sigil}"')
+    return lines
+
+
 def _compute_dirs(action: ResolvedAction, sigil: str, local: bool) -> tuple[str, str, list[str]]:
     """Return (output_dir, final_dir, setup_lines)."""
     if local:
@@ -177,28 +198,33 @@ def _finalize_lines(
 
 
 def generate_check_sh(project: Project, action: ResolvedAction, *, location: str) -> str:
+    """Verify each input dependency is materialized at the execution location.
+
+    Local: also provenance-guards against the sibling action dirs (sigil + result.txt).
+    Remote: only the materialization check is possible/meaningful — the sibling action dirs
+    are not shipped to the remote, and provenance is already pinned by the dep sigil baked
+    into the result path. For a root action (no inputs) this is intentionally a no-op.
+    """
     local = location != "remote"
-    lines = ["#!/usr/bin/env bash", "set -euo pipefail", 'cd "$(dirname "$0")"']
-    lines.extend(_remote_env_header(local))
+    sigil = _read_sigil(action.path)
+    lines = _prologue(local, sigil)
     lines.append("")
     for field in DEPENDENCY_FIELDS[action.action]:
         dep = action.params.get(field)
         if not isinstance(dep, ResolvedAction):
             continue
         dep_sigil = _read_sigil(dep.path)
-        rel = f"../{dep.name}"
-        result_path = (
-            f"${{ALARIC_REMOTE_RESULT_DIR:?}}/{dep_sigil}"
-            if location == "remote"
-            else f"../CACHE/results/{dep_sigil}"
-        )
-        lines.extend(
-            [
-                f'test "$(cat {rel}/sigil.txt)" = "{dep_sigil}"',
-                f"test -s {rel}/result.txt",
-                f"test -e {result_path}",
-            ]
-        )
+        if location == "remote":
+            lines.append(f"test -e ${{ALARIC_REMOTE_RESULT_DIR:?}}/{dep_sigil}")
+        else:
+            rel = f"../{dep.name}"
+            lines.extend(
+                [
+                    f'test "$(cat {rel}/sigil.txt)" = "{dep_sigil}"',
+                    f"test -s {rel}/result.txt",
+                    f"test -e ../CACHE/results/{dep_sigil}",
+                ]
+            )
     lines.append("")
     return "\n".join(lines)
 
@@ -210,8 +236,7 @@ def generate_run_sh(project: Project, action: ResolvedAction, deployer: str, nch
     location = "local" if local else "remote"
     alaric_dir = _alaric_dir_expr(local)
     output_dir, final_dir, setup = _compute_dirs(action, sigil, local)
-    lines = ["#!/usr/bin/env bash", "set -euo pipefail", 'cd "$(dirname "$0")"']
-    lines.extend(_remote_env_header(local))
+    lines = _prologue(local, sigil)
     lines.append("./check.sh")
     lines.append("")
     lines.append(_pythonpath_line(alaric_dir))
@@ -254,15 +279,7 @@ def generate_chunk_files(
 
     base_ctx = template_context(action, alaric_dir=alaric_dir, output_dir=output_dir, location=location)
     pp = _pythonpath_line(alaric_dir)
-    env_header = _remote_env_header(local)
     result_kind = _result_output_kind(action)
-
-    def _header() -> list[str]:
-        head = ["#!/usr/bin/env bash", "set -euo pipefail", 'cd "$(dirname "$0")"']
-        head.extend(env_header)
-        head.append(pp)
-        head.append("")
-        return head
 
     files: dict[str, str] = {}
 
@@ -271,7 +288,13 @@ def generate_chunk_files(
         ctx["nchunks"] = n
         ctx["chunk_index"] = idx
         body = render_template(chunk_tpl, ctx).strip()
-        lines = _header()
+        lines = _prologue(local, sigil)
+        # Each chunk is an independent entry point (e.g. submitted to SLURM on its own),
+        # so it must verify input materialization itself.
+        lines.append("./check.sh")
+        lines.append("")
+        lines.append(pp)
+        lines.append("")
         lines.append(f"mkdir -p {output_dir}")
         lines.append("")
         lines.append(body)
@@ -281,7 +304,10 @@ def generate_chunk_files(
     org_ctx = dict(base_ctx)
     org_ctx["nchunks"] = n
     org_body = render_template(organize_tpl, org_ctx).strip()
-    org_lines = _header()
+    org_lines = _prologue(local, sigil)
+    org_lines.append("")
+    org_lines.append(pp)
+    org_lines.append("")
     if local:
         org_lines.append("mkdir -p ../CACHE/checksum")
     if org_body:
@@ -290,8 +316,7 @@ def generate_chunk_files(
     org_lines.append("")
     files["organize.sh"] = "\n".join(org_lines)
 
-    run_lines = ["#!/usr/bin/env bash", "set -euo pipefail", 'cd "$(dirname "$0")"']
-    run_lines.extend(env_header)
+    run_lines = _prologue(local, sigil)
     run_lines.append("./check.sh")
     run_lines.append("")
     run_lines.append(pp)
@@ -361,10 +386,23 @@ def deploy(deployer: str, action_dir: str | Path = ".", nchunks: int | None = No
 
     if is_remote:
         host = os.environ["ALARIC_REMOTE_HOST"]
-        dest = os.environ["ALARIC_REMOTE_DEPLOYMENT_DIR"].rstrip("/") + f"/{sigil}"
-        subprocess.run(["ssh", host, "mkdir", "-p", dest], check=True)
+        deploy_root = os.environ["ALARIC_REMOTE_DEPLOYMENT_DIR"].rstrip("/")
+        dest = f"{deploy_root}/{sigil}"
+        data_dest = f"{deploy_root}/DATA"
+        # DATA file params (PDBs) the scripts reference as ../DATA/<filename>. They live in
+        # the local project's DATA/ and must be shipped to the remote deployment DATA/.
+        data_files = []
+        for key, value in resolved_action.params.items():
+            if not key.startswith("__"):
+                continue
+            src = project.data_dir / str(value)
+            if src.is_file():
+                data_files.append(str(src))
+        subprocess.run(["ssh", host, "mkdir", "-p", dest, data_dest], check=True)
         payload = [str(action.path / name) for name in files]
         subprocess.run(["scp", *payload, f"{host}:{dest}/"], check=True)
+        if data_files:
+            subprocess.run(["scp", *data_files, f"{host}:{data_dest}/"], check=True)
 
 
 def main(argv: list[str] | None = None) -> int:
