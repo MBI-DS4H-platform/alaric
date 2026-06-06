@@ -26,13 +26,4 @@ bash {{ alaric_dir }}/score.sh \
   {{ nb_kernel }} \
   "$PWD/chunks/chunk-${IDX}/score.npy"
 ### ORGANIZE ###
-{{ python }} - <<"PY"
-from pathlib import Path
-import os
-import numpy as np
-chunks = sorted(Path("chunks").glob("chunk-*"), key=lambda p: int(p.name.split("-")[1]))
-arrays = [np.load(p / "score.npy") for p in chunks]
-out = Path(os.path.expandvars({{ output_path_python }}))
-out.mkdir(parents=True, exist_ok=True)
-np.save(out / "score.npy", np.concatenate(arrays) if arrays else np.empty((0,), dtype=float))
-PY
+{{ score_concat_command }}

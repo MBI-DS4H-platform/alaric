@@ -117,9 +117,10 @@ def test_deploy_score_chunk_emits_independent_chunk_and_organize_scripts(tmp_pat
         assert '"$FIRST"' in body and '"$LAST"' in body
         assert "np.concatenate" not in body
 
-    # The organize step (concatenation) lives in its own script.
+    # The organize step concatenates the chunk scores via the memory-safe helper.
     organize = (d / "organize.sh").read_text()
-    assert "np.concatenate" in organize
+    assert "score_concat.py" in organize
+    assert "np.concatenate" not in organize
 
     # run.sh is only a convenience wrapper: chunks one-by-one, then organize.
     run_sh = (d / "run.sh").read_text()
