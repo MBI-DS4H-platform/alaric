@@ -57,7 +57,7 @@ def main():
     out_dir = Path(args.out_dir)
     prepare_output_dir(out_dir, force=bool(args.force))
 
-    energies = np.load(Path(args.energy_file))
+    energies = np.lib.format.open_memmap(Path(args.energy_file))
     mask = energies < args.threshold
     keep_idx = np.where(mask)[0]  # 0-based
 
