@@ -32,7 +32,7 @@ XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE:-false}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON="${PYTHON:-python}"
-ATTRACT_PAR_NPZ="${SCRIPT_DIR}/attract-jax/attract-original/attract-par.npz"
+ATTRACT_PAR_NPZ="${SCRIPT_DIR}/../attract-jax/attract-original/attract-par.npz"
 NB_KERNEL="compiled"
 
 tmpdir="$(mktemp -d)"
@@ -59,7 +59,7 @@ PYTHONPATH="${SCRIPT_DIR}${PYTHONPATH:+:${PYTHONPATH}}" \
   "${PYTHON}" "${SCRIPT_DIR}/parse_pdb.py" \
   "${receptor_pdb}" "${tmp_rec_ppdb}"
 PYTHONPATH="${SCRIPT_DIR}${PYTHONPATH:+:${PYTHONPATH}}" \
-  "${PYTHON}" "${SCRIPT_DIR}/util/reduce-npy.py" \
+  "${PYTHON}" "${SCRIPT_DIR}/reduce-npy.py" \
   "${tmp_rec_ppdb}" "${tmp_rec_prefix}"
 
 # --- Step 2: parse and reduce ligand PDB → ATTRACT beads ---
@@ -68,7 +68,7 @@ PYTHONPATH="${SCRIPT_DIR}${PYTHONPATH:+:${PYTHONPATH}}" \
   "${PYTHON}" "${SCRIPT_DIR}/parse_pdb.py" \
   "${ligand_pdb}" "${tmp_lig_ppdb}"
 PYTHONPATH="${SCRIPT_DIR}${PYTHONPATH:+:${PYTHONPATH}}" \
-  "${PYTHON}" "${SCRIPT_DIR}/util/reduce-npy.py" \
+  "${PYTHON}" "${SCRIPT_DIR}/reduce-npy.py" \
   "${tmp_lig_ppdb}" "${tmp_lig_prefix}"
 
 # --- Step 3: score the single complex with minfor.py (identity transform) ---
@@ -76,7 +76,7 @@ PYTHONPATH="${SCRIPT_DIR}${PYTHONPATH:+:${PYTHONPATH}}" \
 # single-conformer ligand ensemble; --identity scores it where it sits.
 echo "Scoring with minfor.py (identity)..." >&2
 cmd=(
-  "${PYTHON}" -u "${SCRIPT_DIR}/attract-jax/util/minfor.py"
+  "${PYTHON}" -u "${SCRIPT_DIR}/../attract-jax/util/minfor.py"
   --identity
   --score
   --energy-only
