@@ -125,29 +125,15 @@ def _rotamer_to_matrix(rotamer: np.ndarray) -> np.ndarray:
     Rotaconformers are stored either as scaled axis-angle 3-vectors or already
     as 3x3 matrices (mirrors refe-best-fit.py).
     """
-    rotamer = np.asarray(rotamer, dtype=float)
+    from scipy.spatial.transform import Rotation
+
+    rotamer = np.asarray(rotamer)
     if rotamer.shape == (3, 3):
         return rotamer
-    if rotamer.shape != (3,):
-        raise ValueError(
-            "Unsupported rotaconformer representation; expected shape [3] or [3,3]"
-        )
-    # Rodrigues' rotation formula (equivalent to scipy Rotation.from_rotvec).
-    angle = float(np.linalg.norm(rotamer))
-    if angle == 0.0:
-        return np.eye(3)
-    axis = rotamer / angle
-    cross = np.array(
-        [
-            [0.0, -axis[2], axis[1]],
-            [axis[2], 0.0, -axis[0]],
-            [-axis[1], axis[0], 0.0],
-        ]
-    )
-    return (
-        np.eye(3)
-        + np.sin(angle) * cross
-        + (1.0 - np.cos(angle)) * (cross @ cross)
+    if rotamer.shape == (3,):
+        return Rotation.from_rotvec(rotamer).as_matrix()
+    raise ValueError(
+        "Unsupported rotaconformer representation; expected shape [3] or [3,3]"
     )
 
 
