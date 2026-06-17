@@ -2,9 +2,9 @@
 name = "alaric"
 version = "0.1.0"
 description = "RNA fragment docking and scoring pipeline"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
-    "numpy",
+    "numpy<2",
     "scipy",
     "zstandard",
     "ruamel.yaml",
@@ -14,6 +14,9 @@ dependencies = [
     "seamless-core>=0.1.4",
     "sortednp",
 ]
+
+[tool.setuptools.packages.find]
+include = ["alaric*"]
 
 [project.scripts]
 alaric-sigil = "alaric.middle.sigil:main"
