@@ -9,6 +9,7 @@ import sys
 from typing import Iterable
 
 import numpy as np
+from tqdm import tqdm
 
 _CODE_DIR = Path(__file__).resolve().parent
 if str(_CODE_DIR) not in sys.path:
@@ -29,6 +30,14 @@ KEY_DTYPE = np.dtype(
         ("tz", "<i2"),
     ]
 )
+
+
+def _report(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)
+
+
+def _fmt_count(value: int) -> str:
+    return f"{int(value):,}"
 
 
 def _as_u64(values) -> np.ndarray:
@@ -590,6 +599,8 @@ def bridge_grow(
     bloom: BloomFilter | None = None,
     build_bloom: BloomFilter | None = None,
     emitted_origin_path: Path | None = None,
+    report: bool = True,
+    desc: str | None = None,
 ) -> BridgeGrowResult:
     """Run single-process bridge growth.
 
@@ -609,7 +620,24 @@ def bridge_grow(
             f"Source and target sequences do not overlap for {config.direction} growth: "
             f"{config.source_sequence}/{config.target_sequence}"
         )
+    if report:
+        mode = "build-bloom" if build_bloom is not None else "filter"
+        if bloom is None and build_bloom is None:
+            mode = "count"
+        elif bloom is not None and output_dir is not None:
+            mode = "filter+materialize"
+        _report(
+            f"Bridge grow ({mode}): {config.source_sequence} -> "
+            f"{config.target_sequence} {config.direction}"
+        )
+        _report("  Loading source pose pool...")
     source = _load_source_pool_with_origins(config.source_poses, config.pose_range)
+    if report:
+        _report(
+            f"    source poses={_fmt_count(len(source.pool.conformers))} "
+            f"unique_conformers={_fmt_count(len(source.pool.unique_conformers))}"
+        )
+        _report("  Loading libraries and building cRMSD pivot...")
     factories, _templates = grow.config(verify_checksums=False)
     source_factory = factories[config.source_sequence]
     source_factory.load_rotaconformers()
@@ -650,6 +678,8 @@ def bridge_grow(
         config.test_conformers,
         config.test_seed,
     )
+    if report:
+        _report(f"    target conformers={_fmt_count(len(target_conformers))}")
     fixed_target_rotamer_positions = grow._select_target_rotamer_positions(
         target_library,
         target_conformers,
@@ -661,7 +691,14 @@ def bridge_grow(
     total_generated = 0
 
     try:
-        for target_conformer in target_conformers.tolist():
+        progress = tqdm(
+            target_conformers.tolist(),
+            desc=desc or "Bridge grow",
+            unit="conf",
+            mininterval=2.0,
+            disable=not report,
+        )
+        for target_conformer in progress:
             if target_conformer not in target_to_sources:
                 continue
             coords_t = target_library.coordinates[target_conformer].astype(np.float32, copy=False)
@@ -839,14 +876,28 @@ def bridge_grow(
                             out_translations[hits],
                             origins[hits],
                         )
+                    if report:
+                        emitted_now = 0 if writer is None else writer.total_poses
+                        progress.set_postfix(
+                            generated=total_generated,
+                            emitted=emitted_now,
+                            refresh=False,
+                        )
         emitted = 0
         origin_path = emitted_origin_path
         if writer is not None:
+            if report:
+                _report("  Writing filtered pose shards and provenance...")
             emitted_origin = writer.finish()
             emitted = int(len(emitted_origin))
             if origin_path is None:
                 origin_path = writer.outdir / "emitted_origin.npy"
             np.save(origin_path, emitted_origin)
+        if report:
+            _report(
+                f"  Bridge grow done: generated={_fmt_count(total_generated)} "
+                f"emitted={_fmt_count(emitted)}"
+            )
         return BridgeGrowResult(
             generated_poses=int(total_generated),
             emitted_poses=emitted,
@@ -883,6 +934,10 @@ def organize_bridge_intermediate(
     organized_origin_path = organized_origin_path or (pose_dir / "organized_origin.npy")
     order_array_path = order_array_path or (pose_dir / "order-array.npy")
     emitted_origin = np.load(emitted_origin_path)
+    _report(
+        f"Organizing bridge intermediate {pose_dir}: "
+        f"emitted_origins={_fmt_count(len(emitted_origin))}"
+    )
     organize.organize_pose_dir(
         pose_dir,
         nprocs=nprocs,
@@ -898,6 +953,10 @@ def organize_bridge_intermediate(
         )
     organized_origin = emitted_origin[order_array.astype(np.intp, copy=False)]
     np.save(organized_origin_path, organized_origin)
+    _report(
+        f"Organized bridge intermediate {pose_dir}: "
+        f"organized_origins={_fmt_count(len(organized_origin))}"
+    )
     return organized_origin
 
 
@@ -942,6 +1001,10 @@ def compose_bridge_connections(
         upper = upper[np.lexsort((upper[:, 1], upper[:, 0]))]
     np.save(output_dir / "connections-lower.npy", lower)
     np.save(output_dir / "connections-upper.npy", upper)
+    _report(
+        f"Composed bridge connections: lower={_fmt_count(len(lower))} "
+        f"upper={_fmt_count(len(upper))}"
+    )
     return lower, upper
 
 
@@ -957,6 +1020,7 @@ def run_identity_and_compose_bridge(
     compress: bool = True,
 ) -> dict[str, int]:
     identity_dir = Path(output_dir) / "identity"
+    _report("Running exact identity filter for bridge intermediates...")
     manifest = identity_filter.run_identity_filter(
         Path(first_pose_dir),
         Path(second_pose_dir),
@@ -986,12 +1050,13 @@ def merge_bridge_chunk_outputs(
 ) -> tuple[np.ndarray, np.ndarray]:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    _report(f"Merging {_fmt_count(len(chunk_dirs))} bridge rotamer chunk(s)...")
     writer = _MemoryPoseOriginWriter(output_dir, bucket_size=bucket_size)
     lower_parts: list[np.ndarray] = []
     upper_parts: list[np.ndarray] = []
     base = 0
     spans: list[tuple[int, int]] = []
-    for chunk_dir in chunk_dirs:
+    for chunk_dir in tqdm(chunk_dirs, desc="Merge bridge chunks", unit="chunk"):
         chunk_dir = Path(chunk_dir)
         reader = PoseReader(chunk_dir)
         chunk_start = base
@@ -1017,6 +1082,7 @@ def merge_bridge_chunk_outputs(
 
     old_middle_ids = writer.finish()
     np.save(output_dir / "chunk-middle-origin.npy", old_middle_ids)
+    _report(f"Organizing merged bridge middle pool: poses={_fmt_count(len(old_middle_ids))}")
     organize.organize_pose_dir(
         output_dir,
         nprocs=nprocs,
@@ -1063,6 +1129,11 @@ def merge_bridge_chunk_outputs(
     (output_dir / "bridge-merge.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n"
     )
+    _report(
+        f"Merged bridge chunks: middle={_fmt_count(len(old_middle_ids))} "
+        f"lower_connections={_fmt_count(len(lower_all))} "
+        f"upper_connections={_fmt_count(len(upper_all))}"
+    )
     return lower_all, upper_all
 
 
@@ -1074,14 +1145,15 @@ def _parse_memory_bytes(text: str) -> int:
     return int(value)
 
 
-def _add_pose_dir_to_bloom(pose_dir: Path, bloom: BloomFilter) -> int:
+def _add_pose_dir_to_bloom(pose_dir: Path, bloom: BloomFilter, *, desc: str = "Build Bloom") -> int:
     paths = discover_unorganized(pose_dir) or discover_organized(pose_dir)
     total = 0
-    for path in paths:
+    for path in tqdm(paths, desc=desc, unit="file", mininterval=2.0):
         M, O, C, P, bucket_size = read_arc_file(path)
         conf, rot, translations = decode_pool(M, O, C, P, bucket_size)
         bloom.add_keys(pack_pose_keys(conf, rot, translations))
         total += len(conf)
+    _report(f"{desc}: inserted={_fmt_count(total)}")
     return total
 
 
@@ -1101,31 +1173,75 @@ def run_bridge_pipeline(
     output_dir = Path(output_dir)
     work_dir = output_dir / "bridge-work"
     work_dir.mkdir(parents=True, exist_ok=True)
+    _report("Starting bridge pipeline")
+    _report(
+        f"  output={output_dir} chunks={rotamer_chunks} memory={_fmt_count(memory_bytes)} bytes "
+        f"max_intermediate={_fmt_count(max_intermediate_poses)} "
+        f"max_final={_fmt_count(max_final_poses)}"
+    )
     chunk_dirs: list[Path] = []
     total_final = 0
     for chunk in range(rotamer_chunks):
         chunk_dir = work_dir / f"chunk-{chunk:03d}"
         chunk_dir.mkdir(parents=True, exist_ok=True)
+        _report(f"[chunk {chunk + 1}/{rotamer_chunks}] Preparing Bloom metadata...")
         lower_chunk = BridgeGrowConfig(**{**lower_config.__dict__, "rotamer_chunk": RotamerChunk(chunk, rotamer_chunks)})
         upper_chunk = BridgeGrowConfig(**{**upper_config.__dict__, "rotamer_chunk": RotamerChunk(chunk, rotamer_chunks)})
         metadata = BloomMetadata.from_budget(memory_bytes=memory_bytes, expected_items=max(1, max_intermediate_poses))
+        _report(
+            f"  Bloom bits={_fmt_count(metadata.n_bits)} hashes={metadata.n_hashes} "
+            f"expected_fpr={metadata.expected_fpr:.6g}"
+        )
 
+        _report(f"[chunk {chunk + 1}/{rotamer_chunks}] Growing upper side into full Bloom...")
         upper_full = BloomFilter.from_metadata(metadata)
-        bridge_grow(upper_chunk, build_bloom=upper_full)
+        upper_full_result = bridge_grow(
+            upper_chunk,
+            build_bloom=upper_full,
+            desc=f"Upper full Bloom {chunk + 1}/{rotamer_chunks}",
+        )
+        _report(f"  upper full generated={_fmt_count(upper_full_result.generated_poses)}")
 
+        _report(f"[chunk {chunk + 1}/{rotamer_chunks}] Growing lower side through upper Bloom...")
         first_dir = chunk_dir / "intermediate-first"
-        first = bridge_grow(lower_chunk, output_dir=first_dir, bloom=upper_full)
+        first = bridge_grow(
+            lower_chunk,
+            output_dir=first_dir,
+            bloom=upper_full,
+            desc=f"First intermediate {chunk + 1}/{rotamer_chunks}",
+        )
         enforce_intermediate_guardrail(first.emitted_poses, max_intermediate_poses)
+        _report(
+            f"  first intermediate generated={_fmt_count(first.generated_poses)} "
+            f"emitted={_fmt_count(first.emitted_poses)}"
+        )
 
+        _report(f"[chunk {chunk + 1}/{rotamer_chunks}] Building Bloom from first intermediate...")
         first_bloom = BloomFilter.from_metadata(metadata)
-        _add_pose_dir_to_bloom(first_dir, first_bloom)
+        _add_pose_dir_to_bloom(first_dir, first_bloom, desc=f"First intermediate Bloom {chunk + 1}/{rotamer_chunks}")
 
+        _report(f"[chunk {chunk + 1}/{rotamer_chunks}] Growing upper side through first-intermediate Bloom...")
         second_dir = chunk_dir / "intermediate-second"
-        second = bridge_grow(upper_chunk, output_dir=second_dir, bloom=first_bloom)
+        second = bridge_grow(
+            upper_chunk,
+            output_dir=second_dir,
+            bloom=first_bloom,
+            desc=f"Second intermediate {chunk + 1}/{rotamer_chunks}",
+        )
         enforce_intermediate_guardrail(second.emitted_poses, max_intermediate_poses)
+        _report(
+            f"  second intermediate generated={_fmt_count(second.generated_poses)} "
+            f"emitted={_fmt_count(second.emitted_poses)}"
+        )
 
+        _report(f"[chunk {chunk + 1}/{rotamer_chunks}] Organizing intermediates...")
         first_origin = organize_bridge_intermediate(first_dir, nprocs=nprocs)
         second_origin = organize_bridge_intermediate(second_dir, nprocs=nprocs)
+        _report(
+            f"  organized origins: first={_fmt_count(len(first_origin))} "
+            f"second={_fmt_count(len(second_origin))}"
+        )
+        _report(f"[chunk {chunk + 1}/{rotamer_chunks}] Running exact identity and composing maps...")
         run_identity_and_compose_bridge(
             first_dir,
             second_dir,
@@ -1139,6 +1255,7 @@ def run_bridge_pipeline(
         if final_count > max_final_poses:
             raise ValueError(f"final poses {final_count} exceeds guardrail {max_final_poses}")
         total_final += final_count
+        _report(f"  chunk final middle poses={_fmt_count(final_count)}")
         # Put chunk-local final pose files at chunk root for merge.
         for pose_file in discover_organized(chunk_dir / "identity"):
             target = chunk_dir / pose_file.name
@@ -1147,6 +1264,7 @@ def run_bridge_pipeline(
         chunk_dirs.append(chunk_dir)
 
     if rotamer_chunks == 1:
+        _report("Promoting single bridge chunk to final output...")
         identity_dir = chunk_dirs[0] / "identity"
         for path in identity_dir.iterdir():
             if path.name.startswith("poses-") or path.name in {"connections-lower.npy", "connections-upper.npy"}:
@@ -1156,6 +1274,7 @@ def run_bridge_pipeline(
         for name in ("connections-lower.npy", "connections-upper.npy"):
             (output_dir / name).write_bytes((chunk_dirs[0] / name).read_bytes())
     else:
+        _report("Merging bridge chunk outputs into final output...")
         merge_bridge_chunk_outputs(
             chunk_dirs,
             output_dir,
@@ -1170,6 +1289,7 @@ def run_bridge_pipeline(
         "max_final_poses": int(max_final_poses),
     }
     (output_dir / "bridge.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    _report(f"Bridge pipeline done: final_poses={_fmt_count(total_final)}")
     return manifest
 
 
