@@ -306,6 +306,8 @@ def generate_chunk_files(
 
     org_ctx = dict(base_ctx)
     org_ctx["nchunks"] = n
+    if action.action == "score":
+        org_ctx["score_concat_command"] = str(org_ctx["score_concat_command"]).replace("{{ nchunks }}", str(n))
     org_body = render_template(organize_tpl, org_ctx).strip()
     org_lines = _prologue(local, sigil)
     org_lines.append("")
@@ -326,7 +328,7 @@ def generate_chunk_files(
     run_lines.append("")
     run_lines.extend(setup)
     if action.action == "score":
-        run_lines.append("rm -rf chunks")
+        run_lines.append(f"rm -rf {base_ctx['score_chunks_path']}")
     run_lines.append("")
     for idx in range(1, n + 1):
         run_lines.append(f"bash ./chunk{idx}.sh")

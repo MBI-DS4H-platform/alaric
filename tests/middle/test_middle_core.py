@@ -18,6 +18,7 @@ from alaric.middle.graph import ActionGraph
 from alaric.middle.project import Project
 from alaric.middle.sigil import compute_project_sigils
 from alaric.score_add import main as score_add_main
+from alaric.score_concat import main as score_concat_main
 
 
 def _write_project(root: Path) -> None:
@@ -159,7 +160,7 @@ def test_score_chunk_deploy_defaults_to_compiled_kernel(tmp_path: Path) -> None:
 def test_remote_score_deploy_defaults_to_compiled_kernel(tmp_path: Path) -> None:
     _write_project(tmp_path)
     project = Project.discover(tmp_path)
-    compute_project_sigils(project)
+    sigils = compute_project_sigils(project)
     action = ActionGraph(project).build()["frag4-score"]
 
     body = generate_run_sh(project, action, "remote")
@@ -170,6 +171,11 @@ def test_remote_score_deploy_defaults_to_compiled_kernel(tmp_path: Path) -> None
     chunk = files["chunk1.sh"]
     assert "\n  compiled \\\n" in chunk
     assert "\n  jax \\\n" not in chunk
+    chunk_root = f"${{ALARIC_REMOTE_RESULT_DIR:?}}/{sigils['frag4-score']}-CHUNKS"
+    assert f"CHUNK_DIR={chunk_root}/chunk-${{IDX}}" in chunk
+    assert '"$CHUNK_DIR/score.npy"' in chunk
+    assert f"score_concat.py {chunk_root} " in files["organize.sh"]
+    assert "--nchunks 2" in files["organize.sh"]
 
 
 def test_remote_chunk_python_paths_are_expandvars_compatible(tmp_path: Path) -> None:
@@ -202,6 +208,15 @@ def test_score_add_and_mask_validate_shapes(tmp_path: Path) -> None:
     np.save(b, np.array([1.0]))
     with pytest.raises(ValueError):
         score_add_main([str(a), str(b), str(out)])
+
+
+def test_score_concat_requires_all_expected_chunks(tmp_path: Path) -> None:
+    chunks = tmp_path / "chunks"
+    (chunks / "chunk-1").mkdir(parents=True)
+    np.save(chunks / "chunk-1" / "score.npy", np.array([1.0], dtype=np.float32))
+
+    with pytest.raises(FileNotFoundError):
+        score_concat_main([str(chunks), str(tmp_path / "score.npy"), "--nchunks", "2"])
 
 
 def test_checksum_is_zstd_transparent(tmp_path: Path) -> None:

@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Concatenate per-chunk ``score.npy`` files into one ``score.npy``, memory-safely.
 
-The chunk deployer produces one ``chunks/chunk-<N>/score.npy`` per chunk. Naively loading
-them all and ``np.concatenate``-ing holds the entire score array (plus a copy) in RAM, which
-is dangerous past a few gigaposes (a 20-Gpose float64 score is ~160 GB).
+The chunk deployer produces one ``chunk-<N>/score.npy`` per chunk. Naively loading them all
+and ``np.concatenate``-ing holds the entire score array (plus a copy) in RAM, which is
+dangerous past a few gigaposes (a 20-Gpose float64 score is ~160 GB).
 
 Instead this:
+  - verifies every expected chunk score exists,
   - reads every chunk via ``mmap_mode="r"`` (no full load),
   - streams them block-by-block into a memmapped output ``.npy`` written to a **local**
     staging dir (``$TMPDIR`` -> node-local scratch on the cluster), so peak RAM is one block,
-  - moves the finished file to its final destination at the end (avoids memmap-over-NFS).
+  - copies the finished local file to ``score.npy.partial`` and renames to ``score.npy``.
 
 The output bytes are identical to ``np.save(np.concatenate(chunks))`` for the same data, so
 the result checksum is unchanged.
@@ -25,17 +26,26 @@ from pathlib import Path
 import numpy as np
 
 
-def _chunk_score_files(chunks_dir: Path) -> list[Path]:
-    dirs = sorted(
-        (d for d in chunks_dir.glob("chunk-*") if d.is_dir()),
-        key=lambda d: int(d.name.split("-", 1)[1]),
-    )
-    return [d / "score.npy" for d in dirs]
+def _chunk_score_files(chunks_dir: Path, nchunks: int | None) -> list[Path]:
+    if nchunks is None:
+        dirs = sorted(
+            (d for d in chunks_dir.glob("chunk-*") if d.is_dir()),
+            key=lambda d: int(d.name.split("-", 1)[1]),
+        )
+        score_files = [d / "score.npy" for d in dirs]
+    else:
+        score_files = [chunks_dir / f"chunk-{idx}" / "score.npy" for idx in range(1, nchunks + 1)]
+    missing = [path for path in score_files if not path.is_file()]
+    if missing:
+        sample = ", ".join(str(path) for path in missing[:5])
+        extra = "" if len(missing) <= 5 else f" ... ({len(missing)} missing)"
+        raise FileNotFoundError(f"missing score chunk(s): {sample}{extra}")
+    return score_files
 
 
-def concatenate(chunks_dir: Path, output: Path, *, block: int = 10_000_000) -> None:
+def concatenate(chunks_dir: Path, output: Path, *, nchunks: int | None = None, block: int = 10_000_000) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
-    score_files = _chunk_score_files(chunks_dir)
+    score_files = _chunk_score_files(chunks_dir, nchunks)
 
     mmaps = [np.load(path, mmap_mode="r") for path in score_files]
     if not mmaps:
@@ -65,7 +75,9 @@ def concatenate(chunks_dir: Path, output: Path, *, block: int = 10_000_000) -> N
             pos += n
         out.flush()
         del out
-        shutil.move(str(staged), str(output))
+        partial = output.with_name(output.name + ".partial")
+        shutil.copyfile(staged, partial)
+        partial.replace(output)
     finally:
         shutil.rmtree(stagedir, ignore_errors=True)
 
@@ -74,6 +86,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("chunks_dir", type=Path, help="Directory containing chunk-<N>/score.npy")
     parser.add_argument("output", type=Path, help="Final concatenated score.npy path")
+    parser.add_argument("--nchunks", type=int, help="Expected number of chunk score files.")
     parser.add_argument(
         "--block",
         type=int,
@@ -81,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Elements copied per block (bounds peak memory; default 10000000).",
     )
     args = parser.parse_args(argv)
-    concatenate(args.chunks_dir, args.output, block=args.block)
+    concatenate(args.chunks_dir, args.output, nchunks=args.nchunks, block=args.block)
     return 0
 
 

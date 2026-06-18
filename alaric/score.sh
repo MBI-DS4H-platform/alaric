@@ -93,6 +93,7 @@ tmp_rec_atomtypes="${tmp_rec_prefix}-atomtypes.npy"
 
 tmp_ligand_ensemble="${tmpdir}/ligand-ensemble.npy"
 tmp_ligand_atomtypes="${tmpdir}/ligand-atomtypes.npy"
+tmp_output="${tmpdir}/score.npy"
 
 # --- Step 1: parse and reduce receptor PDB → ATTRACT beads ---
 echo "Parsing receptor PDB: ${receptor_pdb}" >&2
@@ -152,7 +153,7 @@ cmd=(
   --oracle jax
   --attract-par-npz "${ATTRACT_PAR_NPZ}"
   --nb-kernel "${nb_kernel}"
-  --output-npy "${output_file}"
+  --output-npy "${tmp_output}"
   --score-mode bulk
   --receptor-coordinates "${tmp_rec_coor}"
   --receptor-atomtypes "${tmp_rec_atomtypes}"
@@ -172,6 +173,10 @@ fi
 
 env XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE}" \
   "${cmd[@]}" > "${tmp_score}"
+
+mkdir -p "$(dirname "${output_file}")"
+cp "${tmp_output}" "${output_file}.partial"
+mv -f "${output_file}.partial" "${output_file}"
 
 t_score_end=$(date +%s%N)
 t_score_ms=$(( (t_score_end - t_score_start) / 1000000 ))

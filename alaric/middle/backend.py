@@ -108,7 +108,7 @@ def organize_command(alaric_dir: str, output_dir: str, location: str) -> str:
     return "\n".join(lines)
 
 
-def score_concat_command(alaric_dir: str, output_dir: str, location: str) -> str:
+def score_concat_command(alaric_dir: str, output_dir: str, chunks_dir: str, location: str) -> str:
     # Memory-safe concat of the per-chunk score.npy files (memmap streaming, not
     # np.concatenate). On remote, point the staging dir at node-local scratch via TMPDIR so
     # the output file is built locally and then copied to the final (network FS) destination.
@@ -116,7 +116,8 @@ def score_concat_command(alaric_dir: str, output_dir: str, location: str) -> str
     if location == "remote":
         lines.append('export TMPDIR="${ALARIC_REMOTE_SCRATCH_DIR:-${TMPDIR:-/tmp}}"')
     lines.append(
-        f"{python_bin()} {alaric_dir}/score_concat.py chunks {shell_path(f'{output_dir}/score.npy')}"
+        f"{python_bin()} {alaric_dir}/score_concat.py {shell_path(chunks_dir)} "
+        f"{shell_path(f'{output_dir}/score.npy')} --nchunks " + "{{ nchunks }}"
     )
     return "\n".join(lines)
 
@@ -164,6 +165,7 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
             }
         )
     elif action.action == "score":
+        chunks_dir = f"{output_dir.removesuffix('.partial')}-CHUNKS"
         context.update(
             {
                 "score_exclude_args": score_exclude_args(p.get("exclude", [])),
@@ -173,7 +175,8 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
                 "protein_path": data_file_path(p["__protein"], location),
                 "nb_kernel": q(p.get("nb_kernel", "compiled")),
                 "score_output_path": shell_path(f"{output_dir}/score.npy"),
-                "score_concat_command": score_concat_command(alaric_dir, output_dir, location),
+                "score_chunks_path": shell_path(chunks_dir),
+                "score_concat_command": score_concat_command(alaric_dir, output_dir, chunks_dir, location),
             }
         )
     elif action.action == "rmsd":

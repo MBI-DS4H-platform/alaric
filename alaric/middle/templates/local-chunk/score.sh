@@ -15,7 +15,9 @@ PY
 read FIRST LAST < <(chunk_range "$TOTAL" "$IDX" "$NCHUNKS")
 # Non-load-bearing tuning knobs (uncomment to override; they never change the result):
 #   export SCORE_BATCH_SIZE=100000
-mkdir -p "$PWD/chunks/chunk-${IDX}"
+CHUNK_DIR={{ score_chunks_path }}/chunk-${IDX}
+rm -rf "$CHUNK_DIR"
+mkdir -p "$CHUNK_DIR"
 bash {{ alaric_dir }}/score.sh \
   {{ score_exclude_args }} \
   {{ input_result_path }} \
@@ -24,6 +26,6 @@ bash {{ alaric_dir }}/score.sh \
   {{ sequence }} \
   {{ protein_path }} \
   {{ nb_kernel }} \
-  "$PWD/chunks/chunk-${IDX}/score.npy"
+  "$CHUNK_DIR/score.npy"
 ### ORGANIZE ###
 {{ score_concat_command }}
