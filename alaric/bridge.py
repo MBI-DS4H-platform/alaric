@@ -685,6 +685,7 @@ def bridge_grow(
     emitted_origin_path: Path | None = None,
     report: bool = True,
     desc: str | None = None,
+    bloom_inserted_count: int | None = None,
 ) -> BridgeGrowResult:
     """Run single-process bridge growth.
 
@@ -783,6 +784,11 @@ def bridge_grow(
     )
     if report:
         _report(f"    trace work={_fmt_count(trace_work_total)} rotpair")
+        if bloom_inserted_count is not None and bloom is not None:
+            _report(
+                f"    Bloom probe side inserted={_fmt_count(bloom_inserted_count)} "
+                f"fpr={bloom_fpr(bloom_inserted_count, bloom.n_bits, bloom.n_hashes):.6g}"
+            )
 
     try:
         progress = tqdm(
@@ -793,6 +799,36 @@ def bridge_grow(
             mininterval=2.0,
             disable=not report,
         )
+
+        def update_progress(trace_work: int) -> None:
+            if trace_work:
+                progress.update(trace_work)
+            if not report:
+                return
+            done = max(1, int(progress.n))
+            generated_est = int(round(total_generated * trace_work_total / done))
+            emitted_now = 0 if writer is None else writer.total_poses
+            postfix = {
+                "generated": total_generated,
+                "gen_est": generated_est,
+            }
+            if writer is not None:
+                emitted_est = int(round(emitted_now * trace_work_total / done))
+                postfix["emitted"] = emitted_now
+                postfix["emit_est"] = emitted_est
+            if bloom_inserted_count is not None and bloom is not None:
+                postfix["fpr_hit_est"] = int(
+                    round(
+                        expected_intermediate_size(
+                            generated_est,
+                            bloom_inserted_count,
+                            bloom.n_bits,
+                            bloom.n_hashes,
+                        )
+                    )
+                )
+            progress.set_postfix(postfix, refresh=False)
+
         for target_conformer in target_conformers.tolist():
             if target_conformer not in target_to_sources:
                 continue
@@ -840,14 +876,12 @@ def bridge_grow(
                 rc_sd = np.maximum(rc_sd, 0.0).astype(np.float32, copy=False)
                 pp_rows, qq_cols = np.nonzero(rc_sd < total_overlap_sd)
                 if pp_rows.size == 0:
-                    if trace_work:
-                        progress.update(trace_work)
+                    update_progress(trace_work)
                     continue
                 rc_kept = rc_sd[pp_rows, qq_cols]
                 repeat_idx, translation_indices, instance_translations = _expand_source_instances_with_indices(cache, pp_rows)
                 if instance_translations.size == 0:
-                    if trace_work:
-                        progress.update(trace_work)
+                    update_progress(trace_work)
                     continue
                 pp_rows_exp = pp_rows[repeat_idx]
                 qq_cols_exp = qq_cols[repeat_idx]
@@ -973,14 +1007,7 @@ def bridge_grow(
                             out_translations[hits],
                             origins[hits],
                         )
-                if trace_work:
-                    progress.update(trace_work)
-                    emitted_now = 0 if writer is None else writer.total_poses
-                    progress.set_postfix(
-                        generated=total_generated,
-                        emitted=emitted_now,
-                        refresh=False,
-                    )
+                update_progress(trace_work)
         emitted = 0
         origin_path = emitted_origin_path
         if writer is not None:
@@ -1309,6 +1336,7 @@ def run_bridge_pipeline(
             output_dir=first_dir,
             bloom=upper_full,
             desc=f"First intermediate {chunk + 1}/{rotamer_chunks}",
+            bloom_inserted_count=upper_full_result.generated_poses,
         )
         expected_first = expected_intermediate_size(
             first.generated_poses,
@@ -1341,6 +1369,7 @@ def run_bridge_pipeline(
             output_dir=second_dir,
             bloom=first_bloom,
             desc=f"Second intermediate {chunk + 1}/{rotamer_chunks}",
+            bloom_inserted_count=first.emitted_poses,
         )
         enforce_intermediate_guardrail(second.emitted_poses, max_intermediate_poses)
         _report(
