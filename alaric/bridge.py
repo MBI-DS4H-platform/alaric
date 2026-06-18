@@ -4,11 +4,13 @@ from dataclasses import dataclass, asdict
 import argparse
 import json
 import math
+import multiprocessing as mp
 from pathlib import Path
 import shutil
 import sys
 import tempfile
-from typing import Iterable
+import traceback
+from typing import Callable, Iterable
 
 import numpy as np
 from tqdm import tqdm
@@ -154,6 +156,14 @@ def hash_pose_keys(keys: np.ndarray, *, salt: int = 0) -> np.ndarray:
     lo = conf | (rot << np.uint64(16)) | (tx << np.uint64(32)) | (ty << np.uint64(48))
     hi = tz ^ np.uint64(int(salt) & 0xFFFFFFFFFFFFFFFF)
     return _splitmix64(lo ^ _splitmix64(hi))
+
+
+def _bloom_block_indices(hashes: np.ndarray, n_blocks: int) -> np.ndarray:
+    if n_blocks <= 0:
+        raise ValueError("n_blocks must be positive")
+    hashes = _as_u64(hashes).reshape(-1)
+    mixed = _splitmix64(hashes ^ np.uint64(0xA0761D6478BD642F))
+    return np.remainder(mixed, np.uint64(n_blocks)).astype(np.uint64, copy=False)
 
 
 def bloom_fpr(n_items: int, n_bits: int, n_hashes: int) -> float:
@@ -424,9 +434,7 @@ class BloomFilter:
         return cls(metadata.n_bits, metadata.n_hashes, **kwargs)
 
     def block_indices(self, hashes: np.ndarray) -> np.ndarray:
-        hashes = _as_u64(hashes).reshape(-1)
-        mixed = _splitmix64(hashes ^ np.uint64(0xA0761D6478BD642F))
-        return np.remainder(mixed, np.uint64(self.n_blocks)).astype(np.uint64, copy=False)
+        return _bloom_block_indices(hashes, self.n_blocks)
 
     def _positions(self, hashes: np.ndarray, hash_index: int) -> np.ndarray:
         with np.errstate(over="ignore"):
@@ -469,6 +477,139 @@ class BloomFilter:
 
     def probe_keys(self, keys: np.ndarray) -> np.ndarray:
         return self.probe_hashes(hash_pose_keys(keys))
+
+
+def _add_hashes_to_block_shard(
+    bits: np.ndarray,
+    hashes: np.ndarray,
+    *,
+    global_n_blocks: int,
+    first_block: int,
+    n_blocks: int,
+    block_bits: int,
+    n_hashes: int,
+    block_size: int = 1_000_000,
+) -> None:
+    hashes = _as_u64(hashes).reshape(-1)
+    if len(hashes) == 0:
+        return
+    if bits.shape != ((n_blocks * block_bits + 63) // 64,):
+        raise ValueError("local shard bitset has the wrong shape")
+    for start in range(0, len(hashes), block_size):
+        block_hashes = hashes[start : start + block_size]
+        owner = _bloom_block_indices(block_hashes, global_n_blocks).astype(np.int64, copy=False)
+        local_block = owner - int(first_block)
+        if np.any(local_block < 0) or np.any(local_block >= int(n_blocks)):
+            raise ValueError("hash batch contains keys outside reducer block range")
+        block_start = local_block.astype(np.uint64, copy=False) * np.uint64(block_bits)
+        for i in range(n_hashes):
+            with np.errstate(over="ignore"):
+                salt = np.uint64(i) * np.uint64(0xD6E8FEB86659FD93)
+            local = np.remainder(
+                _splitmix64(block_hashes ^ salt),
+                np.uint64(block_bits),
+            )
+            pos = block_start + local
+            word = (pos >> np.uint64(6)).astype(np.intp, copy=False)
+            mask = np.left_shift(np.uint64(1), (pos & np.uint64(63)).astype(np.uint64, copy=False))
+            np.bitwise_or.at(bits, word, mask)
+
+
+def _partition_ranges(total: int, parts: int) -> list[tuple[int, int]]:
+    parts = max(1, min(int(parts), int(total)))
+    ranges = []
+    for i in range(parts):
+        first = (int(total) * i) // parts
+        last = (int(total) * (i + 1)) // parts
+        if first != last:
+            ranges.append((first, last))
+    return ranges
+
+
+def _partition_pose_ranges(total_poses: int, parts: int) -> list[tuple[int, int]]:
+    return [(first + 1, last) for first, last in _partition_ranges(total_poses, parts)]
+
+
+def _route_hashes_to_reducers(
+    hashes: np.ndarray,
+    queues,
+    *,
+    block_ranges: list[tuple[int, int]],
+    global_n_blocks: int,
+) -> None:
+    hashes = _as_u64(hashes).reshape(-1)
+    if len(hashes) == 0:
+        return
+    owner = _bloom_block_indices(hashes, global_n_blocks)
+    for queue, (first_block, last_block) in zip(queues, block_ranges):
+        mask = (owner >= np.uint64(first_block)) & (owner < np.uint64(last_block))
+        if np.any(mask):
+            queue.put(hashes[mask].copy())
+
+
+def _parallel_bloom_reducer(
+    index: int,
+    queue,
+    result_queue,
+    *,
+    global_n_blocks: int,
+    first_block: int,
+    last_block: int,
+    block_bits: int,
+    n_hashes: int,
+) -> None:
+    try:
+        n_blocks = int(last_block) - int(first_block)
+        bits = np.zeros((n_blocks * int(block_bits) + 63) // 64, dtype=np.uint64)
+        while True:
+            hashes = queue.get()
+            if hashes is None:
+                break
+            _add_hashes_to_block_shard(
+                bits,
+                hashes,
+                global_n_blocks=global_n_blocks,
+                first_block=first_block,
+                n_blocks=n_blocks,
+                block_bits=block_bits,
+                n_hashes=n_hashes,
+            )
+        result_queue.put(("ok", index, first_block, bits))
+    except BaseException:
+        result_queue.put(("err", index, traceback.format_exc()))
+
+
+def _parallel_bloom_producer(
+    index: int,
+    config: BridgeGrowConfig,
+    pose_range: tuple[int, int],
+    queues,
+    result_queue,
+    *,
+    block_ranges: list[tuple[int, int]],
+    global_n_blocks: int,
+) -> None:
+    try:
+        producer_config = BridgeGrowConfig(
+            **{**config.__dict__, "pose_range": pose_range}
+        )
+
+        def sink(hashes: np.ndarray) -> None:
+            _route_hashes_to_reducers(
+                hashes,
+                queues,
+                block_ranges=block_ranges,
+                global_n_blocks=global_n_blocks,
+            )
+
+        result = bridge_grow(
+            producer_config,
+            hash_sink=sink,
+            report=False,
+        )
+        result_queue.put(("ok", index, result.generated_poses))
+    except BaseException:
+        result_queue.put(("err", index, traceback.format_exc()))
 
 
 @dataclass(frozen=True)
@@ -854,6 +995,7 @@ def bridge_grow(
     output_dir: Path | None = None,
     bloom: BloomFilter | None = None,
     build_bloom: BloomFilter | None = None,
+    hash_sink: Callable[[np.ndarray], None] | None = None,
     emitted_origin_path: Path | None = None,
     report: bool = True,
     desc: str | None = None,
@@ -1167,10 +1309,13 @@ def bridge_grow(
                     origins = origins[emit_order]
                     total_generated += len(out_conformers)
                     keys = pack_pose_keys(out_conformers, out_rotamers, out_translations)
+                    hashes = hash_pose_keys(keys)
+                    if hash_sink is not None:
+                        hash_sink(hashes)
                     if build_bloom is not None:
-                        build_bloom.add_keys(keys)
+                        build_bloom.add_hashes(hashes)
                     if bloom is not None:
-                        hits = bloom.probe_keys(keys)
+                        hits = bloom.probe_hashes(hashes)
                     else:
                         hits = np.ones(len(keys), dtype=bool)
                     if writer is not None and np.any(hits):
@@ -1483,6 +1628,130 @@ def _write_sample_pose_dir(
         )
 
 
+def build_full_bloom_parallel(
+    config: BridgeGrowConfig,
+    bloom: BloomFilter,
+    *,
+    nprocs: int,
+    desc: str | None = None,
+) -> BridgeGrowResult:
+    if nprocs <= 1:
+        return bridge_grow(config, build_bloom=bloom, desc=desc)
+
+    total_poses = PoseReader.get_nposes(config.source_poses)
+    if config.pose_range is None:
+        source_start = 1
+        source_end = total_poses
+    else:
+        source_start, source_end = config.pose_range
+    selected_poses = source_end - source_start + 1
+    if selected_poses <= 0:
+        raise ValueError("source pose range is empty")
+
+    n_reducers = max(1, min(4, int(nprocs) // 4))
+    n_producers = max(1, int(nprocs) - n_reducers)
+    n_producers = min(n_producers, selected_poses)
+    block_ranges = _partition_ranges(bloom.n_blocks, n_reducers)
+    relative_pose_ranges = _partition_pose_ranges(selected_poses, n_producers)
+    pose_ranges = [
+        (source_start + first - 1, source_start + last - 1)
+        for first, last in relative_pose_ranges
+    ]
+
+    _report(
+        f"Parallel full Bloom: producers={len(pose_ranges)} "
+        f"reducers={len(block_ranges)} source_poses={_fmt_count(selected_poses)}"
+    )
+
+    try:
+        ctx = mp.get_context("fork")
+    except ValueError:
+        ctx = mp.get_context()
+    reducer_queues = [ctx.Queue(maxsize=max(4, int(nprocs) * 2)) for _ in block_ranges]
+    reducer_results = ctx.Queue()
+    producer_results = ctx.Queue()
+    reducers = []
+    producers = []
+
+    for index, (first_block, last_block) in enumerate(block_ranges):
+        proc = ctx.Process(
+            target=_parallel_bloom_reducer,
+            args=(index, reducer_queues[index], reducer_results),
+            kwargs={
+                "global_n_blocks": bloom.n_blocks,
+                "first_block": first_block,
+                "last_block": last_block,
+                "block_bits": bloom.block_bits,
+                "n_hashes": bloom.n_hashes,
+            },
+        )
+        proc.start()
+        reducers.append(proc)
+
+    for index, pose_range in enumerate(pose_ranges):
+        proc = ctx.Process(
+            target=_parallel_bloom_producer,
+            args=(
+                index,
+                config,
+                pose_range,
+                reducer_queues,
+                producer_results,
+            ),
+            kwargs={
+                "block_ranges": block_ranges,
+                "global_n_blocks": bloom.n_blocks,
+            },
+        )
+        proc.start()
+        producers.append(proc)
+
+    producer_messages = []
+    try:
+        for proc in producers:
+            proc.join()
+        for proc in producers:
+            if proc.exitcode != 0:
+                raise RuntimeError(f"Bloom producer process failed with exit code {proc.exitcode}")
+        for _ in producers:
+            producer_messages.append(producer_results.get())
+        for message in producer_messages:
+            if message[0] == "err":
+                raise RuntimeError(f"Bloom producer {message[1]} failed:\n{message[2]}")
+
+        for queue in reducer_queues:
+            queue.put(None)
+        for proc in reducers:
+            proc.join()
+        for proc in reducers:
+            if proc.exitcode != 0:
+                raise RuntimeError(f"Bloom reducer process failed with exit code {proc.exitcode}")
+
+        for _ in reducers:
+            message = reducer_results.get()
+            if message[0] == "err":
+                raise RuntimeError(f"Bloom reducer {message[1]} failed:\n{message[2]}")
+            _status, _index, first_block, local_bits = message
+            word_start = (int(first_block) * bloom.block_bits) // 64
+            bloom.bits[word_start : word_start + len(local_bits)] = local_bits
+    except BaseException:
+        for proc in producers + reducers:
+            if proc.is_alive():
+                proc.terminate()
+        for proc in producers + reducers:
+            proc.join()
+        raise
+
+    generated = int(sum(message[2] for message in producer_messages if message[0] == "ok"))
+    _report(f"Parallel full Bloom done: generated={_fmt_count(generated)}")
+    return BridgeGrowResult(
+        generated_poses=generated,
+        emitted_poses=0,
+        output_dir=None,
+        emitted_origin_path=None,
+    )
+
+
 def _estimate_chunk_growth(
     *,
     lower_config: BridgeGrowConfig,
@@ -1654,9 +1923,10 @@ def run_bridge_pipeline(
             f"(sample full_generated_est={_fmt_count(bloom_est)})..."
         )
         full_bloom = BloomFilter.from_metadata(metadata)
-        full_bloom_result = bridge_grow(
+        full_bloom_result = build_full_bloom_parallel(
             bloom_config,
-            build_bloom=full_bloom,
+            full_bloom,
+            nprocs=nprocs,
             desc=f"{bloom_side.capitalize()} full Bloom {chunk + 1}/{rotamer_chunks}",
         )
         _report(f"  {bloom_side} full generated={_fmt_count(full_bloom_result.generated_poses)}")

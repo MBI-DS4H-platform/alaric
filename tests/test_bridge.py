@@ -14,9 +14,12 @@ from alaric.bridge import (
     BridgeGrowResult,
     RotamerChunk,
     _MemoryPoseOriginWriter,
+    _add_hashes_to_block_shard,
     _fmt_expected_count,
+    _partition_ranges,
     blocked_bloom_fpr,
     bloom_fpr,
+    build_full_bloom_parallel,
     choose_bridge_orientation,
     compose_bridge_connections,
     deterministic_sample_indices,
@@ -85,6 +88,85 @@ def test_bloom_filter_confines_each_key_to_one_block() -> None:
     for hash_index in range(bloom.n_hashes):
         positions = bloom._positions(hashes, hash_index)
         np.testing.assert_array_equal(positions // bloom.block_bits, owner_blocks)
+
+
+def test_block_shards_reassemble_to_serial_bloom_bits() -> None:
+    rng = np.random.default_rng(456)
+    keys = pack_pose_keys(
+        rng.integers(0, 100, size=5000, dtype=np.uint16),
+        rng.integers(0, 1000, size=5000, dtype=np.uint16),
+        rng.integers(-300, 300, size=(5000, 3), dtype=np.int16),
+    )
+    hashes = hash_pose_keys(keys)
+    serial = BloomFilter(n_bits=16384, n_hashes=5, block_bits=512)
+    serial.add_hashes(hashes)
+
+    assembled = np.zeros_like(serial.bits)
+    for first_block, last_block in _partition_ranges(serial.n_blocks, 3):
+        local_n_blocks = last_block - first_block
+        local_bits = np.zeros(
+            (local_n_blocks * serial.block_bits + 63) // 64,
+            dtype=np.uint64,
+        )
+        owner = serial.block_indices(hashes)
+        shard_hashes = hashes[
+            (owner >= np.uint64(first_block)) & (owner < np.uint64(last_block))
+        ]
+        _add_hashes_to_block_shard(
+            local_bits,
+            shard_hashes,
+            global_n_blocks=serial.n_blocks,
+            first_block=first_block,
+            n_blocks=local_n_blocks,
+            block_bits=serial.block_bits,
+            n_hashes=serial.n_hashes,
+        )
+        word_start = (first_block * serial.block_bits) // 64
+        assembled[word_start : word_start + len(local_bits)] = local_bits
+
+    np.testing.assert_array_equal(assembled, serial.bits)
+
+
+def test_parallel_full_bloom_build_matches_serial_fake_grow(tmp_path, monkeypatch) -> None:
+    total = 1000
+    all_hashes = (np.arange(1, total + 1, dtype=np.uint64) * np.uint64(0x9E3779B97F4A7C15))
+    monkeypatch.setattr(
+        bridge_module.PoseReader,
+        "get_nposes",
+        staticmethod(lambda pose_dir: total),
+    )
+
+    def fake_bridge_grow(config, **kwargs):
+        first, last = config.pose_range
+        hashes = all_hashes[first - 1 : last]
+        if kwargs.get("hash_sink") is not None:
+            kwargs["hash_sink"](hashes)
+        if kwargs.get("build_bloom") is not None:
+            kwargs["build_bloom"].add_hashes(hashes)
+        return BridgeGrowResult(
+            generated_poses=len(hashes),
+            emitted_poses=0,
+            output_dir=None,
+            emitted_origin_path=None,
+        )
+
+    monkeypatch.setattr(bridge_module, "bridge_grow", fake_bridge_grow)
+    cfg = BridgeGrowConfig(
+        source_poses=tmp_path / "poses",
+        source_sequence="AA",
+        target_sequence="AU",
+        direction="forward",
+        crmsd=1.0,
+        ov_rmsd=1.0,
+    )
+    parallel = BloomFilter(n_bits=16384, n_hashes=5, block_bits=512)
+    serial = BloomFilter(n_bits=16384, n_hashes=5, block_bits=512)
+
+    result = build_full_bloom_parallel(cfg, parallel, nprocs=4)
+    serial.add_hashes(all_hashes)
+
+    assert result.generated_poses == total
+    np.testing.assert_array_equal(parallel.bits, serial.bits)
 
 
 def test_bloom_formula_and_hash_count_optimization() -> None:
