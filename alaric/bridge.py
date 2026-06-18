@@ -14,6 +14,8 @@ if str(_CODE_DIR) not in sys.path:
     sys.path.insert(0, str(_CODE_DIR))
 
 import grow
+import identity_filter
+import organize
 from poses import pack_pool, write_arc_file
 
 
@@ -863,3 +865,110 @@ def write_bridge_grow_manifest(path: Path, result: BridgeGrowResult, *, metadata
         **metadata,
     }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+def organize_bridge_intermediate(
+    pose_dir: Path,
+    *,
+    emitted_origin_path: Path | None = None,
+    organized_origin_path: Path | None = None,
+    order_array_path: Path | None = None,
+    nprocs: int = 1,
+    max_poses_per_file: int = 100_000_000,
+    compress: bool = True,
+) -> np.ndarray:
+    pose_dir = Path(pose_dir)
+    emitted_origin_path = emitted_origin_path or (pose_dir / "emitted_origin.npy")
+    organized_origin_path = organized_origin_path or (pose_dir / "organized_origin.npy")
+    order_array_path = order_array_path or (pose_dir / "order-array.npy")
+    emitted_origin = np.load(emitted_origin_path)
+    organize.organize_pose_dir(
+        pose_dir,
+        nprocs=nprocs,
+        max_poses_per_file=max_poses_per_file,
+        compress=compress,
+        return_order_array=True,
+        order_array_path=order_array_path,
+    )
+    order_array = np.load(order_array_path)
+    if len(order_array) != len(emitted_origin):
+        raise ValueError(
+            f"order array length {len(order_array)} does not match emitted origins {len(emitted_origin)}"
+        )
+    organized_origin = emitted_origin[order_array.astype(np.intp, copy=False)]
+    np.save(organized_origin_path, organized_origin)
+    return organized_origin
+
+
+def compose_bridge_connections(
+    identity_dir: Path,
+    first_origin_path: Path,
+    second_origin_path: Path,
+    output_dir: Path,
+    *,
+    first_side: str,
+) -> tuple[np.ndarray, np.ndarray]:
+    if first_side not in {"lower", "upper"}:
+        raise ValueError("first_side must be lower or upper")
+    identity_dir = Path(identity_dir)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    map1 = np.load(identity_dir / "map-1.npy")
+    map2 = np.load(identity_dir / "map-2.npy")
+    origin1 = np.load(first_origin_path)
+    origin2 = np.load(second_origin_path)
+    if map1.ndim != 2 or map1.shape[1] != 2:
+        raise ValueError("map-1.npy must have shape (N, 2)")
+    if map2.ndim != 2 or map2.shape[1] != 2:
+        raise ValueError("map-2.npy must have shape (N, 2)")
+
+    if len(map1) and int(map1[:, 0].max()) >= len(origin1):
+        raise ValueError("map-1.npy references an origin outside first_origin_path")
+    if len(map2) and int(map2[:, 0].max()) >= len(origin2):
+        raise ValueError("map-2.npy references an origin outside second_origin_path")
+
+    if first_side == "lower":
+        lower = np.column_stack((origin1[map1[:, 0].astype(np.intp)], map1[:, 1]))
+        upper = np.column_stack((map2[:, 1], origin2[map2[:, 0].astype(np.intp)]))
+    else:
+        lower = np.column_stack((origin2[map2[:, 0].astype(np.intp)], map2[:, 1]))
+        upper = np.column_stack((map1[:, 1], origin1[map1[:, 0].astype(np.intp)]))
+    lower = np.asarray(lower, dtype=np.uint64)
+    upper = np.asarray(upper, dtype=np.uint64)
+    if len(lower):
+        lower = lower[np.lexsort((lower[:, 1], lower[:, 0]))]
+    if len(upper):
+        upper = upper[np.lexsort((upper[:, 1], upper[:, 0]))]
+    np.save(output_dir / "connections-lower.npy", lower)
+    np.save(output_dir / "connections-upper.npy", upper)
+    return lower, upper
+
+
+def run_identity_and_compose_bridge(
+    first_pose_dir: Path,
+    second_pose_dir: Path,
+    output_dir: Path,
+    *,
+    first_origin_path: Path,
+    second_origin_path: Path,
+    first_side: str,
+    max_poses_per_file: int = 100_000_000,
+    compress: bool = True,
+) -> dict[str, int]:
+    identity_dir = Path(output_dir) / "identity"
+    manifest = identity_filter.run_identity_filter(
+        Path(first_pose_dir),
+        Path(second_pose_dir),
+        identity_dir,
+        force=True,
+        max_poses_per_file=max_poses_per_file,
+        compress=compress,
+    )
+    compose_bridge_connections(
+        identity_dir,
+        first_origin_path,
+        second_origin_path,
+        output_dir,
+        first_side=first_side,
+    )
+    return manifest

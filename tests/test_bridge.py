@@ -11,6 +11,7 @@ from alaric.bridge import (
     _MemoryPoseOriginWriter,
     bloom_fpr,
     choose_bridge_orientation,
+    compose_bridge_connections,
     deterministic_sample_indices,
     enforce_intermediate_guardrail,
     expected_intermediate_size,
@@ -132,3 +133,35 @@ def test_intermediate_guardrail_fails_loudly() -> None:
         assert "exceeds guardrail" in str(exc)
     else:
         raise AssertionError("guardrail should have failed")
+
+
+def test_compose_bridge_connections_preserves_final_orientation(tmp_path) -> None:
+    identity_dir = tmp_path / "identity"
+    identity_dir.mkdir()
+    np.save(identity_dir / "map-1.npy", np.array([[1, 2], [0, 1]], dtype=np.uint64))
+    np.save(identity_dir / "map-2.npy", np.array([[0, 2], [2, 1]], dtype=np.uint64))
+    first_origin = tmp_path / "first.npy"
+    second_origin = tmp_path / "second.npy"
+    np.save(first_origin, np.array([10, 11], dtype=np.uint64))
+    np.save(second_origin, np.array([20, 21, 22], dtype=np.uint64))
+
+    lower, upper = compose_bridge_connections(
+        identity_dir,
+        first_origin,
+        second_origin,
+        tmp_path / "out",
+        first_side="lower",
+    )
+
+    np.testing.assert_array_equal(lower, np.array([[10, 1], [11, 2]], dtype=np.uint64))
+    np.testing.assert_array_equal(upper, np.array([[1, 22], [2, 20]], dtype=np.uint64))
+
+    lower_rev, upper_rev = compose_bridge_connections(
+        identity_dir,
+        first_origin,
+        second_origin,
+        tmp_path / "out-rev",
+        first_side="upper",
+    )
+    np.testing.assert_array_equal(lower_rev, np.array([[20, 2], [22, 1]], dtype=np.uint64))
+    np.testing.assert_array_equal(upper_rev, np.array([[1, 10], [2, 11]], dtype=np.uint64))
