@@ -11,6 +11,7 @@ from alaric.bridge import (
     BloomFilter,
     BloomMetadata,
     BridgeGrowConfig,
+    BridgeGrowthEstimates,
     BridgeGrowResult,
     RotamerChunk,
     _MemoryPoseOriginWriter,
@@ -327,8 +328,15 @@ def test_run_bridge_pipeline_enforces_global_final_guardrail_and_keeps_work_out_
 ) -> None:
     monkeypatch.setattr(
         bridge_module,
-        "_estimate_chunk_growth",
-        lambda **kwargs: ("lower", 100, 100, 0.0, 0.0),
+        "_estimate_bridge_growth_once",
+        lambda **kwargs: BridgeGrowthEstimates(
+            lower_generated=200,
+            upper_generated=200,
+            lower_sampled=1000,
+            upper_sampled=1000,
+            lower_total_poses=7,
+            upper_total_poses=7,
+        ),
     )
     monkeypatch.setattr(
         bridge_module,

@@ -6,6 +6,7 @@ import json
 import math
 import multiprocessing as mp
 from pathlib import Path
+import queue as queue_module
 import shutil
 import sys
 import tempfile
@@ -588,6 +589,7 @@ def _parallel_bloom_producer(
     *,
     block_ranges: list[tuple[int, int]],
     global_n_blocks: int,
+    progress_queue=None,
 ) -> None:
     try:
         producer_config = BridgeGrowConfig(
@@ -601,6 +603,8 @@ def _parallel_bloom_producer(
                 block_ranges=block_ranges,
                 global_n_blocks=global_n_blocks,
             )
+            if progress_queue is not None:
+                progress_queue.put(int(len(hashes)))
 
         result = bridge_grow(
             producer_config,
@@ -663,6 +667,16 @@ class BridgeEstimate:
     expected_lower_first: float
     expected_upper_first: float
     first_side: str
+
+
+@dataclass(frozen=True)
+class BridgeGrowthEstimates:
+    lower_generated: int
+    upper_generated: int
+    lower_sampled: int
+    upper_sampled: int
+    lower_total_poses: int
+    upper_total_poses: int
 
 
 def deterministic_sample_indices(total: int, *, seed: int, sample_size: int = 1000) -> np.ndarray:
@@ -1670,6 +1684,7 @@ def build_full_bloom_parallel(
     reducer_queues = [ctx.Queue(maxsize=max(4, int(nprocs) * 2)) for _ in block_ranges]
     reducer_results = ctx.Queue()
     producer_results = ctx.Queue()
+    progress_queue = ctx.Queue()
     reducers = []
     producers = []
 
@@ -1701,6 +1716,7 @@ def build_full_bloom_parallel(
             kwargs={
                 "block_ranges": block_ranges,
                 "global_n_blocks": bloom.n_blocks,
+                "progress_queue": progress_queue,
             },
         )
         proc.start()
@@ -1708,8 +1724,25 @@ def build_full_bloom_parallel(
 
     producer_messages = []
     try:
-        for proc in producers:
-            proc.join()
+        with tqdm(
+            total=None,
+            desc=desc or "Parallel full Bloom",
+            unit="pose",
+            unit_scale=True,
+            mininterval=2.0,
+        ) as progress:
+            while any(proc.is_alive() for proc in producers):
+                try:
+                    progress.update(int(progress_queue.get(timeout=0.25)))
+                except queue_module.Empty:
+                    pass
+            for proc in producers:
+                proc.join()
+            while True:
+                try:
+                    progress.update(int(progress_queue.get_nowait()))
+                except queue_module.Empty:
+                    break
         for proc in producers:
             if proc.exitcode != 0:
                 raise RuntimeError(f"Bloom producer process failed with exit code {proc.exitcode}")
@@ -1750,6 +1783,102 @@ def build_full_bloom_parallel(
         output_dir=None,
         emitted_origin_path=None,
     )
+
+
+def _estimate_bridge_growth_once(
+    *,
+    lower_config: BridgeGrowConfig,
+    upper_config: BridgeGrowConfig,
+    estimate_dir: Path,
+    estimator_seed: int,
+    sample_size: int = 1000,
+) -> BridgeGrowthEstimates:
+    estimate_dir.mkdir(parents=True, exist_ok=True)
+    lower_total = PoseReader.get_nposes(lower_config.source_poses)
+    upper_total = PoseReader.get_nposes(upper_config.source_poses)
+    lower_indices = deterministic_sample_indices(
+        lower_total,
+        seed=estimator_seed,
+        sample_size=sample_size,
+    )
+    upper_indices = deterministic_sample_indices(
+        upper_total,
+        seed=estimator_seed + 1,
+        sample_size=sample_size,
+    )
+    lower_sample_dir = estimate_dir / "lower-sample"
+    upper_sample_dir = estimate_dir / "upper-sample"
+    _report(
+        "Estimating bridge growth once from "
+        f"{len(lower_indices):,}/{lower_total:,} lower and "
+        f"{len(upper_indices):,}/{upper_total:,} upper source poses..."
+    )
+    _write_sample_pose_dir(
+        lower_config.source_poses,
+        lower_sample_dir,
+        lower_indices,
+        bucket_size=lower_config.bucket_size,
+    )
+    _write_sample_pose_dir(
+        upper_config.source_poses,
+        upper_sample_dir,
+        upper_indices,
+        bucket_size=upper_config.bucket_size,
+    )
+    lower_sample_config = BridgeGrowConfig(
+        **{
+            **lower_config.__dict__,
+            "source_poses": lower_sample_dir,
+            "rotamer_chunk": None,
+        }
+    )
+    upper_sample_config = BridgeGrowConfig(
+        **{
+            **upper_config.__dict__,
+            "source_poses": upper_sample_dir,
+            "rotamer_chunk": None,
+        }
+    )
+    lower_sample = bridge_grow(
+        lower_sample_config,
+        report=True,
+        desc="Estimate lower",
+    )
+    upper_sample = bridge_grow(
+        upper_sample_config,
+        report=True,
+        desc="Estimate upper",
+    )
+    lower_est = int(round(lower_sample.generated_poses * lower_total / len(lower_indices)))
+    upper_est = int(round(upper_sample.generated_poses * upper_total / len(upper_indices)))
+    result = BridgeGrowthEstimates(
+        lower_generated=lower_est,
+        upper_generated=upper_est,
+        lower_sampled=int(len(lower_indices)),
+        upper_sampled=int(len(upper_indices)),
+        lower_total_poses=int(lower_total),
+        upper_total_poses=int(upper_total),
+    )
+    (estimate_dir / "estimate.json").write_text(
+        json.dumps(asdict(result), indent=2, sort_keys=True) + "\n"
+    )
+    _report(
+        f"  estimate lower generated={lower_sample.generated_poses:,} "
+        f"from {len(lower_indices):,} sampled source poses; "
+        f"full_generated_est={lower_est:,}"
+    )
+    _report(
+        f"  estimate upper generated={upper_sample.generated_poses:,} "
+        f"from {len(upper_indices):,} sampled source poses; "
+        f"full_generated_est={upper_est:,}"
+    )
+    return result
+
+
+def _per_chunk_estimate(total_estimate: int, rotamer_chunks: int) -> int:
+    if total_estimate <= 0:
+        return 0
+    return int(math.ceil(float(total_estimate) / float(rotamer_chunks)))
 
 
 def _estimate_chunk_growth(
@@ -1881,6 +2010,12 @@ def run_bridge_pipeline(
     )
     chunk_dirs: list[Path] = []
     total_final = 0
+    growth_estimates = _estimate_bridge_growth_once(
+        lower_config=lower_config,
+        upper_config=upper_config,
+        estimate_dir=work_dir / "estimate",
+        estimator_seed=estimator_seed,
+    )
     for chunk in range(rotamer_chunks):
         chunk_dir = work_dir / f"chunk-{chunk:03d}"
         chunk_dir.mkdir(parents=True, exist_ok=True)
@@ -1894,14 +2029,38 @@ def run_bridge_pipeline(
             f"allocated={_fmt_count((metadata.n_bits + 7) // 8)} bytes "
             f"budget={_fmt_count(memory_bytes)} bytes"
         )
-        first_side, lower_est, upper_est, expected_lower_first, expected_upper_first = _estimate_chunk_growth(
-            lower_config=lower_config,
-            upper_config=upper_config,
-            chunk_dir=chunk_dir,
-            chunk=chunk,
-            rotamer_chunks=rotamer_chunks,
-            metadata=metadata,
-            estimator_seed=estimator_seed,
+        lower_est = _per_chunk_estimate(
+            growth_estimates.lower_generated,
+            rotamer_chunks,
+        )
+        upper_est = _per_chunk_estimate(
+            growth_estimates.upper_generated,
+            rotamer_chunks,
+        )
+        expected_lower_first = expected_intermediate_size(
+            lower_est,
+            upper_est,
+            metadata.n_bits,
+            metadata.n_hashes,
+            block_bits=metadata.block_bits,
+        )
+        expected_upper_first = expected_intermediate_size(
+            upper_est,
+            lower_est,
+            metadata.n_bits,
+            metadata.n_hashes,
+            block_bits=metadata.block_bits,
+        )
+        first_side = "lower" if expected_lower_first <= expected_upper_first else "upper"
+        _report(
+            f"  reused growth estimates per chunk: lower={_fmt_count(lower_est)} "
+            f"upper={_fmt_count(upper_est)}"
+        )
+        _report(
+            f"  expected initial Bloom false-positive hits: "
+            f"lower-first={_fmt_expected_count(expected_lower_first)} "
+            f"upper-first={_fmt_expected_count(expected_upper_first)}; "
+            f"choosing {first_side}-first"
         )
         if first_side == "lower":
             bloom_side = "upper"
