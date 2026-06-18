@@ -228,8 +228,26 @@ def resolve_action(
         p["lower_sequence"] = final_sequence(dep1 if frag1 == lower_fragment else dep2)
         p["upper_sequence"] = final_sequence(dep1 if frag1 == higher_fragment else dep2)
         p["middle_sequence"] = resolve_sequence(project, middle_fragment)
-        p["lower_crmsd"], p["lower_ovrmsd"] = _pair_thresholds(project, lower_fragment, middle_fragment)
-        p["upper_crmsd"], p["upper_ovrmsd"] = _pair_thresholds(project, middle_fragment, higher_fragment)
+        lower_crmsd = p.pop("lower-crmsd")
+        lower_ovrmsd = p.pop("lower-ovrmsd")
+        upper_crmsd = p.pop("upper-crmsd")
+        upper_ovrmsd = p.pop("upper-ovrmsd")
+        if lower_crmsd == "auto" or lower_ovrmsd == "auto":
+            auto_crmsd, auto_ovrmsd = _pair_thresholds(project, lower_fragment, middle_fragment)
+            if lower_crmsd == "auto":
+                lower_crmsd = auto_crmsd
+            if lower_ovrmsd == "auto":
+                lower_ovrmsd = auto_ovrmsd
+        if upper_crmsd == "auto" or upper_ovrmsd == "auto":
+            auto_crmsd, auto_ovrmsd = _pair_thresholds(project, middle_fragment, higher_fragment)
+            if upper_crmsd == "auto":
+                upper_crmsd = auto_crmsd
+            if upper_ovrmsd == "auto":
+                upper_ovrmsd = auto_ovrmsd
+        p["lower_crmsd"] = float(lower_crmsd)
+        p["lower_ovrmsd"] = float(lower_ovrmsd)
+        p["upper_crmsd"] = float(upper_crmsd)
+        p["upper_ovrmsd"] = float(upper_ovrmsd)
         p.setdefault("memory", "600G")
         p.setdefault("max-intermediate-poses", 100_000_000)
         p.setdefault("max-final-poses", 1_000_000)

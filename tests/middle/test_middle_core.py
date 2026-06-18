@@ -245,6 +245,10 @@ def test_bridge_middle_integration_and_runtime_knobs_are_non_load_bearing(tmp_pa
                 "action": "bridge",
                 "input1": "frag4-anchor",
                 "input2": "frag6-anchor",
+                "lower-crmsd": "auto",
+                "lower-ovrmsd": "auto",
+                "upper-crmsd": "auto",
+                "upper-ovrmsd": "auto",
                 "memory": "1G",
                 "nprocs": 2,
                 "rotamer-chunks": 3,
@@ -257,6 +261,11 @@ def test_bridge_middle_integration_and_runtime_knobs_are_non_load_bearing(tmp_pa
     project = Project.discover(tmp_path)
     sigils = compute_project_sigils(project)
     first = sigils["frag5-bridge"]
+    params = yaml.safe_load((tmp_path / "CACHE" / "parameters" / first).read_text())
+    assert params["lower_crmsd"] == 0.25
+    assert params["lower_ovrmsd"] == 0.75
+    assert params["upper_crmsd"] == 0.35
+    assert params["upper_ovrmsd"] == 0.85
 
     spec = yaml.safe_load((bridge_dir / "alaric.yaml").read_text())
     spec["memory"] = "2G"
@@ -271,6 +280,10 @@ def test_bridge_middle_integration_and_runtime_knobs_are_non_load_bearing(tmp_pa
     assert "--lower-sequence GU" in body
     assert "--middle-sequence UU" in body
     assert "--upper-sequence UA" in body
+    assert "--lower-crmsd 0.25" in body
+    assert "--lower-ov-rmsd 0.75" in body
+    assert "--upper-crmsd 0.35" in body
+    assert "--upper-ov-rmsd 0.85" in body
 
 
 def test_checksum_is_zstd_transparent(tmp_path: Path) -> None:

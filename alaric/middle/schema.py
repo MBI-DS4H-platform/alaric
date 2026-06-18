@@ -25,7 +25,7 @@ ACTION_SCHEMAS: dict[str, set[str]] = {
     "mask": {"action", "type", "input", "score_input", "threshold"},
     "filter": {"action", "type", "input", "score_input", "threshold", "mask_input"},
     "identity": {"action", "type", "input1", "input2"},
-    "bridge": {"action", "type", "input1", "input2", "memory", "max-intermediate-poses", "max-final-poses", "nprocs", "rotamer-chunks", "estimator-seed"},
+    "bridge": {"action", "type", "input1", "input2", "lower-crmsd", "lower-ovrmsd", "upper-crmsd", "upper-ovrmsd", "memory", "max-intermediate-poses", "max-final-poses", "nprocs", "rotamer-chunks", "estimator-seed"},
 }
 
 REQUIRED: dict[str, set[str]] = {
@@ -38,7 +38,7 @@ REQUIRED: dict[str, set[str]] = {
     "mask": {"input", "score_input", "threshold"},
     "filter": {"input"},
     "identity": {"input1", "input2"},
-    "bridge": {"input1", "input2"},
+    "bridge": {"input1", "input2", "lower-crmsd", "lower-ovrmsd", "upper-crmsd", "upper-ovrmsd"},
 }
 
 DEPENDENCY_FIELDS: dict[str, dict[str, str]] = {
@@ -71,6 +71,7 @@ AUTO_FIELDS = {
     "anchor": {"fragment", "sequence", "exclude", "protein", "dihedral", "angle"},
     "anchor-test": {"fragment", "sequence", "exclude", "protein", "dihedral", "angle"},
     "grow": {"fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
+    "bridge": {"lower-crmsd", "lower-ovrmsd", "upper-crmsd", "upper-ovrmsd"},
     "score": {"sequence", "exclude", "protein"},
     "rmsd": {"fragment", "exclude"},
     "mask": {"threshold"},
