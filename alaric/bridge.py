@@ -5,7 +5,9 @@ import argparse
 import json
 import math
 from pathlib import Path
+import shutil
 import sys
+import tempfile
 from typing import Iterable
 
 import numpy as np
@@ -1424,7 +1426,8 @@ def run_bridge_pipeline(
     if rotamer_chunks <= 0:
         raise ValueError("rotamer_chunks must be positive")
     output_dir = Path(output_dir)
-    work_dir = output_dir / "bridge-work"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    work_dir = Path(tempfile.mkdtemp(prefix="alaric-bridge-work-"))
     work_dir.mkdir(parents=True, exist_ok=True)
     _report("Starting bridge pipeline")
     _report(
@@ -1557,6 +1560,10 @@ def run_bridge_pipeline(
         if final_count > max_final_poses:
             raise ValueError(f"final poses {final_count} exceeds guardrail {max_final_poses}")
         total_final += final_count
+        if total_final > max_final_poses:
+            raise ValueError(
+                f"final poses {total_final} exceeds guardrail {max_final_poses}"
+            )
         _report(f"  chunk final middle poses={_fmt_count(final_count)}")
         # Put chunk-local final pose files at chunk root for merge.
         for pose_file in discover_organized(chunk_dir / "identity"):
@@ -1591,6 +1598,7 @@ def run_bridge_pipeline(
         "max_final_poses": int(max_final_poses),
     }
     (output_dir / "bridge.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    shutil.rmtree(work_dir, ignore_errors=True)
     _report(f"Bridge pipeline done: final_poses={_fmt_count(total_final)}")
     return manifest
 

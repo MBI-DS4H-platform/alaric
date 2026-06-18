@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import numpy as np
+import pytest
 
+import alaric.bridge as bridge_module
 from alaric.bridge import (
     BloomFilter,
     BloomMetadata,
+    BridgeGrowConfig,
+    BridgeGrowResult,
     RotamerChunk,
     _MemoryPoseOriginWriter,
     bloom_fpr,
@@ -20,6 +25,7 @@ from alaric.bridge import (
     merge_bridge_chunk_outputs,
     optimal_hash_count,
     pack_pose_keys,
+    run_bridge_pipeline,
 )
 from alaric.poses import decode_pool, discover_unorganized, read_arc_file, write_arc_file
 
@@ -207,3 +213,76 @@ def test_merge_bridge_chunk_outputs_remaps_middle_indices(tmp_path) -> None:
     assert set(upper[:, 1].tolist()) == {200, 201, 202}
     assert set(lower[:, 1].tolist()) == {0, 1, 2}
     assert set(upper[:, 0].tolist()) == {0, 1, 2}
+
+
+def test_run_bridge_pipeline_enforces_global_final_guardrail_and_keeps_work_out_of_output(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        bridge_module,
+        "_estimate_chunk_growth",
+        lambda **kwargs: ("lower", 100, 100, 0.0, 0.0),
+    )
+    monkeypatch.setattr(
+        bridge_module,
+        "bridge_grow",
+        lambda *args, **kwargs: BridgeGrowResult(
+            generated_poses=100,
+            emitted_poses=1,
+            output_dir=kwargs.get("output_dir"),
+            emitted_origin_path=(
+                None
+                if kwargs.get("output_dir") is None
+                else Path(kwargs["output_dir"]) / "emitted_origin.npy"
+            ),
+        ),
+    )
+    monkeypatch.setattr(bridge_module, "_add_pose_dir_to_bloom", lambda *args, **kwargs: 1)
+
+    def fake_organize(pose_dir, **kwargs):
+        pose_dir = Path(pose_dir)
+        pose_dir.mkdir(parents=True, exist_ok=True)
+        origin = np.array([0], dtype=np.uint64)
+        np.save(pose_dir / "organized_origin.npy", origin)
+        return origin
+
+    def fake_identity(first_pose_dir, second_pose_dir, output_dir, **kwargs):
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "identity").mkdir(exist_ok=True)
+        np.save(output_dir / "connections-lower.npy", np.empty((0, 2), dtype=np.uint64))
+        np.save(output_dir / "connections-upper.npy", np.empty((0, 2), dtype=np.uint64))
+        return {"identity_poses": 7}
+
+    monkeypatch.setattr(bridge_module, "organize_bridge_intermediate", fake_organize)
+    monkeypatch.setattr(bridge_module, "run_identity_and_compose_bridge", fake_identity)
+    monkeypatch.setattr(bridge_module, "discover_organized", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        bridge_module,
+        "PoseReader",
+        type("FakePoseReader", (), {"get_nposes": staticmethod(lambda path: 7)}),
+    )
+
+    cfg = BridgeGrowConfig(
+        source_poses=tmp_path / "source",
+        source_sequence="AA",
+        target_sequence="AU",
+        direction="forward",
+        crmsd=1.0,
+        ov_rmsd=1.0,
+    )
+    out = tmp_path / "out"
+
+    with pytest.raises(ValueError, match="final poses 14 exceeds guardrail 10"):
+        run_bridge_pipeline(
+            lower_config=cfg,
+            upper_config=cfg,
+            output_dir=out,
+            memory_bytes=1024,
+            max_intermediate_poses=10,
+            max_final_poses=10,
+            rotamer_chunks=2,
+        )
+
+    assert not (out / "bridge-work").exists()

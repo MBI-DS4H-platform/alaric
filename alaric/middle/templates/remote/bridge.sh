@@ -1,3 +1,4 @@
+export TMPDIR="${ALARIC_REMOTE_SCRATCH_DIR:-${TMPDIR:-/tmp}}"
 {{ python }} {{ alaric_dir }}/bridge.py \
   --lower-poses {{ lower_result_path }} \
   --upper-poses {{ upper_result_path }} \

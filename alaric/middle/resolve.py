@@ -228,10 +228,10 @@ def resolve_action(
         p["lower_sequence"] = final_sequence(dep1 if frag1 == lower_fragment else dep2)
         p["upper_sequence"] = final_sequence(dep1 if frag1 == higher_fragment else dep2)
         p["middle_sequence"] = resolve_sequence(project, middle_fragment)
-        lower_crmsd = p.pop("lower-crmsd")
-        lower_ovrmsd = p.pop("lower-ovrmsd")
-        upper_crmsd = p.pop("upper-crmsd")
-        upper_ovrmsd = p.pop("upper-ovrmsd")
+        lower_crmsd = p.pop("lower-crmsd", "auto")
+        lower_ovrmsd = p.pop("lower-ovrmsd", "auto")
+        upper_crmsd = p.pop("upper-crmsd", "auto")
+        upper_ovrmsd = p.pop("upper-ovrmsd", "auto")
         if lower_crmsd == "auto" or lower_ovrmsd == "auto":
             auto_crmsd, auto_ovrmsd = _pair_thresholds(project, lower_fragment, middle_fragment)
             if lower_crmsd == "auto":

@@ -38,7 +38,7 @@ REQUIRED: dict[str, set[str]] = {
     "mask": {"input", "score_input", "threshold"},
     "filter": {"input"},
     "identity": {"input1", "input2"},
-    "bridge": {"input1", "input2", "lower-crmsd", "lower-ovrmsd", "upper-crmsd", "upper-ovrmsd"},
+    "bridge": {"input1", "input2"},
 }
 
 DEPENDENCY_FIELDS: dict[str, dict[str, str]] = {
