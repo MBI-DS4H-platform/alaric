@@ -17,10 +17,11 @@ from alaric.bridge import (
     expected_intermediate_size,
     hash_bucket_payload,
     hash_pose_keys,
+    merge_bridge_chunk_outputs,
     optimal_hash_count,
     pack_pose_keys,
 )
-from alaric.poses import decode_pool, discover_unorganized, read_arc_file
+from alaric.poses import decode_pool, discover_unorganized, read_arc_file, write_arc_file
 
 
 def test_pack_and_hash_pose_keys_are_deterministic() -> None:
@@ -165,3 +166,35 @@ def test_compose_bridge_connections_preserves_final_orientation(tmp_path) -> Non
     )
     np.testing.assert_array_equal(lower_rev, np.array([[20, 2], [22, 1]], dtype=np.uint64))
     np.testing.assert_array_equal(upper_rev, np.array([[1, 10], [2, 11]], dtype=np.uint64))
+
+
+def test_merge_bridge_chunk_outputs_remaps_middle_indices(tmp_path) -> None:
+    def write_chunk(path, conformers, rotamers, translations, lower, upper):
+        path.mkdir()
+        from alaric.poses import pack_pool
+
+        packed = pack_pool(
+            np.array(conformers, dtype=np.uint16),
+            np.array(rotamers, dtype=np.uint16),
+            np.array(translations, dtype=np.int16),
+            bucket_size=16,
+        )
+        assert len(packed) == 1
+        M, O, C, P = packed[0]
+        write_arc_file(path / "poses-1.arc", M, O, C, P, bucket_size=16)
+        np.save(path / "connections-lower.npy", np.array(lower, dtype=np.uint64))
+        np.save(path / "connections-upper.npy", np.array(upper, dtype=np.uint64))
+
+    chunk1 = tmp_path / "chunk1"
+    chunk2 = tmp_path / "chunk2"
+    write_chunk(chunk1, [1, 1], [0, 1], [[5, 0, 0], [0, 0, 0]], [[100, 0], [101, 1]], [[0, 200], [1, 201]])
+    write_chunk(chunk2, [1], [2], [[2, 0, 0]], [[102, 0]], [[0, 202]])
+
+    lower, upper = merge_bridge_chunk_outputs([chunk1, chunk2], tmp_path / "final", bucket_size=16, nprocs=1)
+
+    assert lower.shape == (3, 2)
+    assert upper.shape == (3, 2)
+    assert set(lower[:, 0].tolist()) == {100, 101, 102}
+    assert set(upper[:, 1].tolist()) == {200, 201, 202}
+    assert set(lower[:, 1].tolist()) == {0, 1, 2}
+    assert set(upper[:, 0].tolist()) == {0, 1, 2}

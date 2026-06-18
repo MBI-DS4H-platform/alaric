@@ -16,7 +16,7 @@ if str(_CODE_DIR) not in sys.path:
 import grow
 import identity_filter
 import organize
-from poses import pack_pool, write_arc_file
+from poses import PoseReader, pack_pool, write_arc_file
 
 
 KEY_DTYPE = np.dtype(
@@ -972,3 +972,94 @@ def run_identity_and_compose_bridge(
         first_side=first_side,
     )
     return manifest
+
+
+def merge_bridge_chunk_outputs(
+    chunk_dirs: list[Path],
+    output_dir: Path,
+    *,
+    bucket_size: int = 16,
+    nprocs: int = 1,
+    max_poses_per_file: int = 100_000_000,
+    compress: bool = True,
+) -> tuple[np.ndarray, np.ndarray]:
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    writer = _MemoryPoseOriginWriter(output_dir, bucket_size=bucket_size)
+    lower_parts: list[np.ndarray] = []
+    upper_parts: list[np.ndarray] = []
+    base = 0
+    spans: list[tuple[int, int]] = []
+    for chunk_dir in chunk_dirs:
+        chunk_dir = Path(chunk_dir)
+        reader = PoseReader(chunk_dir)
+        chunk_start = base
+        for pose_chunk in reader.iter_chunks():
+            n = len(pose_chunk)
+            origins = np.arange(base, base + n, dtype=np.uint64)
+            writer.add_chunk(
+                pose_chunk.conformers,
+                pose_chunk.rotamers,
+                pose_chunk.translations_grid,
+                origins,
+            )
+            base += n
+        spans.append((chunk_start, base))
+        lower = np.load(chunk_dir / "connections-lower.npy")
+        upper = np.load(chunk_dir / "connections-upper.npy")
+        lower = np.asarray(lower, dtype=np.uint64).copy()
+        upper = np.asarray(upper, dtype=np.uint64).copy()
+        lower[:, 1] += np.uint64(chunk_start)
+        upper[:, 0] += np.uint64(chunk_start)
+        lower_parts.append(lower)
+        upper_parts.append(upper)
+
+    old_middle_ids = writer.finish()
+    np.save(output_dir / "chunk-middle-origin.npy", old_middle_ids)
+    organize.organize_pose_dir(
+        output_dir,
+        nprocs=nprocs,
+        max_poses_per_file=max_poses_per_file,
+        compress=compress,
+        return_order_array=True,
+        order_array_path=output_dir / "order-array.npy",
+    )
+    order = np.load(output_dir / "order-array.npy")
+    if len(order) != len(old_middle_ids):
+        raise ValueError("merged order array length does not match merged pose count")
+    organized_old_ids = old_middle_ids[order.astype(np.intp, copy=False)]
+    old_to_new = np.empty(len(organized_old_ids), dtype=np.uint64)
+    old_to_new[organized_old_ids.astype(np.intp, copy=False)] = np.arange(
+        len(organized_old_ids),
+        dtype=np.uint64,
+    )
+
+    lower_all = (
+        np.concatenate(lower_parts, axis=0)
+        if lower_parts
+        else np.empty((0, 2), dtype=np.uint64)
+    )
+    upper_all = (
+        np.concatenate(upper_parts, axis=0)
+        if upper_parts
+        else np.empty((0, 2), dtype=np.uint64)
+    )
+    if len(lower_all):
+        lower_all[:, 1] = old_to_new[lower_all[:, 1].astype(np.intp, copy=False)]
+        lower_all = lower_all[np.lexsort((lower_all[:, 1], lower_all[:, 0]))]
+    if len(upper_all):
+        upper_all[:, 0] = old_to_new[upper_all[:, 0].astype(np.intp, copy=False)]
+        upper_all = upper_all[np.lexsort((upper_all[:, 1], upper_all[:, 0]))]
+    np.save(output_dir / "connections-lower.npy", lower_all)
+    np.save(output_dir / "connections-upper.npy", upper_all)
+    manifest = {
+        "chunks": [str(Path(p)) for p in chunk_dirs],
+        "chunk_spans": spans,
+        "middle_poses": int(len(old_middle_ids)),
+        "lower_connections": int(len(lower_all)),
+        "upper_connections": int(len(upper_all)),
+    }
+    (output_dir / "bridge-merge.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+    )
+    return lower_all, upper_all
