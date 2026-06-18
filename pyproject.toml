@@ -25,6 +25,7 @@ alaric-result-clean = "alaric.middle.result:clean_main"
 alaric-result-check = "alaric.middle.result:check_main"
 alaric-result-download = "alaric.middle.result:download_main"
 alaric-result-upload = "alaric.middle.result:upload_main"
+alaric-bridge-estimate = "alaric.bridge_estimate:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
