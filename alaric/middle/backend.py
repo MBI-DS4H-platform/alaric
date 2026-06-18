@@ -244,6 +244,7 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
                 "max_final_poses": q(p.get("max-final-poses", 1_000_000)),
                 "nprocs": q(p.get("nprocs", 1)),
                 "rotamer_chunks": q(p.get("rotamer-chunks", 1)),
+                "estimator_seed": q(p.get("estimator-seed", 0)),
             }
         )
     return context

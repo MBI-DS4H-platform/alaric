@@ -18,7 +18,7 @@ if str(_CODE_DIR) not in sys.path:
 import grow
 import identity_filter
 import organize
-from poses import PoseReader, decode_pool, discover_organized, discover_unorganized, pack_pool, read_arc_file, write_arc_file
+from poses import PoseReader, decode_pool, discover_organized, discover_unorganized, pack_pool, read_arc_file, select_pose_indices, write_arc_file
 
 
 KEY_DTYPE = np.dtype(
@@ -1282,6 +1282,133 @@ def _add_pose_dir_to_bloom(pose_dir: Path, bloom: BloomFilter, *, desc: str = "B
     return total
 
 
+def _write_sample_pose_dir(
+    source_dir: Path,
+    output_dir: Path,
+    indices: np.ndarray,
+    *,
+    bucket_size: int,
+) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if len(indices) == 0:
+        raise ValueError("cannot build an empty bridge estimate sample")
+    chunk = select_pose_indices(source_dir, indices)
+    packed = pack_pool(
+        chunk.conformers,
+        chunk.rotamers,
+        chunk.translations_grid,
+        bucket_size=bucket_size,
+    )
+    for file_index, (M, O, C, P) in enumerate(packed, start=1):
+        write_arc_file(
+            output_dir / f"poses-{file_index}.arc",
+            M,
+            O,
+            C,
+            P,
+            bucket_size=bucket_size,
+        )
+
+
+def _estimate_chunk_growth(
+    *,
+    lower_config: BridgeGrowConfig,
+    upper_config: BridgeGrowConfig,
+    chunk_dir: Path,
+    chunk: int,
+    rotamer_chunks: int,
+    metadata: BloomMetadata,
+    estimator_seed: int,
+    sample_size: int = 1000,
+) -> tuple[str, int, int, float, float]:
+    estimate_dir = chunk_dir / "estimate"
+    lower_total = PoseReader.get_nposes(lower_config.source_poses)
+    upper_total = PoseReader.get_nposes(upper_config.source_poses)
+    lower_indices = deterministic_sample_indices(
+        lower_total,
+        seed=estimator_seed + 2 * chunk,
+        sample_size=sample_size,
+    )
+    upper_indices = deterministic_sample_indices(
+        upper_total,
+        seed=estimator_seed + 2 * chunk + 1,
+        sample_size=sample_size,
+    )
+    lower_sample_dir = estimate_dir / "lower-sample"
+    upper_sample_dir = estimate_dir / "upper-sample"
+    _report(
+        f"[chunk {chunk + 1}/{rotamer_chunks}] Estimating growth from "
+        f"{len(lower_indices):,}/{lower_total:,} lower and "
+        f"{len(upper_indices):,}/{upper_total:,} upper source poses..."
+    )
+    _write_sample_pose_dir(
+        lower_config.source_poses,
+        lower_sample_dir,
+        lower_indices,
+        bucket_size=lower_config.bucket_size,
+    )
+    _write_sample_pose_dir(
+        upper_config.source_poses,
+        upper_sample_dir,
+        upper_indices,
+        bucket_size=upper_config.bucket_size,
+    )
+    lower_sample_config = BridgeGrowConfig(
+        **{
+            **lower_config.__dict__,
+            "source_poses": lower_sample_dir,
+            "rotamer_chunk": RotamerChunk(chunk, rotamer_chunks),
+        }
+    )
+    upper_sample_config = BridgeGrowConfig(
+        **{
+            **upper_config.__dict__,
+            "source_poses": upper_sample_dir,
+            "rotamer_chunk": RotamerChunk(chunk, rotamer_chunks),
+        }
+    )
+    lower_sample = bridge_grow(
+        lower_sample_config,
+        report=True,
+        desc=f"Estimate lower {chunk + 1}/{rotamer_chunks}",
+    )
+    upper_sample = bridge_grow(
+        upper_sample_config,
+        report=True,
+        desc=f"Estimate upper {chunk + 1}/{rotamer_chunks}",
+    )
+    lower_est = int(round(lower_sample.generated_poses * lower_total / len(lower_indices)))
+    upper_est = int(round(upper_sample.generated_poses * upper_total / len(upper_indices)))
+    lower_first_expected = expected_intermediate_size(
+        lower_est,
+        upper_est,
+        metadata.n_bits,
+        metadata.n_hashes,
+    )
+    upper_first_expected = expected_intermediate_size(
+        upper_est,
+        lower_est,
+        metadata.n_bits,
+        metadata.n_hashes,
+    )
+    first_side = "lower" if lower_first_expected <= upper_first_expected else "upper"
+    _report(
+        f"  estimate lower generated={lower_sample.generated_poses:,} "
+        f"from {len(lower_indices):,} sampled source poses; "
+        f"full_generated_est={lower_est:,}"
+    )
+    _report(
+        f"  estimate upper generated={upper_sample.generated_poses:,} "
+        f"from {len(upper_indices):,} sampled source poses; "
+        f"full_generated_est={upper_est:,}"
+    )
+    _report(
+        f"  expected initial intermediate: lower-first={lower_first_expected:,.0f} "
+        f"upper-first={upper_first_expected:,.0f}; choosing {first_side}-first"
+    )
+    return first_side, lower_est, upper_est, lower_first_expected, upper_first_expected
+
+
 def run_bridge_pipeline(
     *,
     lower_config: BridgeGrowConfig,
@@ -1292,6 +1419,7 @@ def run_bridge_pipeline(
     max_final_poses: int,
     nprocs: int = 1,
     rotamer_chunks: int = 1,
+    estimator_seed: int = 0,
 ) -> dict[str, int | str]:
     if rotamer_chunks <= 0:
         raise ValueError("rotamer_chunks must be positive")
@@ -1319,28 +1447,57 @@ def run_bridge_pipeline(
             f"allocated={_fmt_count((metadata.n_bits + 7) // 8)} bytes "
             f"budget={_fmt_count(memory_bytes)} bytes"
         )
-
-        _report(f"[chunk {chunk + 1}/{rotamer_chunks}] Growing upper side into full Bloom...")
-        upper_full = BloomFilter.from_metadata(metadata)
-        upper_full_result = bridge_grow(
-            upper_chunk,
-            build_bloom=upper_full,
-            desc=f"Upper full Bloom {chunk + 1}/{rotamer_chunks}",
+        first_side, lower_est, upper_est, expected_lower_first, expected_upper_first = _estimate_chunk_growth(
+            lower_config=lower_config,
+            upper_config=upper_config,
+            chunk_dir=chunk_dir,
+            chunk=chunk,
+            rotamer_chunks=rotamer_chunks,
+            metadata=metadata,
+            estimator_seed=estimator_seed,
         )
-        _report(f"  upper full generated={_fmt_count(upper_full_result.generated_poses)}")
+        if first_side == "lower":
+            bloom_side = "upper"
+            bloom_config = upper_chunk
+            first_config = lower_chunk
+            second_config = upper_chunk
+            expected_first_from_sample = expected_lower_first
+            bloom_est = upper_est
+        else:
+            bloom_side = "lower"
+            bloom_config = lower_chunk
+            first_config = upper_chunk
+            second_config = lower_chunk
+            expected_first_from_sample = expected_upper_first
+            bloom_est = lower_est
 
-        _report(f"[chunk {chunk + 1}/{rotamer_chunks}] Growing lower side through upper Bloom...")
+        _report(
+            f"[chunk {chunk + 1}/{rotamer_chunks}] Growing {bloom_side} side into full Bloom "
+            f"(sample full_generated_est={_fmt_count(bloom_est)})..."
+        )
+        full_bloom = BloomFilter.from_metadata(metadata)
+        full_bloom_result = bridge_grow(
+            bloom_config,
+            build_bloom=full_bloom,
+            desc=f"{bloom_side.capitalize()} full Bloom {chunk + 1}/{rotamer_chunks}",
+        )
+        _report(f"  {bloom_side} full generated={_fmt_count(full_bloom_result.generated_poses)}")
+
+        _report(
+            f"[chunk {chunk + 1}/{rotamer_chunks}] Growing {first_side} side through "
+            f"{bloom_side} Bloom (sample expected_total={expected_first_from_sample:,.0f})..."
+        )
         first_dir = chunk_dir / "intermediate-first"
         first = bridge_grow(
-            lower_chunk,
+            first_config,
             output_dir=first_dir,
-            bloom=upper_full,
+            bloom=full_bloom,
             desc=f"First intermediate {chunk + 1}/{rotamer_chunks}",
-            bloom_inserted_count=upper_full_result.generated_poses,
+            bloom_inserted_count=full_bloom_result.generated_poses,
         )
         expected_first = expected_intermediate_size(
             first.generated_poses,
-            upper_full_result.generated_poses,
+            full_bloom_result.generated_poses,
             metadata.n_bits,
             metadata.n_hashes,
         )
@@ -1355,9 +1512,10 @@ def run_bridge_pipeline(
         first_bloom = BloomFilter.from_metadata(metadata)
         _add_pose_dir_to_bloom(first_dir, first_bloom, desc=f"First intermediate Bloom {chunk + 1}/{rotamer_chunks}")
 
-        _report(f"[chunk {chunk + 1}/{rotamer_chunks}] Growing upper side through first-intermediate Bloom...")
+        second_side = "upper" if first_side == "lower" else "lower"
+        _report(f"[chunk {chunk + 1}/{rotamer_chunks}] Growing {second_side} side through first-intermediate Bloom...")
         expected_second = expected_intermediate_size(
-            upper_full_result.generated_poses,
+            full_bloom_result.generated_poses,
             first.emitted_poses,
             metadata.n_bits,
             metadata.n_hashes,
@@ -1365,7 +1523,7 @@ def run_bridge_pipeline(
         _report(f"  expected second intermediate total={expected_second:,.0f}")
         second_dir = chunk_dir / "intermediate-second"
         second = bridge_grow(
-            upper_chunk,
+            second_config,
             output_dir=second_dir,
             bloom=first_bloom,
             desc=f"Second intermediate {chunk + 1}/{rotamer_chunks}",
@@ -1392,7 +1550,7 @@ def run_bridge_pipeline(
             chunk_dir,
             first_origin_path=first_dir / "organized_origin.npy",
             second_origin_path=second_dir / "organized_origin.npy",
-            first_side="lower",
+            first_side=first_side,
             max_poses_per_file=max_final_poses,
         )
         final_count = PoseReader.get_nposes(chunk_dir / "identity")
@@ -1454,6 +1612,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-final-poses", type=int, default=1_000_000)
     parser.add_argument("--nprocs", type=int, default=1)
     parser.add_argument("--rotamer-chunks", type=int, default=1)
+    parser.add_argument("--estimator-seed", type=int, default=0)
     parser.add_argument("--pdb-exclude", nargs="*", default=[])
     return parser
 
@@ -1487,6 +1646,7 @@ def main(argv: list[str] | None = None) -> int:
         max_final_poses=args.max_final_poses,
         nprocs=args.nprocs,
         rotamer_chunks=args.rotamer_chunks,
+        estimator_seed=args.estimator_seed,
     )
     return 0
 

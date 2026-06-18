@@ -284,6 +284,7 @@ def test_bridge_middle_integration_and_runtime_knobs_are_non_load_bearing(tmp_pa
     assert "--lower-ov-rmsd 0.75" in body
     assert "--upper-crmsd 0.35" in body
     assert "--upper-ov-rmsd 0.85" in body
+    assert "--estimator-seed 0" in body
 
 
 def test_checksum_is_zstd_transparent(tmp_path: Path) -> None:

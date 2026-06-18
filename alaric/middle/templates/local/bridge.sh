@@ -13,4 +13,5 @@
   --max-intermediate-poses {{ max_intermediate_poses }} \
   --max-final-poses {{ max_final_poses }} \
   --nprocs {{ nprocs }} \
-  --rotamer-chunks {{ rotamer_chunks }}
+  --rotamer-chunks {{ rotamer_chunks }} \
+  --estimator-seed {{ estimator_seed }}
