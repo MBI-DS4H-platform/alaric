@@ -183,10 +183,27 @@ class BloomMetadata:
         memory_bytes: int,
         expected_items: int,
         max_hashes: int = 16,
+        target_fpr: float = 1e-9,
     ) -> "BloomMetadata":
         if memory_bytes <= 0:
             raise ValueError("memory_bytes must be positive")
-        n_bits = int(memory_bytes) * 8
+        if target_fpr <= 0.0 or target_fpr >= 1.0:
+            raise ValueError("target_fpr must be between 0 and 1")
+        budget_bits = int(memory_bytes) * 8
+        if expected_items <= 0:
+            n_bits = min(budget_bits, 64)
+        else:
+            requested_bits = min(
+                _bits_for_target_fpr(
+                    expected_items,
+                    target_fpr,
+                    max_hashes=max_hashes,
+                ),
+                budget_bits,
+            )
+            # Round to full uint64 words; this avoids surprising tiny overflows
+            # in bit-position math and keeps the allocation shape stable.
+            n_bits = max(64, ((requested_bits + 63) // 64) * 64)
         n_hashes = optimal_hash_count(expected_items, n_bits, max_hashes=max_hashes)
         return cls(
             n_bits=n_bits,
@@ -197,6 +214,30 @@ class BloomMetadata:
 
     def to_json_dict(self) -> dict[str, int | float]:
         return asdict(self)
+
+
+def _bits_for_target_fpr(
+    n_items: int,
+    target_fpr: float,
+    *,
+    max_hashes: int,
+) -> int:
+    if n_items <= 0:
+        return 64
+    best_bits: int | None = None
+    target = float(target_fpr)
+    for k in range(1, int(max_hashes) + 1):
+        root = target ** (1.0 / k)
+        if root >= 1.0:
+            continue
+        denominator = -math.log1p(-root)
+        if denominator <= 0.0:
+            continue
+        bits = math.ceil(k * float(n_items) / denominator)
+        best_bits = bits if best_bits is None else min(best_bits, bits)
+    if best_bits is None:
+        raise ValueError("could not size Bloom filter for target_fpr")
+    return int(best_bits)
 
 
 class BloomFilter:
@@ -592,6 +633,49 @@ def _target_rotamer_positions(target_library, target_conformer: int, chunk: Rota
     return np.arange(first, last, dtype=np.int64)
 
 
+def _bridge_target_rotamer_count(
+    target_library,
+    target_conformer: int,
+    fixed_positions: np.ndarray | None,
+    chunk: RotamerChunk | None,
+) -> int:
+    if fixed_positions is None:
+        return len(_target_rotamer_positions(target_library, target_conformer, chunk))
+    if chunk is None:
+        return int(len(fixed_positions))
+    first, last = chunk.bounds(len(target_library.get_rotamers(int(target_conformer))))
+    return int(np.count_nonzero((fixed_positions >= first) & (fixed_positions < last)))
+
+
+def _estimate_bridge_trace_work(
+    source_caches: dict[int, grow.SourceConformerCache],
+    target_library,
+    target_to_sources: dict[int, np.ndarray],
+    target_conformers: np.ndarray,
+    fixed_target_rotamer_positions: np.ndarray | None,
+    rotamer_chunk: RotamerChunk | None,
+) -> int:
+    total = 0
+    for target_conformer in target_conformers.tolist():
+        sources = target_to_sources.get(int(target_conformer))
+        if sources is None:
+            continue
+        target_rotamer_count = _bridge_target_rotamer_count(
+            target_library,
+            int(target_conformer),
+            fixed_target_rotamer_positions,
+            rotamer_chunk,
+        )
+        if target_rotamer_count == 0:
+            continue
+        for source_conformer in sources.tolist():
+            cache = source_caches.get(int(source_conformer))
+            if cache is None:
+                continue
+            total += len(cache.rotamer_flat) * target_rotamer_count
+    return int(total)
+
+
 def bridge_grow(
     config: BridgeGrowConfig,
     *,
@@ -689,16 +773,27 @@ def bridge_grow(
     translation_sets = grow._precompute_translation_sets()
     writer = None if output_dir is None else _MemoryPoseOriginWriter(output_dir, bucket_size=config.bucket_size)
     total_generated = 0
+    trace_work_total = _estimate_bridge_trace_work(
+        source_caches,
+        target_library,
+        target_to_sources,
+        target_conformers,
+        fixed_target_rotamer_positions,
+        config.rotamer_chunk,
+    )
+    if report:
+        _report(f"    trace work={_fmt_count(trace_work_total)} rotpair")
 
     try:
         progress = tqdm(
-            target_conformers.tolist(),
+            total=trace_work_total,
             desc=desc or "Bridge grow",
-            unit="conf",
+            unit="rotpair",
+            unit_scale=True,
             mininterval=2.0,
             disable=not report,
         )
-        for target_conformer in progress:
+        for target_conformer in target_conformers.tolist():
             if target_conformer not in target_to_sources:
                 continue
             coords_t = target_library.coordinates[target_conformer].astype(np.float32, copy=False)
@@ -723,7 +818,6 @@ def bridge_grow(
             means_q = np.einsum("j,njk->nk", mean_t0, rot_qq).astype(np.float32, copy=False)
 
             trace_batches = []
-            row_start = 0
             for source_conformer in target_to_sources[target_conformer].tolist():
                 cache = source_caches.get(int(source_conformer))
                 if cache is None:
@@ -735,22 +829,25 @@ def bridge_grow(
                     cache.rotamer_matrices,
                     optimize=True,
                 ).reshape(len(cache.rotamer_matrices), 9)
-                row_stop = row_start + len(source_trace_vectors)
-                trace_batches.append((cache, row_start, row_stop, np.ascontiguousarray(source_trace_vectors)))
-                row_start = row_stop
+                trace_batches.append((cache, np.ascontiguousarray(source_trace_vectors)))
             if not trace_batches:
                 continue
-            trace_scores = np.concatenate([batch[3] for batch in trace_batches], axis=0) @ rot_qq_flat_t
 
-            for cache, row_start, row_stop, _source_trace_vectors in trace_batches:
-                rc_sd = cache.pose_trace + target_trace - 2.0 * trace_scores[row_start:row_stop]
+            for cache, source_trace_vectors in trace_batches:
+                trace_work = len(cache.rotamer_flat) * len(rot_qq)
+                trace_scores = source_trace_vectors @ rot_qq_flat_t
+                rc_sd = cache.pose_trace + target_trace - 2.0 * trace_scores
                 rc_sd = np.maximum(rc_sd, 0.0).astype(np.float32, copy=False)
                 pp_rows, qq_cols = np.nonzero(rc_sd < total_overlap_sd)
                 if pp_rows.size == 0:
+                    if trace_work:
+                        progress.update(trace_work)
                     continue
                 rc_kept = rc_sd[pp_rows, qq_cols]
                 repeat_idx, translation_indices, instance_translations = _expand_source_instances_with_indices(cache, pp_rows)
                 if instance_translations.size == 0:
+                    if trace_work:
+                        progress.update(trace_work)
                     continue
                 pp_rows_exp = pp_rows[repeat_idx]
                 qq_cols_exp = qq_cols[repeat_idx]
@@ -876,13 +973,14 @@ def bridge_grow(
                             out_translations[hits],
                             origins[hits],
                         )
-                    if report:
-                        emitted_now = 0 if writer is None else writer.total_poses
-                        progress.set_postfix(
-                            generated=total_generated,
-                            emitted=emitted_now,
-                            refresh=False,
-                        )
+                if trace_work:
+                    progress.update(trace_work)
+                    emitted_now = 0 if writer is None else writer.total_poses
+                    progress.set_postfix(
+                        generated=total_generated,
+                        emitted=emitted_now,
+                        refresh=False,
+                    )
         emitted = 0
         origin_path = emitted_origin_path
         if writer is not None:
@@ -1190,7 +1288,9 @@ def run_bridge_pipeline(
         metadata = BloomMetadata.from_budget(memory_bytes=memory_bytes, expected_items=max(1, max_intermediate_poses))
         _report(
             f"  Bloom bits={_fmt_count(metadata.n_bits)} hashes={metadata.n_hashes} "
-            f"expected_fpr={metadata.expected_fpr:.6g}"
+            f"expected_fpr={metadata.expected_fpr:.6g} "
+            f"allocated={_fmt_count((metadata.n_bits + 7) // 8)} bytes "
+            f"budget={_fmt_count(memory_bytes)} bytes"
         )
 
         _report(f"[chunk {chunk + 1}/{rotamer_chunks}] Growing upper side into full Bloom...")
@@ -1210,9 +1310,16 @@ def run_bridge_pipeline(
             bloom=upper_full,
             desc=f"First intermediate {chunk + 1}/{rotamer_chunks}",
         )
+        expected_first = expected_intermediate_size(
+            first.generated_poses,
+            upper_full_result.generated_poses,
+            metadata.n_bits,
+            metadata.n_hashes,
+        )
         enforce_intermediate_guardrail(first.emitted_poses, max_intermediate_poses)
         _report(
             f"  first intermediate generated={_fmt_count(first.generated_poses)} "
+            f"expected_total={expected_first:,.0f} "
             f"emitted={_fmt_count(first.emitted_poses)}"
         )
 
@@ -1221,6 +1328,13 @@ def run_bridge_pipeline(
         _add_pose_dir_to_bloom(first_dir, first_bloom, desc=f"First intermediate Bloom {chunk + 1}/{rotamer_chunks}")
 
         _report(f"[chunk {chunk + 1}/{rotamer_chunks}] Growing upper side through first-intermediate Bloom...")
+        expected_second = expected_intermediate_size(
+            upper_full_result.generated_poses,
+            first.emitted_poses,
+            metadata.n_bits,
+            metadata.n_hashes,
+        )
+        _report(f"  expected second intermediate total={expected_second:,.0f}")
         second_dir = chunk_dir / "intermediate-second"
         second = bridge_grow(
             upper_chunk,
@@ -1231,6 +1345,7 @@ def run_bridge_pipeline(
         enforce_intermediate_guardrail(second.emitted_poses, max_intermediate_poses)
         _report(
             f"  second intermediate generated={_fmt_count(second.generated_poses)} "
+            f"expected_total={expected_second:,.0f} "
             f"emitted={_fmt_count(second.emitted_poses)}"
         )
 

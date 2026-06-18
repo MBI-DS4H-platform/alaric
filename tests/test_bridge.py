@@ -75,6 +75,15 @@ def test_bloom_formula_and_hash_count_optimization() -> None:
     assert bloom_fpr(100, 1024, k) == min(bloom_fpr(100, 1024, i) for i in range(1, 17))
 
 
+def test_bloom_budget_is_a_ceiling_not_a_required_allocation() -> None:
+    metadata = BloomMetadata.from_budget(
+        memory_bytes=240 * 1024**3,
+        expected_items=1_000_000_000,
+    )
+    assert metadata.n_bits // 8 < 10 * 1024**3
+    assert metadata.expected_fpr <= 1e-9
+
+
 def test_memory_pose_origin_writer_emits_matching_unorganized_origins(tmp_path) -> None:
     writer = _MemoryPoseOriginWriter(tmp_path, bucket_size=16)
     conformers = np.array([2, 1, 2, 1], dtype=np.uint16)
