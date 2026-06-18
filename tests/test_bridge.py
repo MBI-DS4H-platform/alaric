@@ -72,6 +72,19 @@ def test_bloom_filter_has_no_false_negatives_for_inserted_keys() -> None:
     assert bloom.probe_keys(keys).all()
 
 
+def test_bloom_filter_confines_each_key_to_one_block() -> None:
+    conformers = np.array([1, 2, 3], dtype=np.uint16)
+    rotamers = np.array([4, 5, 6], dtype=np.uint16)
+    translations = np.array([[0, 0, 0], [10, -2, 1], [-5, 3, 7]], dtype=np.int16)
+    hashes = hash_pose_keys(pack_pose_keys(conformers, rotamers, translations))
+    bloom = BloomFilter(n_bits=4096, n_hashes=6, block_bits=512)
+
+    owner_blocks = bloom.block_indices(hashes)
+    for hash_index in range(bloom.n_hashes):
+        positions = bloom._positions(hashes, hash_index)
+        np.testing.assert_array_equal(positions // bloom.block_bits, owner_blocks)
+
+
 def test_bloom_formula_and_hash_count_optimization() -> None:
     assert bloom_fpr(0, 1024, 4) == 0.0
     expected = (1.0 - math.exp(-4.0 * 100.0 / 1024.0)) ** 4
@@ -87,6 +100,7 @@ def test_bloom_budget_is_a_ceiling_not_a_required_allocation() -> None:
         expected_items=1_000_000_000,
     )
     assert metadata.n_bits // 8 < 10 * 1024**3
+    assert metadata.n_bits % metadata.block_bits == 0
     assert metadata.expected_fpr <= 1e-9
 
 

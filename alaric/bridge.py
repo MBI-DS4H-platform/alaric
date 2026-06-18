@@ -32,6 +32,7 @@ KEY_DTYPE = np.dtype(
         ("tz", "<i2"),
     ]
 )
+DEFAULT_BLOOM_BLOCK_BITS = 512
 
 
 def _report(message: str) -> None:
@@ -177,6 +178,7 @@ class BloomMetadata:
     n_hashes: int
     expected_items: int
     expected_fpr: float
+    block_bits: int = DEFAULT_BLOOM_BLOCK_BITS
 
     @classmethod
     def from_budget(
@@ -186,32 +188,39 @@ class BloomMetadata:
         expected_items: int,
         max_hashes: int = 16,
         target_fpr: float = 1e-9,
+        block_bits: int = DEFAULT_BLOOM_BLOCK_BITS,
     ) -> "BloomMetadata":
         if memory_bytes <= 0:
             raise ValueError("memory_bytes must be positive")
+        block_bits = int(block_bits)
+        if block_bits <= 0 or block_bits % 64 != 0:
+            raise ValueError("block_bits must be a positive multiple of 64")
         if target_fpr <= 0.0 or target_fpr >= 1.0:
             raise ValueError("target_fpr must be between 0 and 1")
         budget_bits = int(memory_bytes) * 8
+        if budget_bits < block_bits:
+            raise ValueError("memory budget is smaller than one Bloom block")
+        usable_budget_bits = (budget_bits // block_bits) * block_bits
         if expected_items <= 0:
-            n_bits = min(budget_bits, 64)
+            n_bits = block_bits
         else:
-            requested_bits = min(
-                _bits_for_target_fpr(
-                    expected_items,
-                    target_fpr,
-                    max_hashes=max_hashes,
-                ),
-                budget_bits,
+            requested_bits = _bits_for_target_fpr(
+                expected_items,
+                target_fpr,
+                max_hashes=max_hashes,
             )
-            # Round to full uint64 words; this avoids surprising tiny overflows
-            # in bit-position math and keeps the allocation shape stable.
-            n_bits = max(64, ((requested_bits + 63) // 64) * 64)
+            rounded_bits = max(
+                block_bits,
+                ((requested_bits + block_bits - 1) // block_bits) * block_bits,
+            )
+            n_bits = min(rounded_bits, usable_budget_bits)
         n_hashes = optimal_hash_count(expected_items, n_bits, max_hashes=max_hashes)
         return cls(
             n_bits=n_bits,
             n_hashes=n_hashes,
             expected_items=int(expected_items),
             expected_fpr=bloom_fpr(expected_items, n_bits, n_hashes),
+            block_bits=block_bits,
         )
 
     def to_json_dict(self) -> dict[str, int | float]:
@@ -243,7 +252,7 @@ def _bits_for_target_fpr(
 
 
 class BloomFilter:
-    """Single-process exact-key Bloom filter backed by a uint64 bitset."""
+    """Single-process blocked Bloom filter backed by a uint64 bitset."""
 
     def __init__(
         self,
@@ -252,14 +261,22 @@ class BloomFilter:
         *,
         bits: np.ndarray | None = None,
         block_size: int = 1_000_000,
+        block_bits: int = DEFAULT_BLOOM_BLOCK_BITS,
     ) -> None:
         if n_bits <= 0:
             raise ValueError("n_bits must be positive")
         if n_hashes <= 0:
             raise ValueError("n_hashes must be positive")
+        block_bits = int(block_bits)
+        if block_bits <= 0 or block_bits % 64 != 0:
+            raise ValueError("block_bits must be a positive multiple of 64")
+        if int(n_bits) % block_bits != 0:
+            raise ValueError("n_bits must be a multiple of block_bits")
         self.n_bits = int(n_bits)
         self.n_hashes = int(n_hashes)
         self.block_size = int(block_size)
+        self.block_bits = block_bits
+        self.n_blocks = self.n_bits // self.block_bits
         if self.block_size <= 0:
             raise ValueError("block_size must be positive")
         n_words = (self.n_bits + 63) // 64
@@ -273,13 +290,21 @@ class BloomFilter:
 
     @classmethod
     def from_metadata(cls, metadata: BloomMetadata, **kwargs) -> "BloomFilter":
+        kwargs.setdefault("block_bits", metadata.block_bits)
         return cls(metadata.n_bits, metadata.n_hashes, **kwargs)
+
+    def block_indices(self, hashes: np.ndarray) -> np.ndarray:
+        hashes = _as_u64(hashes).reshape(-1)
+        mixed = _splitmix64(hashes ^ np.uint64(0xA0761D6478BD642F))
+        return np.remainder(mixed, np.uint64(self.n_blocks)).astype(np.uint64, copy=False)
 
     def _positions(self, hashes: np.ndarray, hash_index: int) -> np.ndarray:
         with np.errstate(over="ignore"):
             salt = np.uint64(hash_index) * np.uint64(0xD6E8FEB86659FD93)
+        block_start = self.block_indices(hashes) * np.uint64(self.block_bits)
         mixed = _splitmix64(_as_u64(hashes) ^ salt)
-        return np.remainder(mixed, np.uint64(self.n_bits)).astype(np.uint64, copy=False)
+        local = np.remainder(mixed, np.uint64(self.block_bits))
+        return (block_start + local).astype(np.uint64, copy=False)
 
     def _iter_hash_blocks(self, hashes: np.ndarray) -> Iterable[np.ndarray]:
         hashes = _as_u64(hashes).reshape(-1)
