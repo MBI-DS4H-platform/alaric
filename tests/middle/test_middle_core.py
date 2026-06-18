@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from alaric.mask import main as mask_main
-from alaric.middle.checksum import byte_checksum, write_array_sidecar
+from alaric.middle.checksum import byte_checksum, write_array_sidecar, write_pose_sidecars
 from alaric.middle.deploy import deploy, generate_chunk_files, generate_run_sh
 from alaric.middle.graph import ActionGraph
 from alaric.middle.project import Project
@@ -282,3 +282,26 @@ def test_checksum_is_zstd_transparent(tmp_path: Path) -> None:
     assert byte_checksum(raw) == byte_checksum(compressed)
     checksum = write_array_sidecar(compressed)
     assert (tmp_path / "score.npy.CHECKSUM").read_text().strip() == checksum
+
+
+def test_pose_directory_checksum_includes_connection_maps(tmp_path: Path) -> None:
+    from alaric.poses import pack_pool, write_arc_file
+
+    pose_dir = tmp_path / "bridge-result"
+    pose_dir.mkdir()
+    M, O, C, P = pack_pool(
+        np.array([1], dtype=np.uint16),
+        np.array([2], dtype=np.uint16),
+        np.array([[0, 0, 0]], dtype=np.int16),
+        bucket_size=16,
+    )[0]
+    write_arc_file(pose_dir / "poses-1.arc", M, O, C, P, bucket_size=16)
+    np.save(pose_dir / "connections-lower.npy", np.array([[10, 0]], dtype=np.uint64))
+    np.save(pose_dir / "connections-upper.npy", np.array([[0, 20]], dtype=np.uint64))
+    (pose_dir / "bridge.json").write_text('{"ok": true}\n')
+
+    first = write_pose_sidecars(pose_dir)
+    np.save(pose_dir / "connections-upper.npy", np.array([[0, 21]], dtype=np.uint64))
+    second = write_pose_sidecars(pose_dir)
+
+    assert first != second
