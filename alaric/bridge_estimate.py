@@ -8,7 +8,11 @@ _CODE_DIR = Path(__file__).resolve().parent
 if str(_CODE_DIR) not in sys.path:
     sys.path.insert(0, str(_CODE_DIR))
 
-from bridge import BridgeGrowConfig, _estimate_bridge_growth_once
+from bridge import (
+    BridgeGrowConfig,
+    _estimate_bridge_growth_once,
+    attach_middle_conformer_intersection,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -49,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
         ov_rmsd=args.upper_ov_rmsd,
         pdb_exclude=tuple(args.pdb_exclude),
     )
+    lower, upper, _allowed = attach_middle_conformer_intersection(lower, upper)
     _estimate_bridge_growth_once(
         lower_config=lower,
         upper_config=upper,

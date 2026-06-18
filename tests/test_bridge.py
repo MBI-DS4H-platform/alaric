@@ -20,6 +20,7 @@ from alaric.bridge import (
     _partition_ranges,
     blocked_bloom_fpr,
     bloom_fpr,
+    attach_middle_conformer_intersection,
     build_full_bloom_parallel,
     choose_bridge_orientation,
     compose_bridge_connections,
@@ -225,6 +226,51 @@ def test_rotamer_chunk_partitions_target_rotamers() -> None:
     assert chunks == [(0, 3), (3, 6), (6, 10)]
 
 
+def test_middle_conformer_intersection_filters_both_bridge_sides(monkeypatch, tmp_path) -> None:
+    lower_cfg = BridgeGrowConfig(
+        source_poses=tmp_path / "lower",
+        source_sequence="AA",
+        target_sequence="AU",
+        direction="forward",
+        crmsd=1.0,
+        ov_rmsd=1.0,
+    )
+    upper_cfg = BridgeGrowConfig(
+        source_poses=tmp_path / "upper",
+        source_sequence="UU",
+        target_sequence="AU",
+        direction="backward",
+        crmsd=1.0,
+        ov_rmsd=1.0,
+    )
+
+    def fake_unique(path, pose_range=None):
+        return np.array([0], dtype=np.int64) if path == lower_cfg.source_poses else np.array([1], dtype=np.int64)
+
+    def fake_crmsds(a, b, pdb_code=None):
+        if (a, b) == ("AA", "AU"):
+            return np.array([[0.5, 0.5, 2.0]], dtype=np.float32)
+        if (a, b) == ("AU", "UU"):
+            return np.array(
+                [
+                    [2.0, 2.0],
+                    [2.0, 0.5],
+                    [2.0, 0.5],
+                ],
+                dtype=np.float32,
+            )
+        raise AssertionError((a, b))
+
+    monkeypatch.setattr(bridge_module, "_read_source_unique_conformers", fake_unique)
+    monkeypatch.setattr(bridge_module.grow, "load_crmsds", fake_crmsds)
+
+    lower, upper, allowed = attach_middle_conformer_intersection(lower_cfg, upper_cfg)
+
+    assert allowed == (1,)
+    assert lower.allowed_target_conformers == (1,)
+    assert upper.allowed_target_conformers == (1,)
+
+
 def test_deterministic_sampling_is_stable_and_sorted() -> None:
     first = deterministic_sample_indices(10_000, seed=5, sample_size=100)
     second = deterministic_sample_indices(10_000, seed=5, sample_size=100)
@@ -326,6 +372,11 @@ def test_run_bridge_pipeline_enforces_global_final_guardrail_and_keeps_work_out_
     tmp_path,
     monkeypatch,
 ) -> None:
+    monkeypatch.setattr(
+        bridge_module,
+        "attach_middle_conformer_intersection",
+        lambda lower, upper: (lower, upper, (0,)),
+    )
     monkeypatch.setattr(
         bridge_module,
         "_estimate_bridge_growth_once",

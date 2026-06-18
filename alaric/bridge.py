@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, replace
 import argparse
 import json
 import math
@@ -643,6 +643,7 @@ class BridgeGrowConfig:
     pose_range: tuple[int, int] | None = None
     bucket_size: int = 16
     rotamer_chunk: RotamerChunk | None = None
+    allowed_target_conformers: tuple[int, ...] | None = None
     test_seed: int = 0
     test_conformers: int | None = None
     test_rotamers: int | None = None
@@ -932,6 +933,73 @@ def _load_source_pool_with_origins(
     )
 
 
+def _read_source_unique_conformers(
+    source_poses: Path,
+    pose_range: tuple[int, int] | None = None,
+) -> np.ndarray:
+    reader = PoseReader(source_poses, pose_range=pose_range)
+    parts: list[np.ndarray] = []
+    for chunk in reader.iter_chunks():
+        if len(chunk):
+            parts.append(chunk.conformers.copy())
+    if not parts:
+        raise ValueError("No poses found in source directory")
+    return np.unique(np.concatenate(parts)).astype(np.int64, copy=False)
+
+
+def _reachable_target_conformers_from_source_pool(config: BridgeGrowConfig) -> set[int]:
+    layout = grow._resolve_growth_layout(
+        config.source_sequence,
+        config.target_sequence,
+        config.direction,
+    )
+    if layout.crmsd_ab[1] != layout.crmsd_bc[0]:
+        raise ValueError(
+            f"Source and target sequences do not overlap for {config.direction} growth: "
+            f"{config.source_sequence}/{config.target_sequence}"
+        )
+    source_conformers = _read_source_unique_conformers(
+        config.source_poses,
+        config.pose_range,
+    )
+    crmsds = grow.load_crmsds(
+        layout.crmsd_ab,
+        layout.crmsd_bc,
+        pdb_code=sorted(config.pdb_exclude) or None,
+    )
+    target_to_sources = grow._build_target_to_sources(
+        source_conformers,
+        crmsds,
+        config.crmsd,
+        source_on_rows=layout.source_on_rows,
+    )
+    return set(int(target) for target in target_to_sources)
+
+
+def attach_middle_conformer_intersection(
+    lower_config: BridgeGrowConfig,
+    upper_config: BridgeGrowConfig,
+) -> tuple[BridgeGrowConfig, BridgeGrowConfig, tuple[int, ...]]:
+    lower_targets = _reachable_target_conformers_from_source_pool(lower_config)
+    upper_targets = _reachable_target_conformers_from_source_pool(upper_config)
+    allowed = tuple(sorted(lower_targets & upper_targets))
+    if not allowed:
+        raise ValueError(
+            "No middle conformers are reachable from both bridge inputs under cRMSD thresholds"
+        )
+    _report(
+        "Middle conformer cRMSD intersection: "
+        f"lower={_fmt_count(len(lower_targets))} "
+        f"upper={_fmt_count(len(upper_targets))} "
+        f"intersection={_fmt_count(len(allowed))}"
+    )
+    return (
+        replace(lower_config, allowed_target_conformers=allowed),
+        replace(upper_config, allowed_target_conformers=allowed),
+        allowed,
+    )
+
+
 def _expand_source_instances_with_indices(
     cache: grow.SourceConformerCache,
     pp_rows: np.ndarray,
@@ -1070,6 +1138,13 @@ def bridge_grow(
         config.crmsd,
         source_on_rows=layout.source_on_rows,
     )
+    if config.allowed_target_conformers is not None:
+        allowed = set(int(c) for c in config.allowed_target_conformers)
+        target_to_sources = {
+            int(target): sources
+            for target, sources in target_to_sources.items()
+            if int(target) in allowed
+        }
     target_conformers = np.array(sorted(target_to_sources), dtype=np.int64)
     target_factory = factories[config.target_sequence]
     target_factory.load_rotaconformers()
@@ -1995,6 +2070,7 @@ def run_bridge_pipeline(
     nprocs: int = 1,
     rotamer_chunks: int = 1,
     estimator_seed: int = 0,
+    estimator_sample_size: int = 1000,
 ) -> dict[str, int | str]:
     if rotamer_chunks <= 0:
         raise ValueError("rotamer_chunks must be positive")
@@ -2008,6 +2084,10 @@ def run_bridge_pipeline(
         f"max_intermediate={_fmt_count(max_intermediate_poses)} "
         f"max_final={_fmt_count(max_final_poses)}"
     )
+    lower_config, upper_config, allowed_middle_conformers = attach_middle_conformer_intersection(
+        lower_config,
+        upper_config,
+    )
     chunk_dirs: list[Path] = []
     total_final = 0
     growth_estimates = _estimate_bridge_growth_once(
@@ -2015,6 +2095,7 @@ def run_bridge_pipeline(
         upper_config=upper_config,
         estimate_dir=work_dir / "estimate",
         estimator_seed=estimator_seed,
+        sample_size=estimator_sample_size,
     )
     for chunk in range(rotamer_chunks):
         chunk_dir = work_dir / f"chunk-{chunk:03d}"
@@ -2206,6 +2287,7 @@ def run_bridge_pipeline(
         "memory_bytes": int(memory_bytes),
         "max_intermediate_poses": int(max_intermediate_poses),
         "max_final_poses": int(max_final_poses),
+        "allowed_middle_conformers": int(len(allowed_middle_conformers)),
     }
     (output_dir / "bridge.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     shutil.rmtree(work_dir, ignore_errors=True)
@@ -2231,6 +2313,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--nprocs", type=int, default=1)
     parser.add_argument("--rotamer-chunks", type=int, default=1)
     parser.add_argument("--estimator-seed", type=int, default=0)
+    parser.add_argument("--estimator-sample-size", type=int, default=1000)
     parser.add_argument("--pdb-exclude", nargs="*", default=[])
     return parser
 
@@ -2265,6 +2348,7 @@ def main(argv: list[str] | None = None) -> int:
         nprocs=args.nprocs,
         rotamer_chunks=args.rotamer_chunks,
         estimator_seed=args.estimator_seed,
+        estimator_sample_size=args.estimator_sample_size,
     )
     return 0
 

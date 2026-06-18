@@ -248,6 +248,7 @@ def test_bridge_middle_integration_and_runtime_knobs_are_non_load_bearing(tmp_pa
                 "memory": "1G",
                 "nprocs": 2,
                 "rotamer-chunks": 3,
+                "estimator-sample-size": 123,
                 "max-intermediate-poses": 1000,
                 "max-final-poses": 100,
             },
@@ -266,6 +267,7 @@ def test_bridge_middle_integration_and_runtime_knobs_are_non_load_bearing(tmp_pa
     spec = yaml.safe_load((bridge_dir / "alaric.yaml").read_text())
     spec["memory"] = "2G"
     spec["nprocs"] = 8
+    spec["estimator-sample-size"] = 456
     (bridge_dir / "alaric.yaml").write_text(yaml.safe_dump(spec, sort_keys=False))
     second = compute_project_sigils(project, force=True)["frag5-bridge"]
     assert first == second
@@ -281,6 +283,7 @@ def test_bridge_middle_integration_and_runtime_knobs_are_non_load_bearing(tmp_pa
     assert "--upper-crmsd 0.35" in body
     assert "--upper-ov-rmsd 0.85" in body
     assert "--estimator-seed 0" in body
+    assert "--estimator-sample-size 456" in body
 
 
 def test_checksum_is_zstd_transparent(tmp_path: Path) -> None:

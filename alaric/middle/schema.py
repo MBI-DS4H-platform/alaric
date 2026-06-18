@@ -25,7 +25,7 @@ ACTION_SCHEMAS: dict[str, set[str]] = {
     "mask": {"action", "type", "input", "score_input", "threshold"},
     "filter": {"action", "type", "input", "score_input", "threshold", "mask_input"},
     "identity": {"action", "type", "input1", "input2"},
-    "bridge": {"action", "type", "input1", "input2", "lower-crmsd", "lower-ovrmsd", "upper-crmsd", "upper-ovrmsd", "memory", "max-intermediate-poses", "max-final-poses", "nprocs", "rotamer-chunks", "estimator-seed"},
+    "bridge": {"action", "type", "input1", "input2", "lower-crmsd", "lower-ovrmsd", "upper-crmsd", "upper-ovrmsd", "memory", "max-intermediate-poses", "max-final-poses", "nprocs", "rotamer-chunks", "estimator-seed", "estimator-sample-size"},
 }
 
 REQUIRED: dict[str, set[str]] = {

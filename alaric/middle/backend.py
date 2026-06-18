@@ -245,6 +245,7 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
                 "nprocs": q(p.get("nprocs", 1)),
                 "rotamer_chunks": q(p.get("rotamer-chunks", 1)),
                 "estimator_seed": q(p.get("estimator-seed", 0)),
+                "estimator_sample_size": q(p.get("estimator-sample-size", 1000)),
             }
         )
     return context

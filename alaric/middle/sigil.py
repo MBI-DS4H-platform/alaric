@@ -22,6 +22,7 @@ NON_LOAD_BEARING: dict[str, set[str]] = {
         "max-final-poses",
         "rotamer-chunks",
         "estimator-seed",
+        "estimator-sample-size",
     }
 }
 

@@ -254,6 +254,7 @@ def resolve_action(
         p.setdefault("nprocs", 1)
         p.setdefault("rotamer-chunks", 1)
         p.setdefault("estimator-seed", 0)
+        p.setdefault("estimator-sample-size", 1000)
     if action == "rmsd":
         reference = str(p.get("reference", "reference.pdb"))
         ref_path = Path(reference)

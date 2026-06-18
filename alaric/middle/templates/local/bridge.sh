@@ -14,4 +14,5 @@
   --max-final-poses {{ max_final_poses }} \
   --nprocs {{ nprocs }} \
   --rotamer-chunks {{ rotamer_chunks }} \
-  --estimator-seed {{ estimator_seed }}
+  --estimator-seed {{ estimator_seed }} \
+  --estimator-sample-size {{ estimator_sample_size }}
