@@ -10,6 +10,10 @@ from alaric.bridge import (
     RotamerChunk,
     _MemoryPoseOriginWriter,
     bloom_fpr,
+    choose_bridge_orientation,
+    deterministic_sample_indices,
+    enforce_intermediate_guardrail,
+    expected_intermediate_size,
     hash_bucket_payload,
     hash_pose_keys,
     optimal_hash_count,
@@ -95,3 +99,36 @@ def test_memory_pose_origin_writer_emits_matching_unorganized_origins(tmp_path) 
 def test_rotamer_chunk_partitions_target_rotamers() -> None:
     chunks = [RotamerChunk(i, 3).bounds(10) for i in range(3)]
     assert chunks == [(0, 3), (3, 6), (6, 10)]
+
+
+def test_deterministic_sampling_is_stable_and_sorted() -> None:
+    first = deterministic_sample_indices(10_000, seed=5, sample_size=100)
+    second = deterministic_sample_indices(10_000, seed=5, sample_size=100)
+    np.testing.assert_array_equal(first, second)
+    assert len(first) == 100
+    assert np.all(first[:-1] < first[1:])
+    np.testing.assert_array_equal(
+        deterministic_sample_indices(3, seed=5, sample_size=100),
+        np.array([0, 1, 2], dtype=np.uint64),
+    )
+
+
+def test_orientation_uses_expected_first_intermediate() -> None:
+    first, lower_first, upper_first = choose_bridge_orientation(
+        lower_generated=10_000,
+        upper_generated=100,
+        n_bits=8192,
+        n_hashes=3,
+    )
+    assert first == ("lower" if lower_first <= upper_first else "upper")
+    assert expected_intermediate_size(0, 10, 1024, 2) == 0.0
+
+
+def test_intermediate_guardrail_fails_loudly() -> None:
+    enforce_intermediate_guardrail(10.0, 10)
+    try:
+        enforce_intermediate_guardrail(11.0, 10)
+    except ValueError as exc:
+        assert "exceeds guardrail" in str(exc)
+    else:
+        raise AssertionError("guardrail should have failed")

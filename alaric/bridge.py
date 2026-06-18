@@ -301,6 +301,137 @@ class BridgeGrowResult:
     emitted_origin_path: Path | None
 
 
+@dataclass(frozen=True)
+class BridgeEstimate:
+    lower_generated: int
+    upper_generated: int
+    lower_sampled: int
+    upper_sampled: int
+    lower_total_poses: int
+    upper_total_poses: int
+    expected_lower_first: float
+    expected_upper_first: float
+    first_side: str
+
+
+def deterministic_sample_indices(total: int, *, seed: int, sample_size: int = 1000) -> np.ndarray:
+    if total < 0:
+        raise ValueError("total must be non-negative")
+    if sample_size <= 0:
+        raise ValueError("sample_size must be positive")
+    if total <= sample_size:
+        return np.arange(total, dtype=np.uint64)
+    rng = np.random.default_rng(seed)
+    return np.sort(rng.choice(total, size=sample_size, replace=False).astype(np.uint64))
+
+
+def expected_intermediate_size(n_probe: int, n_insert: int, n_bits: int, n_hashes: int) -> float:
+    if n_probe < 0 or n_insert < 0:
+        raise ValueError("pose counts must be non-negative")
+    if n_probe == 0 or n_insert == 0:
+        return 0.0
+    return float(n_probe) * bloom_fpr(n_insert, n_bits, n_hashes)
+
+
+def choose_bridge_orientation(
+    *,
+    lower_generated: int,
+    upper_generated: int,
+    n_bits: int,
+    n_hashes: int,
+) -> tuple[str, float, float]:
+    lower_first = expected_intermediate_size(
+        lower_generated,
+        upper_generated,
+        n_bits,
+        n_hashes,
+    )
+    upper_first = expected_intermediate_size(
+        upper_generated,
+        lower_generated,
+        n_bits,
+        n_hashes,
+    )
+    first = "lower" if lower_first <= upper_first else "upper"
+    return first, lower_first, upper_first
+
+
+def enforce_intermediate_guardrail(expected: float, maximum: int) -> None:
+    if maximum <= 0:
+        raise ValueError("maximum intermediate poses must be positive")
+    if expected > maximum:
+        raise ValueError(
+            f"expected intermediate poses {expected:.0f} exceeds guardrail {maximum}"
+        )
+
+
+def estimate_bridge_orientation(
+    *,
+    lower_config: BridgeGrowConfig,
+    upper_config: BridgeGrowConfig,
+    lower_total_poses: int,
+    upper_total_poses: int,
+    bloom_metadata: BloomMetadata,
+    estimator_seed: int = 0,
+    sample_size: int = 1000,
+) -> BridgeEstimate:
+    lower_indices = deterministic_sample_indices(
+        lower_total_poses,
+        seed=estimator_seed,
+        sample_size=sample_size,
+    )
+    upper_indices = deterministic_sample_indices(
+        upper_total_poses,
+        seed=estimator_seed + 1,
+        sample_size=sample_size,
+    )
+
+    def contiguous_range(indices: np.ndarray) -> tuple[int, int] | None:
+        if len(indices) == 0:
+            return None
+        return int(indices[0]) + 1, int(indices[-1]) + 1
+
+    lower_range = contiguous_range(lower_indices)
+    upper_range = contiguous_range(upper_indices)
+    lower_sample_config = BridgeGrowConfig(
+        **{**lower_config.__dict__, "pose_range": lower_range}
+    )
+    upper_sample_config = BridgeGrowConfig(
+        **{**upper_config.__dict__, "pose_range": upper_range}
+    )
+    lower_result = bridge_grow(lower_sample_config)
+    upper_result = bridge_grow(upper_sample_config)
+    lower_span = 0 if lower_range is None else lower_range[1] - lower_range[0] + 1
+    upper_span = 0 if upper_range is None else upper_range[1] - upper_range[0] + 1
+    lower_generated = (
+        0
+        if lower_span == 0
+        else int(round(lower_result.generated_poses * lower_total_poses / lower_span))
+    )
+    upper_generated = (
+        0
+        if upper_span == 0
+        else int(round(upper_result.generated_poses * upper_total_poses / upper_span))
+    )
+    first, expected_lower_first, expected_upper_first = choose_bridge_orientation(
+        lower_generated=lower_generated,
+        upper_generated=upper_generated,
+        n_bits=bloom_metadata.n_bits,
+        n_hashes=bloom_metadata.n_hashes,
+    )
+    return BridgeEstimate(
+        lower_generated=lower_generated,
+        upper_generated=upper_generated,
+        lower_sampled=int(len(lower_indices)),
+        upper_sampled=int(len(upper_indices)),
+        lower_total_poses=int(lower_total_poses),
+        upper_total_poses=int(upper_total_poses),
+        expected_lower_first=expected_lower_first,
+        expected_upper_first=expected_upper_first,
+        first_side=first,
+    )
+
+
 class _MemoryPoseOriginWriter:
     def __init__(self, outdir: Path, *, bucket_size: int) -> None:
         self.outdir = Path(outdir)
