@@ -7,12 +7,15 @@ import numpy as np
 from alaric.bridge import (
     BloomFilter,
     BloomMetadata,
+    RotamerChunk,
+    _MemoryPoseOriginWriter,
     bloom_fpr,
     hash_bucket_payload,
     hash_pose_keys,
     optimal_hash_count,
     pack_pose_keys,
 )
+from alaric.poses import decode_pool, discover_unorganized, read_arc_file
 
 
 def test_pack_and_hash_pose_keys_are_deterministic() -> None:
@@ -65,3 +68,30 @@ def test_bloom_formula_and_hash_count_optimization() -> None:
     assert 1 <= k <= 16
     assert bloom_fpr(100, 1024, k) == min(bloom_fpr(100, 1024, i) for i in range(1, 17))
 
+
+def test_memory_pose_origin_writer_emits_matching_unorganized_origins(tmp_path) -> None:
+    writer = _MemoryPoseOriginWriter(tmp_path, bucket_size=16)
+    conformers = np.array([2, 1, 2, 1], dtype=np.uint16)
+    rotamers = np.array([3, 4, 1, 2], dtype=np.uint16)
+    translations = np.array(
+        [[17, 0, 0], [0, 0, 0], [18, 0, 0], [1, 0, 0]],
+        dtype=np.int16,
+    )
+    origins = np.array([10, 11, 12, 13], dtype=np.uint64)
+
+    emitted = writer.finish()
+    assert len(emitted) == 0
+
+    writer.add_chunk(conformers, rotamers, translations, origins)
+    emitted = writer.finish()
+
+    np.testing.assert_array_equal(emitted, np.array([11, 13, 10, 12], dtype=np.uint64))
+    paths = discover_unorganized(tmp_path)
+    decoded = [decode_pool(*read_arc_file(path)) for path in paths]
+    decoded_conformers = np.concatenate([part[0] for part in decoded])
+    np.testing.assert_array_equal(decoded_conformers, np.array([1, 1, 2, 2], dtype=np.uint16))
+
+
+def test_rotamer_chunk_partitions_target_rotamers() -> None:
+    chunks = [RotamerChunk(i, 3).bounds(10) for i in range(3)]
+    assert chunks == [(0, 3), (3, 6), (6, 10)]
