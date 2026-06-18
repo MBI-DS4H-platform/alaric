@@ -43,6 +43,13 @@ def _fmt_count(value: int) -> str:
     return f"{int(value):,}"
 
 
+def _fmt_expected_count(value: float) -> str:
+    value = float(value)
+    if 0.0 < value < 1.0:
+        return "<1"
+    return f"{value:,.0f}"
+
+
 def _as_u64(values) -> np.ndarray:
     return np.asarray(values, dtype=np.uint64)
 
@@ -161,6 +168,55 @@ def bloom_fpr(n_items: int, n_bits: int, n_hashes: int) -> float:
     return (1.0 - math.exp(-float(n_hashes) * float(n_items) / float(n_bits))) ** n_hashes
 
 
+def blocked_bloom_fpr(
+    n_items: int,
+    n_bits: int,
+    n_hashes: int,
+    block_bits: int,
+) -> float:
+    if n_items < 0:
+        raise ValueError("n_items must be non-negative")
+    if n_bits <= 0:
+        raise ValueError("n_bits must be positive")
+    if n_hashes <= 0:
+        raise ValueError("n_hashes must be positive")
+    if block_bits <= 0 or block_bits % 64 != 0:
+        raise ValueError("block_bits must be a positive multiple of 64")
+    if n_bits % block_bits != 0:
+        raise ValueError("n_bits must be a multiple of block_bits")
+    if n_items == 0:
+        return 0.0
+
+    n_blocks = n_bits // block_bits
+    mean_items_per_block = float(n_items) / float(n_blocks)
+
+    def local_fpr(items_in_block: float) -> float:
+        return (
+            1.0
+            - math.exp(
+                -float(n_hashes) * float(items_in_block) / float(block_bits)
+            )
+        ) ** n_hashes
+
+    if mean_items_per_block > 700.0:
+        return local_fpr(mean_items_per_block)
+
+    # A queried key selects one owner block. Insert counts per owner block are
+    # approximately Poisson; averaging local FPR over that distribution captures
+    # the occupancy variance that a blocked Bloom filter adds.
+    p = math.exp(-mean_items_per_block)
+    total_probability = p
+    expected = p * local_fpr(0.0)
+    stop = int(math.ceil(mean_items_per_block + 12.0 * math.sqrt(mean_items_per_block) + 50.0))
+    for count in range(1, max(1, stop) + 1):
+        p *= mean_items_per_block / float(count)
+        total_probability += p
+        expected += p * local_fpr(float(count))
+    if total_probability < 1.0:
+        expected += max(0.0, 1.0 - total_probability) * local_fpr(mean_items_per_block)
+    return min(1.0, max(0.0, expected))
+
+
 def optimal_hash_count(n_items: int, n_bits: int, *, max_hashes: int = 16) -> int:
     if n_items <= 0:
         return 1
@@ -170,6 +226,26 @@ def optimal_hash_count(n_items: int, n_bits: int, *, max_hashes: int = 16) -> in
         raise ValueError("max_hashes must be positive")
     candidates = range(1, int(max_hashes) + 1)
     return min(candidates, key=lambda k: bloom_fpr(n_items, n_bits, k))
+
+
+def optimal_blocked_hash_count(
+    n_items: int,
+    n_bits: int,
+    block_bits: int,
+    *,
+    max_hashes: int = 16,
+) -> int:
+    if n_items <= 0:
+        return 1
+    if n_bits <= 0:
+        raise ValueError("n_bits must be positive")
+    if max_hashes <= 0:
+        raise ValueError("max_hashes must be positive")
+    candidates = range(1, int(max_hashes) + 1)
+    return min(
+        candidates,
+        key=lambda k: blocked_bloom_fpr(n_items, n_bits, k, block_bits),
+    )
 
 
 @dataclass(frozen=True)
@@ -204,22 +280,30 @@ class BloomMetadata:
         if expected_items <= 0:
             n_bits = block_bits
         else:
-            requested_bits = _bits_for_target_fpr(
+            requested_bits = _bits_for_target_blocked_fpr(
                 expected_items,
                 target_fpr,
                 max_hashes=max_hashes,
+                block_bits=block_bits,
+                max_bits=usable_budget_bits,
             )
-            rounded_bits = max(
-                block_bits,
-                ((requested_bits + block_bits - 1) // block_bits) * block_bits,
-            )
-            n_bits = min(rounded_bits, usable_budget_bits)
-        n_hashes = optimal_hash_count(expected_items, n_bits, max_hashes=max_hashes)
+            n_bits = min(requested_bits, usable_budget_bits)
+        n_hashes = optimal_blocked_hash_count(
+            expected_items,
+            n_bits,
+            block_bits,
+            max_hashes=max_hashes,
+        )
         return cls(
             n_bits=n_bits,
             n_hashes=n_hashes,
             expected_items=int(expected_items),
-            expected_fpr=bloom_fpr(expected_items, n_bits, n_hashes),
+            expected_fpr=blocked_bloom_fpr(
+                expected_items,
+                n_bits,
+                n_hashes,
+                block_bits,
+            ),
             block_bits=block_bits,
         )
 
@@ -249,6 +333,52 @@ def _bits_for_target_fpr(
     if best_bits is None:
         raise ValueError("could not size Bloom filter for target_fpr")
     return int(best_bits)
+
+
+def _bits_for_target_blocked_fpr(
+    n_items: int,
+    target_fpr: float,
+    *,
+    max_hashes: int,
+    block_bits: int,
+    max_bits: int,
+) -> int:
+    if n_items <= 0:
+        return block_bits
+
+    def rounded(bits: int) -> int:
+        return max(block_bits, ((int(bits) + block_bits - 1) // block_bits) * block_bits)
+
+    def best_fpr(bits: int) -> float:
+        return min(
+            blocked_bloom_fpr(n_items, bits, k, block_bits)
+            for k in range(1, int(max_hashes) + 1)
+        )
+
+    low = block_bits
+    high = rounded(
+        _bits_for_target_fpr(n_items, target_fpr, max_hashes=max_hashes)
+    )
+    high = min(max_bits, max(block_bits, high))
+    while high < max_bits and best_fpr(high) > target_fpr:
+        low = high + block_bits
+        high = min(max_bits, high * 2)
+    if best_fpr(high) > target_fpr:
+        return high
+
+    low = block_bits if low < block_bits else low
+    while low < high:
+        mid_blocks = ((low + high) // 2) // block_bits
+        mid = max(block_bits, mid_blocks * block_bits)
+        if mid < low:
+            mid = low
+        if mid >= high:
+            break
+        if best_fpr(mid) <= target_fpr:
+            high = mid
+        else:
+            low = mid + block_bits
+    return rounded(high)
 
 
 class BloomFilter:
@@ -405,12 +535,23 @@ def deterministic_sample_indices(total: int, *, seed: int, sample_size: int = 10
     return np.sort(rng.choice(total, size=sample_size, replace=False).astype(np.uint64))
 
 
-def expected_intermediate_size(n_probe: int, n_insert: int, n_bits: int, n_hashes: int) -> float:
+def expected_intermediate_size(
+    n_probe: int,
+    n_insert: int,
+    n_bits: int,
+    n_hashes: int,
+    *,
+    block_bits: int | None = None,
+) -> float:
     if n_probe < 0 or n_insert < 0:
         raise ValueError("pose counts must be non-negative")
     if n_probe == 0 or n_insert == 0:
         return 0.0
-    return float(n_probe) * bloom_fpr(n_insert, n_bits, n_hashes)
+    if block_bits is None:
+        fpr = bloom_fpr(n_insert, n_bits, n_hashes)
+    else:
+        fpr = blocked_bloom_fpr(n_insert, n_bits, n_hashes, block_bits)
+    return float(n_probe) * fpr
 
 
 def choose_bridge_orientation(
@@ -419,18 +560,21 @@ def choose_bridge_orientation(
     upper_generated: int,
     n_bits: int,
     n_hashes: int,
+    block_bits: int | None = None,
 ) -> tuple[str, float, float]:
     lower_first = expected_intermediate_size(
         lower_generated,
         upper_generated,
         n_bits,
         n_hashes,
+        block_bits=block_bits,
     )
     upper_first = expected_intermediate_size(
         upper_generated,
         lower_generated,
         n_bits,
         n_hashes,
+        block_bits=block_bits,
     )
     first = "lower" if lower_first <= upper_first else "upper"
     return first, lower_first, upper_first
@@ -498,6 +642,7 @@ def estimate_bridge_orientation(
         upper_generated=upper_generated,
         n_bits=bloom_metadata.n_bits,
         n_hashes=bloom_metadata.n_hashes,
+        block_bits=bloom_metadata.block_bits,
     )
     return BridgeEstimate(
         lower_generated=lower_generated,
@@ -851,6 +996,7 @@ def bridge_grow(
                             bloom_inserted_count,
                             bloom.n_bits,
                             bloom.n_hashes,
+                            block_bits=bloom.block_bits,
                         )
                     )
                 )
@@ -1411,12 +1557,14 @@ def _estimate_chunk_growth(
         upper_est,
         metadata.n_bits,
         metadata.n_hashes,
+        block_bits=metadata.block_bits,
     )
     upper_first_expected = expected_intermediate_size(
         upper_est,
         lower_est,
         metadata.n_bits,
         metadata.n_hashes,
+        block_bits=metadata.block_bits,
     )
     first_side = "lower" if lower_first_expected <= upper_first_expected else "upper"
     _report(
@@ -1430,8 +1578,10 @@ def _estimate_chunk_growth(
         f"full_generated_est={upper_est:,}"
     )
     _report(
-        f"  expected initial intermediate: lower-first={lower_first_expected:,.0f} "
-        f"upper-first={upper_first_expected:,.0f}; choosing {first_side}-first"
+        f"  expected initial Bloom false-positive hits: "
+        f"lower-first={_fmt_expected_count(lower_first_expected)} "
+        f"upper-first={_fmt_expected_count(upper_first_expected)}; "
+        f"choosing {first_side}-first"
     )
     return first_side, lower_est, upper_est, lower_first_expected, upper_first_expected
 
@@ -1513,7 +1663,8 @@ def run_bridge_pipeline(
 
         _report(
             f"[chunk {chunk + 1}/{rotamer_chunks}] Growing {first_side} side through "
-            f"{bloom_side} Bloom (sample expected_total={expected_first_from_sample:,.0f})..."
+            f"{bloom_side} Bloom "
+            f"(sample expected_fp={_fmt_expected_count(expected_first_from_sample)})..."
         )
         first_dir = chunk_dir / "intermediate-first"
         first = bridge_grow(
@@ -1528,11 +1679,12 @@ def run_bridge_pipeline(
             full_bloom_result.generated_poses,
             metadata.n_bits,
             metadata.n_hashes,
+            block_bits=metadata.block_bits,
         )
         enforce_intermediate_guardrail(first.emitted_poses, max_intermediate_poses)
         _report(
             f"  first intermediate generated={_fmt_count(first.generated_poses)} "
-            f"expected_total={expected_first:,.0f} "
+            f"expected_fp={_fmt_expected_count(expected_first)} "
             f"emitted={_fmt_count(first.emitted_poses)}"
         )
 
@@ -1547,8 +1699,12 @@ def run_bridge_pipeline(
             first.emitted_poses,
             metadata.n_bits,
             metadata.n_hashes,
+            block_bits=metadata.block_bits,
         )
-        _report(f"  expected second intermediate total={expected_second:,.0f}")
+        _report(
+            f"  expected second intermediate Bloom false-positive hits="
+            f"{_fmt_expected_count(expected_second)}"
+        )
         second_dir = chunk_dir / "intermediate-second"
         second = bridge_grow(
             second_config,
@@ -1560,7 +1716,7 @@ def run_bridge_pipeline(
         enforce_intermediate_guardrail(second.emitted_poses, max_intermediate_poses)
         _report(
             f"  second intermediate generated={_fmt_count(second.generated_poses)} "
-            f"expected_total={expected_second:,.0f} "
+            f"expected_fp={_fmt_expected_count(expected_second)} "
             f"emitted={_fmt_count(second.emitted_poses)}"
         )
 

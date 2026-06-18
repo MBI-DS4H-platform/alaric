@@ -14,6 +14,8 @@ from alaric.bridge import (
     BridgeGrowResult,
     RotamerChunk,
     _MemoryPoseOriginWriter,
+    _fmt_expected_count,
+    blocked_bloom_fpr,
     bloom_fpr,
     choose_bridge_orientation,
     compose_bridge_connections,
@@ -92,6 +94,14 @@ def test_bloom_formula_and_hash_count_optimization() -> None:
     k = optimal_hash_count(100, 1024, max_hashes=16)
     assert 1 <= k <= 16
     assert bloom_fpr(100, 1024, k) == min(bloom_fpr(100, 1024, i) for i in range(1, 17))
+
+
+def test_blocked_bloom_fpr_and_tiny_expected_formatting() -> None:
+    fpr = blocked_bloom_fpr(100, 4096, 4, 512)
+    assert 0.0 < fpr < 1.0
+    assert _fmt_expected_count(0.25) == "<1"
+    assert _fmt_expected_count(0.0) == "0"
+    assert _fmt_expected_count(12_345.2) == "12,345"
 
 
 def test_bloom_budget_is_a_ceiling_not_a_required_allocation() -> None:
