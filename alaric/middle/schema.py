@@ -10,6 +10,7 @@ from .errors import SchemaError
 
 
 POSE = "pose"
+CONNECTED_POSE = "connected_pose"
 SCORE = "score"
 MASK = "mask"
 
@@ -24,6 +25,7 @@ ACTION_SCHEMAS: dict[str, set[str]] = {
     "mask": {"action", "type", "input", "score_input", "threshold"},
     "filter": {"action", "type", "input", "score_input", "threshold", "mask_input"},
     "identity": {"action", "type", "input1", "input2"},
+    "bridge": {"action", "type", "input1", "input2", "memory", "max-intermediate-poses", "max-final-poses", "nprocs", "rotamer-chunks", "estimator-seed"},
 }
 
 REQUIRED: dict[str, set[str]] = {
@@ -36,6 +38,7 @@ REQUIRED: dict[str, set[str]] = {
     "mask": {"input", "score_input", "threshold"},
     "filter": {"input"},
     "identity": {"input1", "input2"},
+    "bridge": {"input1", "input2"},
 }
 
 DEPENDENCY_FIELDS: dict[str, dict[str, str]] = {
@@ -48,6 +51,7 @@ DEPENDENCY_FIELDS: dict[str, dict[str, str]] = {
     "mask": {"input": POSE, "score_input": SCORE},
     "filter": {"input": POSE, "score_input": SCORE, "mask_input": MASK},
     "identity": {"input1": POSE, "input2": POSE},
+    "bridge": {"input1": POSE, "input2": POSE},
 }
 
 OUTPUT_KIND = {
@@ -60,6 +64,7 @@ OUTPUT_KIND = {
     "mask": MASK,
     "filter": POSE,
     "identity": POSE,
+    "bridge": CONNECTED_POSE,
 }
 
 AUTO_FIELDS = {

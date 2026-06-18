@@ -6,7 +6,7 @@ from typing import Any
 from .errors import GraphError, ResolveError
 from .project import Project
 from .resolve import ResolvedAction, final_fragment, resolve_action
-from .schema import DEPENDENCY_FIELDS, OUTPUT_KIND, ActionSpec, load_action_spec
+from .schema import CONNECTED_POSE, DEPENDENCY_FIELDS, OUTPUT_KIND, POSE, ActionSpec, load_action_spec
 
 
 class ActionGraph:
@@ -60,7 +60,7 @@ class ActionGraph:
                     raise GraphError(f"{name}: missing dependency {dep_name}")
                 expected = DEPENDENCY_FIELDS[spec.action][field]
                 actual = OUTPUT_KIND[self.resolved[dep_name].action]
-                if actual != expected:
+                if actual != expected and not (expected == POSE and actual == CONNECTED_POSE):
                     raise GraphError(
                         f"{name}.{field}: expected {expected} output from {dep_name}, got {actual}"
                     )
@@ -132,6 +132,11 @@ class ActionGraph:
         elif resolved.action == "identity":
             if final_fragment(p["input1"]) != final_fragment(p["input2"]):
                 raise GraphError(f"{resolved.name}: identity inputs must resolve to the same fragment")
+        elif resolved.action == "bridge":
+            lower = final_fragment(p["input1"])
+            upper = final_fragment(p["input2"])
+            if abs(lower - upper) != 2:
+                raise GraphError(f"{resolved.name}: bridge inputs must differ by exactly 2 fragments")
 
     def action(self, name: str) -> ResolvedAction:
         if not self.resolved:

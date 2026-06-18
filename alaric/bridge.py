@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
+import argparse
 import json
 import math
 from pathlib import Path
@@ -16,7 +17,7 @@ if str(_CODE_DIR) not in sys.path:
 import grow
 import identity_filter
 import organize
-from poses import PoseReader, pack_pool, write_arc_file
+from poses import PoseReader, decode_pool, discover_organized, discover_unorganized, pack_pool, read_arc_file, write_arc_file
 
 
 KEY_DTYPE = np.dtype(
@@ -1063,3 +1064,168 @@ def merge_bridge_chunk_outputs(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n"
     )
     return lower_all, upper_all
+
+
+def _parse_memory_bytes(text: str) -> int:
+    value = str(text).strip().upper()
+    multipliers = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
+    if value[-1:] in multipliers:
+        return int(float(value[:-1]) * multipliers[value[-1]])
+    return int(value)
+
+
+def _add_pose_dir_to_bloom(pose_dir: Path, bloom: BloomFilter) -> int:
+    paths = discover_unorganized(pose_dir) or discover_organized(pose_dir)
+    total = 0
+    for path in paths:
+        M, O, C, P, bucket_size = read_arc_file(path)
+        conf, rot, translations = decode_pool(M, O, C, P, bucket_size)
+        bloom.add_keys(pack_pose_keys(conf, rot, translations))
+        total += len(conf)
+    return total
+
+
+def run_bridge_pipeline(
+    *,
+    lower_config: BridgeGrowConfig,
+    upper_config: BridgeGrowConfig,
+    output_dir: Path,
+    memory_bytes: int,
+    max_intermediate_poses: int,
+    max_final_poses: int,
+    nprocs: int = 1,
+    rotamer_chunks: int = 1,
+) -> dict[str, int | str]:
+    if rotamer_chunks <= 0:
+        raise ValueError("rotamer_chunks must be positive")
+    output_dir = Path(output_dir)
+    work_dir = output_dir / "bridge-work"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    chunk_dirs: list[Path] = []
+    total_final = 0
+    for chunk in range(rotamer_chunks):
+        chunk_dir = work_dir / f"chunk-{chunk:03d}"
+        chunk_dir.mkdir(parents=True, exist_ok=True)
+        lower_chunk = BridgeGrowConfig(**{**lower_config.__dict__, "rotamer_chunk": RotamerChunk(chunk, rotamer_chunks)})
+        upper_chunk = BridgeGrowConfig(**{**upper_config.__dict__, "rotamer_chunk": RotamerChunk(chunk, rotamer_chunks)})
+        metadata = BloomMetadata.from_budget(memory_bytes=memory_bytes, expected_items=max(1, max_intermediate_poses))
+
+        upper_full = BloomFilter.from_metadata(metadata)
+        bridge_grow(upper_chunk, build_bloom=upper_full)
+
+        first_dir = chunk_dir / "intermediate-first"
+        first = bridge_grow(lower_chunk, output_dir=first_dir, bloom=upper_full)
+        enforce_intermediate_guardrail(first.emitted_poses, max_intermediate_poses)
+
+        first_bloom = BloomFilter.from_metadata(metadata)
+        _add_pose_dir_to_bloom(first_dir, first_bloom)
+
+        second_dir = chunk_dir / "intermediate-second"
+        second = bridge_grow(upper_chunk, output_dir=second_dir, bloom=first_bloom)
+        enforce_intermediate_guardrail(second.emitted_poses, max_intermediate_poses)
+
+        first_origin = organize_bridge_intermediate(first_dir, nprocs=nprocs)
+        second_origin = organize_bridge_intermediate(second_dir, nprocs=nprocs)
+        run_identity_and_compose_bridge(
+            first_dir,
+            second_dir,
+            chunk_dir,
+            first_origin_path=first_dir / "organized_origin.npy",
+            second_origin_path=second_dir / "organized_origin.npy",
+            first_side="lower",
+            max_poses_per_file=max_final_poses,
+        )
+        final_count = PoseReader.get_nposes(chunk_dir / "identity")
+        if final_count > max_final_poses:
+            raise ValueError(f"final poses {final_count} exceeds guardrail {max_final_poses}")
+        total_final += final_count
+        # Put chunk-local final pose files at chunk root for merge.
+        for pose_file in discover_organized(chunk_dir / "identity"):
+            target = chunk_dir / pose_file.name
+            if not target.exists():
+                target.write_bytes(pose_file.read_bytes())
+        chunk_dirs.append(chunk_dir)
+
+    if rotamer_chunks == 1:
+        identity_dir = chunk_dirs[0] / "identity"
+        for path in identity_dir.iterdir():
+            if path.name.startswith("poses-") or path.name in {"connections-lower.npy", "connections-upper.npy"}:
+                continue
+        for pose_file in discover_organized(identity_dir):
+            (output_dir / pose_file.name).write_bytes(pose_file.read_bytes())
+        for name in ("connections-lower.npy", "connections-upper.npy"):
+            (output_dir / name).write_bytes((chunk_dirs[0] / name).read_bytes())
+    else:
+        merge_bridge_chunk_outputs(
+            chunk_dirs,
+            output_dir,
+            nprocs=nprocs,
+            max_poses_per_file=max_final_poses,
+        )
+    manifest = {
+        "chunks": rotamer_chunks,
+        "final_poses": int(total_final),
+        "memory_bytes": int(memory_bytes),
+        "max_intermediate_poses": int(max_intermediate_poses),
+        "max_final_poses": int(max_final_poses),
+    }
+    (output_dir / "bridge.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    return manifest
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="bridge")
+    parser.add_argument("--lower-poses", required=True, type=Path)
+    parser.add_argument("--upper-poses", required=True, type=Path)
+    parser.add_argument("--lower-sequence", required=True)
+    parser.add_argument("--middle-sequence", required=True)
+    parser.add_argument("--upper-sequence", required=True)
+    parser.add_argument("--lower-crmsd", required=True, type=float)
+    parser.add_argument("--lower-ov-rmsd", required=True, type=float)
+    parser.add_argument("--upper-crmsd", required=True, type=float)
+    parser.add_argument("--upper-ov-rmsd", required=True, type=float)
+    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--memory", default="600G")
+    parser.add_argument("--max-intermediate-poses", type=int, default=100_000_000)
+    parser.add_argument("--max-final-poses", type=int, default=1_000_000)
+    parser.add_argument("--nprocs", type=int, default=1)
+    parser.add_argument("--rotamer-chunks", type=int, default=1)
+    parser.add_argument("--pdb-exclude", nargs="*", default=[])
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    lower = BridgeGrowConfig(
+        source_poses=args.lower_poses,
+        source_sequence=args.lower_sequence,
+        target_sequence=args.middle_sequence,
+        direction="forward",
+        crmsd=args.lower_crmsd,
+        ov_rmsd=args.lower_ov_rmsd,
+        pdb_exclude=tuple(args.pdb_exclude),
+    )
+    upper = BridgeGrowConfig(
+        source_poses=args.upper_poses,
+        source_sequence=args.upper_sequence,
+        target_sequence=args.middle_sequence,
+        direction="backward",
+        crmsd=args.upper_crmsd,
+        ov_rmsd=args.upper_ov_rmsd,
+        pdb_exclude=tuple(args.pdb_exclude),
+    )
+    run_bridge_pipeline(
+        lower_config=lower,
+        upper_config=upper,
+        output_dir=args.output,
+        memory_bytes=_parse_memory_bytes(args.memory),
+        max_intermediate_poses=args.max_intermediate_poses,
+        max_final_poses=args.max_final_poses,
+        nprocs=args.nprocs,
+        rotamer_chunks=args.rotamer_chunks,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

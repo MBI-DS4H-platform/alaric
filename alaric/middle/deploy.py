@@ -13,7 +13,7 @@ from .errors import MiddleError
 from .graph import ActionGraph
 from .project import Project
 from .resolve import ResolvedAction
-from .schema import DEPENDENCY_FIELDS, OUTPUT_KIND
+from .schema import CONNECTED_POSE, DEPENDENCY_FIELDS, OUTPUT_KIND, POSE
 
 # Actions that support chunked deployment, and their chunking axis:
 #   anchor / anchor-test -> conformers (--conformer-range)
@@ -76,7 +76,8 @@ def _read_sigil(action_dir: Path) -> str:
 
 
 def _result_output_kind(action: ResolvedAction) -> str:
-    return OUTPUT_KIND[action.action]
+    kind = OUTPUT_KIND[action.action]
+    return POSE if kind == CONNECTED_POSE else kind
 
 
 def _alaric_dir_expr(local: bool) -> str:

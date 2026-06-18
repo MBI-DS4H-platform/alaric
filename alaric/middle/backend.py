@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .resolve import ResolvedAction, final_sequence
+from .resolve import ResolvedAction, final_fragment, final_sequence
 from .schema import OUTPUT_KIND
 
 
@@ -221,6 +221,29 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
             {
                 "input1_result_path": shell_path(dep_result_path(p["input1"], location)),
                 "input2_result_path": shell_path(dep_result_path(p["input2"], location)),
+            }
+        )
+    elif action.action == "bridge":
+        input1 = p["input1"]
+        input2 = p["input2"]
+        lower = input1 if final_fragment(input1) == p["lower_fragment"] else input2
+        upper = input1 if lower is input2 else input2
+        context.update(
+            {
+                "lower_result_path": shell_path(dep_result_path(lower, location)),
+                "upper_result_path": shell_path(dep_result_path(upper, location)),
+                "lower_sequence": q(p["lower_sequence"]),
+                "middle_sequence": q(p["middle_sequence"]),
+                "upper_sequence": q(p["upper_sequence"]),
+                "lower_crmsd": q(p["lower_crmsd"]),
+                "lower_ovrmsd": q(p["lower_ovrmsd"]),
+                "upper_crmsd": q(p["upper_crmsd"]),
+                "upper_ovrmsd": q(p["upper_ovrmsd"]),
+                "memory": q(p.get("memory", "600G")),
+                "max_intermediate_poses": q(p.get("max-intermediate-poses", 100_000_000)),
+                "max_final_poses": q(p.get("max-final-poses", 1_000_000)),
+                "nprocs": q(p.get("nprocs", 1)),
+                "rotamer_chunks": q(p.get("rotamer-chunks", 1)),
             }
         )
     return context

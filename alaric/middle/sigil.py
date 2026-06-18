@@ -14,6 +14,18 @@ from .resolve import ResolvedAction
 from .schema import DEPENDENCY_FIELDS
 
 
+NON_LOAD_BEARING: dict[str, set[str]] = {
+    "bridge": {
+        "memory",
+        "nprocs",
+        "max-intermediate-poses",
+        "max-final-poses",
+        "rotamer-chunks",
+        "estimator-seed",
+    }
+}
+
+
 def _plain_value(value: Any) -> Any:
     if isinstance(value, ResolvedAction):
         raise TypeError("dependency value must be stripped before serialization")
@@ -30,9 +42,12 @@ def _plain_value(value: Any) -> Any:
 
 def parameter_record(action: ResolvedAction, dep_sigils: dict[str, str]) -> dict[str, Any]:
     dep_fields = set(DEPENDENCY_FIELDS[action.action])
+    runtime_fields = NON_LOAD_BEARING.get(action.action, set())
     params: dict[str, Any] = {}
     for key, value in action.params.items():
         if key in dep_fields:
+            continue
+        if key in runtime_fields:
             continue
         if isinstance(value, ResolvedAction):
             continue

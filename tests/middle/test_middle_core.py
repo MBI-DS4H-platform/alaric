@@ -30,7 +30,11 @@ def _write_project(root: Path) -> None:
   "pdb_code": "1abc",
   "frag4": {"sequence": "GU", "scores": {"dom": -1.5}},
   "frag5": {"sequence": "UU", "scores": {"dom": -2.5}},
-  "pairs": [{"down": "frag4", "up": "frag5", "cRMSD": 0.25, "ovRMSD": 0.75}]
+  "frag6": {"sequence": "UA", "scores": {"dom": -3.5}},
+  "pairs": [
+    {"down": "frag4", "up": "frag5", "cRMSD": 0.25, "ovRMSD": 0.75},
+    {"down": "frag5", "up": "frag6", "cRMSD": 0.35, "ovRMSD": 0.85}
+  ]
 }
 """.strip()
         + "\n"
@@ -87,6 +91,18 @@ def _write_project(root: Path) -> None:
             "direction": "auto",
             "crmsd": "auto",
             "ovrmsd": "auto",
+        },
+    )
+    action(
+        "frag6-anchor",
+        {
+            "action": "anchor",
+            "fragment": 6,
+            "sequence": "auto",
+            "exclude": "auto",
+            "protein": "dom",
+            "resid": 1,
+            "nucleotide": "first",
         },
     )
 
@@ -217,6 +233,44 @@ def test_score_concat_requires_all_expected_chunks(tmp_path: Path) -> None:
 
     with pytest.raises(FileNotFoundError):
         score_concat_main([str(chunks), str(tmp_path / "score.npy"), "--nchunks", "2"])
+
+
+def test_bridge_middle_integration_and_runtime_knobs_are_non_load_bearing(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    bridge_dir = tmp_path / "frag5-bridge"
+    bridge_dir.mkdir()
+    (bridge_dir / "alaric.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "action": "bridge",
+                "input1": "frag4-anchor",
+                "input2": "frag6-anchor",
+                "memory": "1G",
+                "nprocs": 2,
+                "rotamer-chunks": 3,
+                "max-intermediate-poses": 1000,
+                "max-final-poses": 100,
+            },
+            sort_keys=False,
+        )
+    )
+    project = Project.discover(tmp_path)
+    sigils = compute_project_sigils(project)
+    first = sigils["frag5-bridge"]
+
+    spec = yaml.safe_load((bridge_dir / "alaric.yaml").read_text())
+    spec["memory"] = "2G"
+    spec["nprocs"] = 8
+    (bridge_dir / "alaric.yaml").write_text(yaml.safe_dump(spec, sort_keys=False))
+    second = compute_project_sigils(project, force=True)["frag5-bridge"]
+    assert first == second
+
+    deploy("local", bridge_dir)
+    body = (bridge_dir / "run.sh").read_text()
+    assert "bridge.py" in body
+    assert "--lower-sequence GU" in body
+    assert "--middle-sequence UU" in body
+    assert "--upper-sequence UA" in body
 
 
 def test_checksum_is_zstd_transparent(tmp_path: Path) -> None:

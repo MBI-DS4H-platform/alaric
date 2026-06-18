@@ -211,6 +211,31 @@ def resolve_action(
                 p["ovrmsd"] = ovrmsd
         if p.get("sequence") != "auto":
             p["source_sequence"] = final_sequence(dep)
+    if action == "bridge":
+        dep1 = resolved_by_name.get(str(p["input1"]))
+        dep2 = resolved_by_name.get(str(p["input2"]))
+        if dep1 is None or dep2 is None:
+            raise ResolveError(f"{spec.name}: bridge needs resolved inputs")
+        frag1 = final_fragment(dep1)
+        frag2 = final_fragment(dep2)
+        if abs(frag1 - frag2) != 2:
+            raise ResolveError(f"{spec.name}: bridge inputs must differ by exactly 2 fragments")
+        lower_fragment, higher_fragment = sorted((frag1, frag2))
+        middle_fragment = (lower_fragment + higher_fragment) // 2
+        p["lower_fragment"] = lower_fragment
+        p["middle_fragment"] = middle_fragment
+        p["higher_fragment"] = higher_fragment
+        p["lower_sequence"] = final_sequence(dep1 if frag1 == lower_fragment else dep2)
+        p["upper_sequence"] = final_sequence(dep1 if frag1 == higher_fragment else dep2)
+        p["middle_sequence"] = resolve_sequence(project, middle_fragment)
+        p["lower_crmsd"], p["lower_ovrmsd"] = _pair_thresholds(project, lower_fragment, middle_fragment)
+        p["upper_crmsd"], p["upper_ovrmsd"] = _pair_thresholds(project, middle_fragment, higher_fragment)
+        p.setdefault("memory", "600G")
+        p.setdefault("max-intermediate-poses", 100_000_000)
+        p.setdefault("max-final-poses", 1_000_000)
+        p.setdefault("nprocs", 1)
+        p.setdefault("rotamer-chunks", 1)
+        p.setdefault("estimator-seed", 0)
     if action == "rmsd":
         reference = str(p.get("reference", "reference.pdb"))
         ref_path = Path(reference)
@@ -225,6 +250,8 @@ def resolve_action(
 
 
 def final_fragment(action: ResolvedAction) -> int:
+    if "middle_fragment" in action.params:
+        return int(action.params["middle_fragment"])
     if "fragment" in action.params:
         return int(action.params["fragment"])
     for key in ("input", "input1", "input2"):
@@ -234,6 +261,8 @@ def final_fragment(action: ResolvedAction) -> int:
 
 
 def final_sequence(action: ResolvedAction) -> str:
+    if "middle_sequence" in action.params:
+        return str(action.params["middle_sequence"]).upper()
     if "sequence" in action.params:
         return str(action.params["sequence"]).upper()
     for key in ("input", "input1", "input2"):
