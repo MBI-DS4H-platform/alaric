@@ -150,6 +150,13 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
         )
     elif action.action == "grow":
         source = p["input"]
+        restrict = p.get("restrict_input")
+        restrict_args = ""
+        if restrict is not None:
+            restrict_args = (
+                "--restrict-poses "
+                + shell_path(dep_result_path(restrict, location))
+            )
         context.update(
             {
                 "input_result_path": shell_path(dep_result_path(source, location)),
@@ -161,6 +168,7 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
                 "ovrmsd": q(p["ovrmsd"]),
                 "exclude_args": exclude_args(p.get("exclude", [])),
                 "exclude_python": repr(p.get("exclude", [])),
+                "restrict_args": restrict_args,
                 "organize_command": organize_command(alaric_dir, output_dir, location),
             }
         )

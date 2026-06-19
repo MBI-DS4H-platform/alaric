@@ -6,6 +6,7 @@
   --crmsd {{ crmsd }} \
   --ov-rmsd {{ ovrmsd }} \
   --output {{ output_path }} \
+  {{ restrict_args }} \
   {{ exclude_args }} \
   --bucket-size 16 \
   ${ALARIC_GROW_EXTRA_ARGS:-}

@@ -5,7 +5,7 @@ from typing import Any
 
 from .errors import GraphError, ResolveError
 from .project import Project
-from .resolve import ResolvedAction, final_fragment, resolve_action
+from .resolve import ResolvedAction, final_fragment, final_sequence, resolve_action
 from .schema import DEPENDENCY_FIELDS, OUTPUT_KIND, ActionSpec, load_action_spec
 
 
@@ -132,6 +132,17 @@ class ActionGraph:
         elif resolved.action == "identity":
             if final_fragment(p["input1"]) != final_fragment(p["input2"]):
                 raise GraphError(f"{resolved.name}: identity inputs must resolve to the same fragment")
+        elif resolved.action == "grow":
+            restrict = p.get("restrict_input")
+            if isinstance(restrict, ResolvedAction):
+                if final_fragment(restrict) != final_fragment(resolved):
+                    raise GraphError(
+                        f"{resolved.name}: restrict_input must resolve to the grow target fragment"
+                    )
+                if final_sequence(restrict) != final_sequence(resolved):
+                    raise GraphError(
+                        f"{resolved.name}: restrict_input must resolve to the grow target sequence"
+                    )
 
     def action(self, name: str) -> ResolvedAction:
         if not self.resolved:

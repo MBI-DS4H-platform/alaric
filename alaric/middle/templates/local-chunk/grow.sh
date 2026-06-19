@@ -26,6 +26,7 @@ grow_opts=(
   --crmsd {{ crmsd }} \
   --ov-rmsd {{ ovrmsd }} \
   --output {{ output_path }} \
+  {{ restrict_args }} \
   {{ exclude_args }} \
   --bucket-size 16 \
   --pose-range "$FIRST" "$LAST" \

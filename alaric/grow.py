@@ -79,6 +79,9 @@ class GrowthLayout:
     source_on_rows: bool
 
 
+RestrictIndex = dict[int, dict[int, np.ndarray]]
+
+
 def _existing_dir(path: str) -> str:
     p = Path(path)
     if not p.exists():
@@ -157,6 +160,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         required=True,
         help="Output directory where unorganized .arc.zst pose shards are written.",
+    )
+    parser.add_argument(
+        "--restrict-poses",
+        type=_existing_dir,
+        default=None,
+        help="Optional organized target pose directory restricting generated output poses.",
     )
     parser.add_argument(
         "--pose-range",
@@ -408,6 +417,56 @@ def _stable_pose_order(rotamers: np.ndarray, translations: np.ndarray) -> np.nda
     ).astype(np.int64, copy=False)
 
 
+def _pack_translations(translations: np.ndarray) -> np.ndarray:
+    grid = np.asarray(translations, dtype=np.int16)
+    if grid.ndim != 2 or grid.shape[1] != 3:
+        raise ValueError("translations must have shape [N,3]")
+    shifted = grid.astype(np.uint16, copy=False).astype(np.uint64, copy=False)
+    return (shifted[:, 0] << np.uint64(32)) | (
+        shifted[:, 1] << np.uint64(16)
+    ) | shifted[:, 2]
+
+
+def _load_restrict_index(restrict_poses: str | Path) -> RestrictIndex:
+    reader = PoseReader(restrict_poses)
+    parts: dict[int, dict[int, list[np.ndarray]]] = {}
+    total = 0
+    for chunk in reader.iter_chunks():
+        if len(chunk) == 0:
+            continue
+        total += len(chunk)
+        packed = _pack_translations(chunk.translations_grid)
+        order = np.lexsort((chunk.rotamers, chunk.conformers))
+        conformers = chunk.conformers[order]
+        rotamers = chunk.rotamers[order]
+        packed = packed[order]
+        run_starts = np.r_[
+            0,
+            np.flatnonzero(
+                (conformers[1:] != conformers[:-1])
+                | (rotamers[1:] != rotamers[:-1])
+            )
+            + 1,
+        ]
+        run_stops = np.r_[run_starts[1:], len(order)]
+        for start, stop in zip(run_starts, run_stops):
+            conformer = int(conformers[start])
+            rotamer = int(rotamers[start])
+            parts.setdefault(conformer, {}).setdefault(rotamer, []).append(
+                packed[start:stop].copy()
+            )
+    if total == 0:
+        raise ValueError("restrict pose directory is empty")
+
+    index: RestrictIndex = {}
+    for conformer, by_rotamer in parts.items():
+        index[conformer] = {}
+        for rotamer, arrays in by_rotamer.items():
+            values = arrays[0] if len(arrays) == 1 else np.concatenate(arrays)
+            index[conformer][rotamer] = np.unique(values)
+    return index
+
+
 def _build_target_to_sources(
     source_conformers: np.ndarray,
     crmsds: np.ndarray,
@@ -428,6 +487,20 @@ def _build_target_to_sources(
     return {
         target: np.asarray(sources, dtype=np.int64)
         for target, sources in target_to_sources.items()
+    }
+
+
+def _apply_restrict_conformers(
+    target_to_sources: dict[int, np.ndarray],
+    restrict_index: RestrictIndex | None,
+) -> dict[int, np.ndarray]:
+    if restrict_index is None:
+        return target_to_sources
+    allowed = set(restrict_index)
+    return {
+        target: sources
+        for target, sources in target_to_sources.items()
+        if target in allowed
     }
 
 
@@ -455,6 +528,8 @@ def _select_target_rotamer_positions(
         return None
     if count <= 0:
         raise ValueError("--test-rotamers must be positive")
+    if len(target_conformers) == 0:
+        return np.empty((0,), dtype=np.int64)
     smallest = None
     for conformer in target_conformers.tolist():
         nrot = len(target_library.get_rotamers(int(conformer)))
@@ -466,6 +541,51 @@ def _select_target_rotamer_positions(
         )
     rng = np.random.default_rng(seed)
     return np.sort(rng.choice(smallest, size=count, replace=False).astype(np.int64))
+
+
+def _target_rotamer_indices(
+    target_library,
+    target_conformer: int,
+    target_rotamer_positions: np.ndarray | None,
+    restrict_index: RestrictIndex | None,
+) -> np.ndarray:
+    nrot = len(target_library.get_rotamers(target_conformer))
+    if target_rotamer_positions is None:
+        indices = np.arange(nrot, dtype=np.int64)
+    else:
+        indices = target_rotamer_positions.astype(np.int64, copy=False)
+    if restrict_index is None:
+        return indices
+    allowed_by_rotamer = restrict_index.get(int(target_conformer), {})
+    if not allowed_by_rotamer or len(indices) == 0:
+        return np.empty((0,), dtype=np.int64)
+    allowed = np.fromiter(allowed_by_rotamer, dtype=np.int64)
+    return indices[np.isin(indices, allowed)]
+
+
+def _restrict_output_mask(
+    allowed_by_rotamer: dict[int, np.ndarray] | None,
+    rotamers: np.ndarray,
+    translations: np.ndarray,
+) -> np.ndarray:
+    if allowed_by_rotamer is None:
+        return np.ones(len(rotamers), dtype=bool)
+    if len(rotamers) == 0:
+        return np.empty((0,), dtype=bool)
+    packed = _pack_translations(translations)
+    keep = np.zeros(len(rotamers), dtype=bool)
+    for rotamer in np.unique(rotamers).tolist():
+        allowed = allowed_by_rotamer.get(int(rotamer))
+        if allowed is None or len(allowed) == 0:
+            continue
+        rows = np.nonzero(rotamers == rotamer)[0]
+        values = packed[rows]
+        positions = np.searchsorted(allowed, values)
+        valid = positions < len(allowed)
+        matched = np.zeros(len(rows), dtype=bool)
+        matched[valid] = allowed[positions[valid]] == values[valid]
+        keep[rows] = matched
+    return keep
 
 
 def _build_source_caches(
@@ -554,19 +674,20 @@ def _estimate_trace_work(
     target_to_sources: dict[int, np.ndarray],
     target_conformers: np.ndarray,
     target_rotamer_positions: np.ndarray | None,
+    restrict_index: RestrictIndex | None,
 ) -> int:
     total = 0
-    fixed_target_rotamer_count = (
-        None if target_rotamer_positions is None else len(target_rotamer_positions)
-    )
     for target_conformer in target_conformers.tolist():
         sources = target_to_sources.get(int(target_conformer))
         if sources is None:
             continue
-        target_rotamer_count = (
-            len(target_library.get_rotamers(int(target_conformer)))
-            if fixed_target_rotamer_count is None
-            else fixed_target_rotamer_count
+        target_rotamer_count = len(
+            _target_rotamer_indices(
+                target_library,
+                int(target_conformer),
+                target_rotamer_positions,
+                restrict_index,
+            )
         )
         if target_rotamer_count == 0:
             continue
@@ -589,6 +710,7 @@ class _GrowWorkerConfig:
     bucket_size: int
     translation_sets: TranslationSets
     target_rotamer_positions: object
+    restrict_index: object
 
 
 _GROW_WORKER_CONFIG: _GrowWorkerConfig | None = None
@@ -614,6 +736,7 @@ def _grow_worker(target_conformers: np.ndarray) -> int:
         unorganized_subdirs=True,
         translation_sets=cfg.translation_sets,
         target_rotamer_positions=cfg.target_rotamer_positions,
+        restrict_index=cfg.restrict_index,
     )
 
 
@@ -630,6 +753,7 @@ def _pooled_trace_grow(
     unorganized_subdirs: bool,
     translation_sets: TranslationSets,
     target_rotamer_positions: np.ndarray | None,
+    restrict_index: RestrictIndex | None,
 ) -> int:
     writer = PoseWriter(
         output_dir,
@@ -643,6 +767,7 @@ def _pooled_trace_grow(
         target_to_sources,
         target_conformers,
         target_rotamer_positions,
+        restrict_index,
     )
     progress = tqdm(
         total=trace_work_total,
@@ -668,14 +793,20 @@ def _pooled_trace_grow(
             rot_qq_all = _rotamers_to_matrices(
                 target_library.get_rotamers(target_conformer)
             )
-            if target_rotamer_positions is None:
-                rot_qq = rot_qq_all
-                rotamer_indices = np.arange(len(rot_qq_all), dtype=np.int64)
-            else:
-                rot_qq = rot_qq_all[target_rotamer_positions]
-                rotamer_indices = target_rotamer_positions
+            rotamer_indices = _target_rotamer_indices(
+                target_library,
+                int(target_conformer),
+                target_rotamer_positions,
+                restrict_index,
+            )
+            rot_qq = rot_qq_all[rotamer_indices]
             if len(rot_qq) == 0:
                 continue
+            allowed_by_rotamer = (
+                None
+                if restrict_index is None
+                else restrict_index.get(int(target_conformer), {})
+            )
             rot_qq_flat_t = np.ascontiguousarray(
                 rot_qq.reshape(len(rot_qq), 9).T
             )
@@ -910,6 +1041,16 @@ def _pooled_trace_grow(
                             kept_qq_cols[local_rows[kept_rows]]
                         ]
                         out_provenance = kept_instance_source_ids[local_rows[kept_rows]]
+                        restrict_keep = _restrict_output_mask(
+                            allowed_by_rotamer,
+                            out_rotamers,
+                            out_translations,
+                        )
+                        if not np.any(restrict_keep):
+                            continue
+                        out_translations = out_translations[restrict_keep]
+                        out_rotamers = out_rotamers[restrict_keep]
+                        out_provenance = out_provenance[restrict_keep]
                         if (
                             len(out_rotamers)
                             and int(out_rotamers.max()) > np.iinfo(np.uint16).max
@@ -979,6 +1120,23 @@ def _run(args: argparse.Namespace) -> int:
         f"{len(source_pool.unique_conformers)} unique conformers",
         file=sys.stderr,
     )
+    restrict_index = None
+    if args.restrict_poses is not None:
+        print("      Loading restrict pose index...", file=sys.stderr)
+        restrict_index = _load_restrict_index(args.restrict_poses)
+        restrict_poses = sum(
+            len(translations)
+            for by_rotamer in restrict_index.values()
+            for translations in by_rotamer.values()
+        )
+        restrict_rotamers = sum(
+            len(by_rotamer) for by_rotamer in restrict_index.values()
+        )
+        print(
+            f"      restrict: {restrict_poses} poses, "
+            f"{len(restrict_index)} conformers, {restrict_rotamers} rotamers",
+            file=sys.stderr,
+        )
 
     print(
         "[2/6] Loading source library and precomputing source caches...",
@@ -1009,6 +1167,7 @@ def _run(args: argparse.Namespace) -> int:
         args.crmsd,
         source_on_rows=layout.source_on_rows,
     )
+    target_to_sources = _apply_restrict_conformers(target_to_sources, restrict_index)
     target_conformers = np.array(sorted(target_to_sources.keys()), dtype=np.int64)
 
     print("[4/6] Loading target library...", file=sys.stderr)
@@ -1055,6 +1214,7 @@ def _run(args: argparse.Namespace) -> int:
             unorganized_subdirs=True,
             translation_sets=translation_sets,
             target_rotamer_positions=target_rotamer_positions,
+            restrict_index=restrict_index,
         )
     else:
         if "fork" not in mp.get_all_start_methods():
@@ -1074,6 +1234,7 @@ def _run(args: argparse.Namespace) -> int:
             bucket_size=args.bucket_size,
             translation_sets=translation_sets,
             target_rotamer_positions=target_rotamer_positions,
+            restrict_index=restrict_index,
         )
         with ctx.Pool(
             processes=nprocs,

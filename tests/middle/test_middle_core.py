@@ -145,6 +145,62 @@ def test_score_deploy_defaults_to_compiled_kernel(tmp_path: Path) -> None:
     assert "\n  jax \\\n" not in body
 
 
+def test_grow_deploy_renders_restrict_input(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    restrict_dir = tmp_path / "frag5-restrict"
+    restrict_dir.mkdir()
+    (restrict_dir / "alaric.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "action": "anchor-test",
+                "fragment": 5,
+                "sequence": "auto",
+                "exclude": "auto",
+                "protein": "dom",
+                "resid": 1,
+                "nucleotide": "first",
+                "nconformers": 1,
+            },
+            sort_keys=False,
+        )
+    )
+    (tmp_path / "frag5-fwd" / "alaric.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "action": "grow",
+                "input": "frag4-filter",
+                "restrict_input": "frag5-restrict",
+                "fragment": "auto",
+                "sequence": "auto",
+                "exclude": "auto",
+                "direction": "auto",
+                "crmsd": "auto",
+                "ovrmsd": "auto",
+            },
+            sort_keys=False,
+        )
+    )
+    project = Project.discover(tmp_path)
+    sigils = compute_project_sigils(project)
+    action = ActionGraph(project).build()["frag5-fwd"]
+
+    body = generate_run_sh(project, action, "local")
+    assert "--restrict-poses" in body
+    assert sigils["frag5-restrict"] in body
+
+    files = generate_chunk_files(project, action, "local-chunk", nchunks=2)
+    assert "--restrict-poses" in files["chunk1.sh"]
+    assert sigils["frag5-restrict"] in files["chunk1.sh"]
+
+    params = (
+        tmp_path
+        / "CACHE"
+        / "parameters"
+        / sigils["frag5-fwd"]
+    ).read_text()
+    assert "restrict_input" in params
+
+
 def test_score_chunk_deploy_defaults_to_compiled_kernel(tmp_path: Path) -> None:
     _write_project(tmp_path)
     project = Project.discover(tmp_path)

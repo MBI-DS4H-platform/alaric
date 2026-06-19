@@ -17,7 +17,7 @@ MASK = "mask"
 ACTION_SCHEMAS: dict[str, set[str]] = {
     "anchor": {"action", "type", "fragment", "sequence", "exclude", "protein", "resid", "nucleotide", "dihedral", "angle", "margin"},
     "anchor-test": {"action", "type", "fragment", "sequence", "exclude", "protein", "resid", "nucleotide", "dihedral", "angle", "margin", "nconformers"},
-    "grow": {"action", "type", "input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
+    "grow": {"action", "type", "input", "restrict_input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
     "score": {"action", "type", "input", "sequence", "exclude", "protein", "nb_kernel"},
     "rmsd": {"action", "type", "input", "fragment", "exclude", "reference"},
     "score_add": {"action", "type", "score_input1", "score_input2"},
@@ -41,7 +41,7 @@ REQUIRED: dict[str, set[str]] = {
 DEPENDENCY_FIELDS: dict[str, dict[str, str]] = {
     "anchor": {},
     "anchor-test": {},
-    "grow": {"input": POSE},
+    "grow": {"input": POSE, "restrict_input": POSE},
     "score": {"input": POSE},
     "rmsd": {"input": POSE},
     "score_add": {"score_input1": SCORE, "score_input2": SCORE},
