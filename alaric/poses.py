@@ -721,10 +721,12 @@ class PoseWriter:
         self.bucket_size = _check_bucket_size(bucket_size)
         self._memory_lock = memory_lock
         self.unorganized_subdirs = bool(unorganized_subdirs)
-        self._unsorted_chunks: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+        self._unsorted_chunks: list[
+            tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]
+        ] = []
         self._buckets: dict[
             tuple[int, int, int],
-            list[tuple[np.ndarray, np.ndarray, np.ndarray]],
+            list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]],
         ] = defaultdict(list)
         self._bucket_counts: dict[tuple[int, int, int], int] = defaultdict(int)
         self.total_poses = 0
@@ -746,6 +748,7 @@ class PoseWriter:
         conformer_indices: np.ndarray,
         rotamer_indices: np.ndarray,
         translations: np.ndarray,
+        provenance: np.ndarray | None = None,
     ) -> None:
         conf = _as_uint16_array("conformer_indices", conformer_indices)
         rot = _as_uint16_array("rotamer_indices", rotamer_indices)
@@ -754,6 +757,13 @@ class PoseWriter:
         grid = _as_grid_array(translations)
         if len(grid) != len(conf):
             raise ValueError("translations length must match conformer/rotamer indices")
+        provenance_arr = None
+        if provenance is not None:
+            provenance_arr = np.asarray(provenance, dtype=np.uint32)
+            if provenance_arr.ndim != 1:
+                raise ValueError("provenance must be a 1D array")
+            if len(provenance_arr) != len(conf):
+                raise ValueError("provenance length must match conformer/rotamer indices")
         if len(grid) == 0:
             return
 
@@ -762,6 +772,7 @@ class PoseWriter:
                 conf.copy(),
                 rot.copy(),
                 grid.astype(np.int16, copy=True),
+                None if provenance_arr is None else provenance_arr.copy(),
             )
         )
         n = len(grid)
@@ -798,6 +809,17 @@ class PoseWriter:
             conf = np.concatenate([chunk[0] for chunk in chunks])
             rot = np.concatenate([chunk[1] for chunk in chunks])
             grid = np.concatenate([chunk[2] for chunk in chunks])
+            provenance_parts = [chunk[3] for chunk in chunks]
+            has_provenance = [part is not None for part in provenance_parts]
+            if any(has_provenance) and not all(has_provenance):
+                raise ValueError("cannot mix chunks with and without provenance")
+            provenance = (
+                None
+                if not any(has_provenance)
+                else np.concatenate(
+                    [part for part in provenance_parts if part is not None]
+                )
+            )
             Ms, Os = split_M_O(grid, self.bucket_size)
             unique_M = np.unique(Ms, axis=0)
             for M in unique_M:
@@ -808,6 +830,7 @@ class PoseWriter:
                         conf[mask].copy(),
                         rot[mask].copy(),
                         Os[mask].astype(np.int16, copy=True),
+                        None if provenance is None else provenance[mask].copy(),
                     )
                 )
                 self._bucket_counts[key] += int(mask.sum())
@@ -824,6 +847,17 @@ class PoseWriter:
             conf = np.concatenate([p[0] for p in parts])
             rot = np.concatenate([p[1] for p in parts])
             O_rows = np.concatenate([p[2] for p in parts])
+            provenance_parts = [p[3] for p in parts]
+            has_provenance = [part is not None for part in provenance_parts]
+            if any(has_provenance) and not all(has_provenance):
+                raise ValueError("cannot mix buckets with and without provenance")
+            provenance = (
+                None
+                if not any(has_provenance)
+                else np.concatenate(
+                    [part for part in provenance_parts if part is not None]
+                )
+            )
             O, inverse = np.unique(O_rows, axis=0, return_inverse=True)
             C = np.bincount(inverse, minlength=len(O)).astype(np.uint32)
             P = np.column_stack((conf, rot, inverse.astype(np.uint16, copy=False)))
@@ -831,6 +865,8 @@ class PoseWriter:
 
         path = self._next_unorganized_path()
         write_arc_file(path, M, O, C, P, bucket_size=self.bucket_size, zstd=True)
+        if provenance is not None:
+            np.save(path.with_name(path.name + ".provenance.npy"), provenance)
         self._written.append(path)
 
     def finish(self) -> list[Path]:

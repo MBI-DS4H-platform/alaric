@@ -42,6 +42,8 @@ from poses import (
 
 
 DONE_MARKER = ".ORGANIZED-DONE"
+PROVENANCE_NAME = "provenance.npy"
+PROVENANCE_SUFFIX = ".provenance.npy"
 
 
 @dataclass(frozen=True)
@@ -373,14 +375,18 @@ def _write_bucket(
     *,
     chunk_poses: int,
     origins: np.ndarray | None = None,
+    sort_keys: np.ndarray | None = None,
 ) -> np.ndarray | None:
-    if origins is None:
+    if origins is None and sort_keys is None:
         bucket.sort()
         sorted_origins = None
     else:
-        order = np.argsort(bucket, kind="stable")
+        if sort_keys is None:
+            order = np.argsort(bucket, kind="stable")
+        else:
+            order = np.lexsort((sort_keys, bucket))
         bucket = bucket[order]
-        sorted_origins = origins[order]
+        sorted_origins = None if origins is None else origins[order]
     for start in range(0, len(bucket), chunk_poses):
         stop = min(start + chunk_poses, len(bucket))
         chunk = bucket[start:stop]
@@ -399,12 +405,20 @@ def _arc_uncompressed_size(n_offsets: int, n_poses: int) -> int:
 def _sort_bucket_with_origins(
     bucket: np.ndarray,
     origins: np.ndarray | None,
-) -> tuple[np.ndarray, np.ndarray | None]:
-    if origins is None:
+    sort_keys: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray | None, np.ndarray | None]:
+    if origins is None and sort_keys is None:
         bucket.sort()
-        return bucket, None
-    order = np.argsort(bucket, kind="stable")
-    return bucket[order], origins[order]
+        return bucket, None, None
+    if sort_keys is None:
+        order = np.argsort(bucket, kind="stable")
+    else:
+        order = np.lexsort((sort_keys, bucket))
+    return (
+        bucket[order],
+        None if origins is None else origins[order],
+        None if sort_keys is None else sort_keys[order],
+    )
 
 
 @dataclass(frozen=True)
@@ -479,6 +493,95 @@ def _arc_checksum_path(pose_dir: Path, file_index: int) -> Path:
     return pose_dir / f"poses-{file_index}.arc.CHECKSUM"
 
 
+def _provenance_sidecar_path(path: Path) -> Path:
+    return path.with_name(path.name + PROVENANCE_SUFFIX)
+
+
+def _source_provenance_paths(sources: list[SourceMeta]) -> list[Path] | None:
+    paths = [_provenance_sidecar_path(source.path) for source in sources]
+    exists = [path.is_file() for path in paths]
+    if not any(exists):
+        return None
+    if not all(exists):
+        missing = [str(path) for path, present in zip(paths, exists) if not present]
+        raise FileNotFoundError(
+            "missing provenance sidecar(s): " + ", ".join(missing[:5])
+        )
+    for source, path in zip(sources, paths):
+        arr = np.load(path, mmap_mode="r")
+        try:
+            if arr.dtype != np.dtype(np.uint32):
+                raise ValueError(f"provenance sidecar must be uint32: {path}")
+            if arr.ndim != 1 or len(arr) != source.nP:
+                raise ValueError(
+                    f"provenance sidecar length mismatch for {source.path}: "
+                    f"expected {source.nP}, got shape {arr.shape}"
+                )
+        finally:
+            del arr
+    return paths
+
+
+def _write_organized_provenance(
+    sources: list[SourceMeta],
+    provenance_paths: list[Path],
+    order_array_path: Path,
+    output_path: Path,
+    *,
+    chunk_poses: int,
+) -> None:
+    total_poses = int(sum(source.nP for source in sources))
+    with tempfile.NamedTemporaryFile(
+        prefix=f"{output_path.name}.source.",
+        suffix=".tmp.npy",
+        dir=output_path.parent,
+        delete=False,
+    ) as handle:
+        source_tmp = Path(handle.name)
+    try:
+        source_provenance = np.lib.format.open_memmap(
+            source_tmp,
+            mode="w+",
+            dtype=np.uint32,
+            shape=(total_poses,),
+        )
+        cursor = 0
+        for source, path in zip(sources, provenance_paths):
+            arr = np.load(path, mmap_mode="r")
+            try:
+                stop = cursor + int(source.nP)
+                source_provenance[cursor:stop] = arr
+                cursor = stop
+            finally:
+                del arr
+        source_provenance.flush()
+
+        order = np.load(order_array_path, mmap_mode="r")
+        if order.ndim != 1 or len(order) != total_poses:
+            raise ValueError(
+                f"order array length mismatch for provenance: "
+                f"expected {total_poses}, got shape {order.shape}"
+            )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        out = np.lib.format.open_memmap(
+            output_path,
+            mode="w+",
+            dtype=np.uint32,
+            shape=(total_poses,),
+        )
+        try:
+            for start in range(0, total_poses, chunk_poses):
+                stop = min(start + chunk_poses, total_poses)
+                out[start:stop] = source_provenance[order[start:stop]]
+            out.flush()
+        finally:
+            del out
+            del order
+            del source_provenance
+    finally:
+        source_tmp.unlink(missing_ok=True)
+
+
 def _write_group_layout(
     pose_dir: Path,
     layout: OutputLayout,
@@ -494,6 +597,10 @@ def _write_group_layout(
     ]
     | None = None,
     order_array: np.ndarray | None = None,
+    provenance_key_buffers: dict[
+        tuple[tuple[int, int, int], tuple[int, int, int]], np.ndarray
+    ]
+    | None = None,
 ) -> int:
     try:
         import zstandard as zstd
@@ -555,21 +662,37 @@ def _write_group_layout(
                 segment = entry.segment
                 bucket = buffers[key]
                 origins = None if order_buffers is None else order_buffers[key]
+                sort_keys = (
+                    None
+                    if provenance_key_buffers is None
+                    else provenance_key_buffers[key]
+                )
                 if overrides and offset_id in overrides:
-                    bucket, origins = _sort_bucket_with_origins(bucket, origins)
+                    bucket, origins, sort_keys = _sort_bucket_with_origins(
+                        bucket,
+                        origins,
+                        sort_keys,
+                    )
                     start, count = overrides[offset_id]
                     out_bucket = bucket[start : start + count]
                     out_origins = (
                         None if origins is None else origins[start : start + count]
                     )
+                    out_sort_keys = (
+                        None
+                        if sort_keys is None
+                        else sort_keys[start : start + count]
+                    )
                 elif len(bucket) == segment.count and segment.start == 0:
                     out_bucket = bucket
+                    out_sort_keys = sort_keys
                     out_origins = _write_bucket(
                         writer,
                         offset_id,
                         out_bucket,
                         chunk_poses=chunk_poses,
                         origins=origins,
+                        sort_keys=out_sort_keys,
                     )
                     if len(out_bucket) != int(C[offset_id]):
                         raise ValueError(f"layout count mismatch for {key}")
@@ -584,7 +707,11 @@ def _write_group_layout(
                         progress.update(len(out_bucket))
                     continue
                 else:
-                    bucket, origins = _sort_bucket_with_origins(bucket, origins)
+                    bucket, origins, sort_keys = _sort_bucket_with_origins(
+                        bucket,
+                        origins,
+                        sort_keys,
+                    )
                     out_bucket = bucket[
                         segment.start : segment.start + segment.count
                     ]
@@ -592,6 +719,11 @@ def _write_group_layout(
                         None
                         if origins is None
                         else origins[segment.start : segment.start + segment.count]
+                    )
+                    out_sort_keys = (
+                        None
+                        if sort_keys is None
+                        else sort_keys[segment.start : segment.start + segment.count]
                     )
                 if len(out_bucket) != int(C[offset_id]):
                     raise ValueError(f"layout count mismatch for {key}")
@@ -601,6 +733,7 @@ def _write_group_layout(
                     out_bucket,
                     chunk_poses=chunk_poses,
                     origins=out_origins,
+                    sort_keys=out_sort_keys,
                 )
                 if order_array is not None:
                     if sorted_origins is None:
@@ -663,6 +796,7 @@ def _process_layout_group(
     order_array_path: Path | None = None,
     order_array_dtype: np.dtype | None = None,
     order_array_shape: tuple[int, ...] | None = None,
+    provenance_paths: list[Path] | None = None,
 ) -> None:
     group_keys: list[tuple[tuple[int, int, int], tuple[int, int, int]]] = []
     collect_counts: dict[
@@ -695,8 +829,24 @@ def _process_layout_group(
             for key, count in collect_counts.items()
         }
     )
+    provenance_key_buffers = (
+        None
+        if provenance_paths is None
+        else {
+            key: np.empty(count, dtype=np.uint32)
+            for key, count in collect_counts.items()
+        }
+    )
     cursors = np.zeros(len(group_keys), dtype=np.uint64)
     group_sources = [source for source in sources if source.M == group.M]
+    provenance_by_source = (
+        {}
+        if provenance_paths is None
+        else {
+            source.path: provenance_path
+            for source, provenance_path in zip(sources, provenance_paths)
+        }
+    )
     order_array = None
     if order_array_path is not None:
         if order_array_dtype is None or order_array_shape is None:
@@ -730,6 +880,10 @@ def _process_layout_group(
         )
     with read_cm as read_pbar:
         for source in group_sources:
+            source_provenance = None
+            provenance_path = provenance_by_source.get(source.path)
+            if provenance_path is not None:
+                source_provenance = np.load(provenance_path, mmap_mode="r")
             local_to_group = np.full(len(source.O), -1, dtype=np.int32)
             for local_index, offset_row in enumerate(source.O):
                 key = (source.M, tuple(int(x) for x in offset_row))
@@ -766,6 +920,11 @@ def _process_layout_group(
                     continue
                 kept_group_ids = group_ids[keep]
                 kept_rows = P[keep, 0:2]
+                kept_provenance = None
+                if source_provenance is not None:
+                    kept_provenance = source_provenance[
+                        source_cursor : source_cursor + len(P)
+                    ][keep]
                 packed = (
                     (kept_rows[:, 0].astype(np.uint32, copy=False) << 16)
                     | kept_rows[:, 1].astype(np.uint32, copy=False)
@@ -784,6 +943,9 @@ def _process_layout_group(
                 sorted_group_ids = kept_group_ids[order]
                 sorted_packed = packed[order]
                 sorted_origins = None if kept_origins is None else kept_origins[order]
+                sorted_provenance = (
+                    None if kept_provenance is None else kept_provenance[order]
+                )
                 run_starts = np.r_[
                     0,
                     np.flatnonzero(sorted_group_ids[1:] != sorted_group_ids[:-1]) + 1,
@@ -800,10 +962,17 @@ def _process_layout_group(
                         order_buffers[key][cursor : cursor + n] = sorted_origins[
                             run_start:run_stop
                         ]
+                    if provenance_key_buffers is not None:
+                        assert sorted_provenance is not None
+                        provenance_key_buffers[key][cursor : cursor + n] = (
+                            sorted_provenance[run_start:run_stop]
+                        )
                     cursors[group_index] += n
                 source_cursor += len(P)
             if not saw_chunk and source.nP != 0:
                 raise ValueError(f"no pose chunks read from {source.path}")
+            if source_provenance is not None:
+                del source_provenance
 
     for index, key in enumerate(group_keys):
         expected = len(buffers[key])
@@ -855,6 +1024,7 @@ def _process_layout_group(
                 overrides=layout_overrides.get(layout_id),
                 order_buffers=order_buffers,
                 order_array=order_array,
+                provenance_key_buffers=provenance_key_buffers,
             )
     if order_array is not None:
         order_array.flush()
@@ -884,6 +1054,7 @@ def _run_group_in_worker(group: LayoutGroup) -> None:
         order_array_path=state.get("order_array_path"),
         order_array_dtype=state.get("order_array_dtype"),
         order_array_shape=state.get("order_array_shape"),
+        provenance_paths=state.get("provenance_paths"),
     )
 
 
@@ -918,6 +1089,7 @@ def _organize_streaming(
     compress: bool,
     chunk_poses: int,
     order_array_path: Path | None = None,
+    provenance_paths: list[Path] | None = None,
 ) -> int:
     layouts, destination, _bucket_size = _build_layouts(
         sources,
@@ -959,6 +1131,7 @@ def _organize_streaming(
                 order_array_path=order_array_path,
                 order_array_dtype=order_array_dtype,
                 order_array_shape=order_array_shape,
+                provenance_paths=provenance_paths,
             )
         return len(layouts)
 
@@ -977,6 +1150,7 @@ def _organize_streaming(
         "order_array_path": order_array_path,
         "order_array_dtype": order_array_dtype,
         "order_array_shape": order_array_shape,
+        "provenance_paths": provenance_paths,
     }
     stop_event = threading.Event()
     poll_thread = threading.Thread(
@@ -1017,6 +1191,7 @@ def _staged_unorganized_arc_name(src: Path) -> str:
 def _unlink_unorganized(paths: Sequence[Path], root: Path) -> None:
     parents: set[Path] = set()
     for path in paths:
+        _provenance_sidecar_path(path).unlink(missing_ok=True)
         try:
             path.unlink()
         except FileNotFoundError:
@@ -1064,6 +1239,9 @@ def _stage_unorganized_uncompressed(unorganized: list[Path], tempdir: Path) -> N
             shutil.copy2(src, dst)
         else:
             raise ValueError(f"unexpected unorganized file: {src}")
+        provenance = _provenance_sidecar_path(src)
+        if provenance.is_file():
+            shutil.copy2(provenance, _provenance_sidecar_path(dst))
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         list(
@@ -1143,6 +1321,7 @@ def organize_pose_dir(
 
     local_tempdir: Path | None = None
     local_stagedir: Path | None = None
+    internal_order_array: Path | None = None
     try:
         if use_local_tempdir:
             local_tempdir = Path(tempfile.mkdtemp(prefix="alaric-organize-src-"))
@@ -1158,6 +1337,17 @@ def organize_pose_dir(
             output_dir = pose_dir
 
         sources = _read_sources(source_paths, nprocs=int(nprocs))
+        provenance_paths = _source_provenance_paths(sources) if sources else None
+        effective_order_array_output = order_array_output
+        if provenance_paths is not None and effective_order_array_output is None:
+            with tempfile.NamedTemporaryFile(
+                prefix="alaric-organize-order.",
+                suffix=".npy",
+                dir=pose_dir,
+                delete=False,
+            ) as handle:
+                internal_order_array = Path(handle.name)
+            effective_order_array_output = internal_order_array
         if sources:
             _organize_streaming(
                 output_dir,
@@ -1167,7 +1357,18 @@ def organize_pose_dir(
                 nprocs=int(nprocs),
                 compress=bool(compress),
                 chunk_poses=int(chunk_poses),
-                order_array_path=order_array_output,
+                order_array_path=effective_order_array_output,
+                provenance_paths=provenance_paths,
+            )
+        if provenance_paths is not None:
+            if effective_order_array_output is None:
+                raise ValueError("missing order array for provenance organization")
+            _write_organized_provenance(
+                sources,
+                provenance_paths,
+                effective_order_array_output,
+                pose_dir / PROVENANCE_NAME,
+                chunk_poses=int(chunk_poses),
             )
 
         marker.touch()
@@ -1180,6 +1381,8 @@ def organize_pose_dir(
             shutil.rmtree(local_tempdir)
         if local_stagedir is not None and local_stagedir.exists():
             shutil.rmtree(local_stagedir)
+        if internal_order_array is not None:
+            internal_order_array.unlink(missing_ok=True)
     if return_order_array and order_array_output is not None:
         return np.load(order_array_output, mmap_mode="r")
     return None

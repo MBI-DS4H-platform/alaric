@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import os
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -101,11 +102,9 @@ def pose_index(pose_dir: Path) -> dict[str, str]:
 
 
 def write_pose_sidecars(pose_dir: Path) -> str:
-    index_path = pose_dir.with_name(pose_dir.name + ".INDEX")
     checksum_path = pose_dir.with_name(pose_dir.name + ".CHECKSUM")
-    index_path.write_bytes(serialize(pose_index(pose_dir), "plain"))
-    checksum = streaming_file_checksum(index_path)
-    checksum_path.write_text(checksum + "\n")
+    subprocess.run(["seamless-checksum-index", str(pose_dir)], check=True)
+    checksum = read_sidecar(checksum_path)
     return checksum
 
 

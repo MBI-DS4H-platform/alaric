@@ -75,3 +75,59 @@ def test_identity_filter_can_write_compressed_pose_output(tmp_path: Path) -> Non
     )
     assert bucket_size == 16
     assert lookup[((0, 0, 0), (1, 0, 0))][0] == 2
+
+
+def test_organize_reorders_provenance_sidecars(tmp_path: Path) -> None:
+    pose_dir = tmp_path / "poses"
+    pose_dir.mkdir()
+    M = np.array([0, 0, 0], dtype=np.int16)
+    O = np.array([[0, 0, 0]], dtype=np.int16)
+    C = np.array([2], dtype=np.uint32)
+
+    first = pose_dir / "unorganized-test-1.arc.zst"
+    write_arc_file(
+        first,
+        M,
+        O,
+        C,
+        np.array([[2, 0, 0], [1, 1, 0]], dtype=np.uint16),
+        bucket_size=16,
+        zstd=True,
+    )
+    np.save(
+        first.with_name(first.name + ".provenance.npy"),
+        np.array([20, 11], dtype=np.uint32),
+    )
+
+    second = pose_dir / "unorganized-test-2.arc.zst"
+    write_arc_file(
+        second,
+        M,
+        O,
+        C,
+        np.array([[1, 0, 0], [2, 0, 0]], dtype=np.uint16),
+        bucket_size=16,
+        zstd=True,
+    )
+    np.save(
+        second.with_name(second.name + ".provenance.npy"),
+        np.array([10, 21], dtype=np.uint32),
+    )
+
+    organize_pose_dir(pose_dir, compress=True, nprocs=1, max_poses_per_file=100)
+
+    organized = discover_organized(pose_dir)
+    assert [path.name for path in organized] == ["poses-1.arc.zst"]
+    _M, _O, _C, P, _bucket_size = read_arc_file(organized[0])
+    np.testing.assert_array_equal(
+        P,
+        np.array(
+            [[1, 0, 0], [1, 1, 0], [2, 0, 0], [2, 0, 0]],
+            dtype=np.uint16,
+        ),
+    )
+    np.testing.assert_array_equal(
+        np.load(pose_dir / "provenance.npy"),
+        np.array([10, 11, 20, 21], dtype=np.uint32),
+    )
+    assert not list(pose_dir.glob("*.provenance.npy"))

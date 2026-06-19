@@ -47,6 +47,7 @@ class SourcePool:
     conformers: np.ndarray
     rotamers: np.ndarray
     translations: np.ndarray
+    source_ids: np.ndarray
     unique_conformers: np.ndarray
     conformer_starts: np.ndarray
     conformer_counts: np.ndarray
@@ -64,6 +65,7 @@ class SourceConformerCache:
     rotamer_flat: np.ndarray
     mean_rotated: np.ndarray
     instance_translations: np.ndarray
+    instance_source_ids: np.ndarray
     instance_starts: np.ndarray
     instance_counts: np.ndarray
 
@@ -311,10 +313,11 @@ def _sort_source_rows(
     conformers: np.ndarray,
     rotamers: np.ndarray,
     translations: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    source_ids: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     order = np.argsort(rotamers, kind="stable")
     order = order[np.argsort(conformers[order], kind="stable")]
-    return conformers[order], rotamers[order], translations[order]
+    return conformers[order], rotamers[order], translations[order], source_ids[order]
 
 
 def _load_source_pool(
@@ -329,10 +332,17 @@ def _load_source_pool(
     all_conformers: list[np.ndarray] = []
     all_rotamers: list[np.ndarray] = []
     all_translations: list[np.ndarray] = []
+    all_source_ids: list[np.ndarray] = []
+    cursor = reader.start0
     for chunk in reader.iter_chunks():
         all_conformers.append(chunk.conformers.copy())
         all_rotamers.append(chunk.rotamers.copy())
         all_translations.append(chunk.translations_grid.copy())
+        stop = cursor + len(chunk)
+        if stop > np.iinfo(np.uint32).max + 1:
+            raise ValueError("source pose index exceeds uint32 provenance range")
+        all_source_ids.append(np.arange(cursor, stop, dtype=np.uint32))
+        cursor = stop
 
     if not all_conformers:
         raise ValueError("No poses found in source directory")
@@ -340,9 +350,10 @@ def _load_source_pool(
     conformers = np.concatenate(all_conformers)
     rotamers = np.concatenate(all_rotamers)
     translations = np.concatenate(all_translations)
+    source_ids = np.concatenate(all_source_ids)
 
-    conformers, rotamers, translations = _sort_source_rows(
-        conformers, rotamers, translations
+    conformers, rotamers, translations, source_ids = _sort_source_rows(
+        conformers, rotamers, translations, source_ids
     )
     unique_conformers, conformer_starts, conformer_counts = np.unique(
         conformers,
@@ -353,6 +364,7 @@ def _load_source_pool(
         conformers=conformers,
         rotamers=rotamers,
         translations=translations,
+        source_ids=source_ids,
         unique_conformers=unique_conformers.astype(np.int64, copy=False),
         conformer_starts=conformer_starts.astype(np.int64, copy=False),
         conformer_counts=conformer_counts.astype(np.int64, copy=False),
@@ -505,6 +517,7 @@ def _build_source_caches(
             rotamer_flat=rotamer_flat,
             mean_rotated=mean_rotated,
             instance_translations=source_pool.translations[start:stop],
+            instance_source_ids=source_pool.source_ids[start:stop],
             instance_starts=instance_starts.astype(np.int64, copy=False),
             instance_counts=instance_counts.astype(np.int64, copy=False),
         )
@@ -514,17 +527,25 @@ def _build_source_caches(
 def _expand_source_instances(
     cache: SourceConformerCache,
     pp_rows: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     counts = cache.instance_counts[pp_rows]
     total = int(counts.sum())
     if total == 0:
-        return np.empty((0,), dtype=np.int64), np.empty((0, 3), dtype=np.int16)
+        return (
+            np.empty((0,), dtype=np.int64),
+            np.empty((0, 3), dtype=np.int16),
+            np.empty((0,), dtype=np.uint32),
+        )
     repeat_idx = np.repeat(np.arange(len(pp_rows), dtype=np.int64), counts)
     repeated_starts = cache.instance_starts[pp_rows][repeat_idx]
     group_offsets = np.cumsum(counts, dtype=np.int64) - counts
     within = np.arange(total, dtype=np.int64) - np.repeat(group_offsets, counts)
     translation_indices = repeated_starts + within
-    return repeat_idx, cache.instance_translations[translation_indices]
+    return (
+        repeat_idx,
+        cache.instance_translations[translation_indices],
+        cache.instance_source_ids[translation_indices],
+    )
 
 
 def _estimate_trace_work(
@@ -711,9 +732,11 @@ def _pooled_trace_grow(
                     if pp_rows.size == 0:
                         continue
                     rc_kept = rc_sd[pp_rows, qq_cols]
-                    repeat_idx, instance_translations = _expand_source_instances(
-                        cache, pp_rows
-                    )
+                    (
+                        repeat_idx,
+                        instance_translations,
+                        instance_source_ids,
+                    ) = _expand_source_instances(cache, pp_rows)
                     if instance_translations.size == 0:
                         continue
                     pp_rows_exp = pp_rows[repeat_idx]
@@ -771,6 +794,7 @@ def _pooled_trace_grow(
                     kept_best_grid = best_grid[keep_rot]
                     kept_delta = delta[keep_rot]
                     kept_instance_translations = instance_translations[keep_rot]
+                    kept_instance_source_ids = instance_source_ids[keep_rot]
                     remaining3 = (
                         total_overlap_sd - grid_discretization_sd[keep_rot] - kept_rc
                     )
@@ -885,6 +909,7 @@ def _pooled_trace_grow(
                         out_rotamers = rotamer_indices[
                             kept_qq_cols[local_rows[kept_rows]]
                         ]
+                        out_provenance = kept_instance_source_ids[local_rows[kept_rows]]
                         if (
                             len(out_rotamers)
                             and int(out_rotamers.max()) > np.iinfo(np.uint16).max
@@ -895,6 +920,7 @@ def _pooled_trace_grow(
                             out_conformers[emit_order],
                             out_rotamers[emit_order].astype(np.uint16, copy=False),
                             out_translations[emit_order].astype(np.int16, copy=False),
+                            provenance=out_provenance[emit_order],
                         )
                 finally:
                     if trace_work:
