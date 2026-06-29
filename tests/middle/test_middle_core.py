@@ -12,8 +12,9 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from alaric.mask import main as mask_main
+import alaric.middle.deploy as deploy_module
 from alaric.middle.checksum import byte_checksum, write_array_sidecar
-from alaric.middle.deploy import deploy, generate_chunk_files, generate_run_sh
+from alaric.middle.deploy import deploy, generate_check_sh, generate_chunk_files, generate_run_sh
 from alaric.middle.graph import ActionGraph
 from alaric.middle.project import Project
 from alaric.middle.sigil import compute_project_sigils
@@ -103,6 +104,48 @@ def test_sigil_is_deterministic_and_writes_parameters(tmp_path: Path) -> None:
     assert (tmp_path / "CACHE" / "parameters" / first["frag4-score"]).is_file()
 
 
+def test_deploy_auto_sigils_only_target_dependency_closure(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    unrelated = tmp_path / "frag4-unrelated"
+    unrelated.mkdir()
+    (unrelated / "alaric.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "action": "anchor",
+                "fragment": 4,
+                "sequence": "auto",
+                "exclude": "auto",
+                "protein": "missing",
+                "resid": 1,
+                "nucleotide": "first",
+            },
+            sort_keys=False,
+        )
+    )
+
+    deploy("local", tmp_path / "frag4-filter")
+
+    assert (tmp_path / "frag4-anchor" / "sigil.txt").is_file()
+    assert (tmp_path / "frag4-score" / "sigil.txt").is_file()
+    assert (tmp_path / "frag4-filter" / "sigil.txt").is_file()
+    assert not (tmp_path / "frag5-fwd" / "sigil.txt").exists()
+    assert not (unrelated / "sigil.txt").exists()
+    assert (tmp_path / "frag4-filter" / "run.sh").is_file()
+
+
+def test_check_sh_reports_status_message(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    project = Project.discover(tmp_path)
+    compute_project_sigils(project)
+    action = ActionGraph(project).build()["frag4-anchor"]
+
+    body = generate_check_sh(project, action, location="local")
+
+    assert 'echo "check.sh: OK"' in body
+    assert 'echo "check.sh: not OK"' in body
+    assert 'exit "$status"' in body
+
+
 def test_deploy_score_chunk_emits_independent_chunk_and_organize_scripts(tmp_path: Path) -> None:
     _write_project(tmp_path)
     project = Project.discover(tmp_path)
@@ -136,13 +179,15 @@ def test_deploy_score_chunk_emits_independent_chunk_and_organize_scripts(tmp_pat
 def test_score_deploy_defaults_to_compiled_kernel(tmp_path: Path) -> None:
     _write_project(tmp_path)
     project = Project.discover(tmp_path)
-    compute_project_sigils(project)
+    sigils = compute_project_sigils(project)
 
     d = tmp_path / "frag4-score"
     deploy("local", d)
     body = (d / "run.sh").read_text()
     assert "\n  compiled \\\n" in body
     assert "\n  jax \\\n" not in body
+    assert f"ln -s ../CACHE/results/{sigils['frag4-score']} results" in body
+    assert f"cp ../CACHE/checksum/{sigils['frag4-score']} result.txt" in body
 
 
 def test_grow_deploy_renders_restrict_input(tmp_path: Path) -> None:
@@ -204,13 +249,16 @@ def test_grow_deploy_renders_restrict_input(tmp_path: Path) -> None:
 def test_score_chunk_deploy_defaults_to_compiled_kernel(tmp_path: Path) -> None:
     _write_project(tmp_path)
     project = Project.discover(tmp_path)
-    compute_project_sigils(project)
+    sigils = compute_project_sigils(project)
 
     d = tmp_path / "frag4-score"
     deploy("local-chunk", d, nchunks=2)
     body = (d / "chunk1.sh").read_text()
     assert "\n  compiled \\\n" in body
     assert "\n  jax \\\n" not in body
+    organize = (d / "organize.sh").read_text()
+    assert f"ln -s ../CACHE/results/{sigils['frag4-score']} results" in organize
+    assert f"cp ../CACHE/checksum/{sigils['frag4-score']} result.txt" in organize
 
 
 def test_remote_score_deploy_defaults_to_compiled_kernel(tmp_path: Path) -> None:
@@ -220,6 +268,7 @@ def test_remote_score_deploy_defaults_to_compiled_kernel(tmp_path: Path) -> None
     action = ActionGraph(project).build()["frag4-score"]
 
     body = generate_run_sh(project, action, "remote")
+    assert f'cd "${{ALARIC_REMOTE_DEPLOYMENT_DIR:?}}/SIGIL/{sigils["frag4-score"]}"' in body
     assert "\n  compiled \\\n" in body
     assert "\n  jax \\\n" not in body
 
@@ -232,6 +281,32 @@ def test_remote_score_deploy_defaults_to_compiled_kernel(tmp_path: Path) -> None
     assert '"$CHUNK_DIR/score.npy"' in chunk
     assert f"score_concat.py {chunk_root} " in files["organize.sh"]
     assert "--nchunks 2" in files["organize.sh"]
+
+
+def test_remote_deploy_uses_sigil_dir_and_project_alias(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_project(tmp_path)
+    project = Project.discover(tmp_path)
+    sigils = compute_project_sigils(project)
+    action_dir = tmp_path / "frag4-filter"
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str], **_kwargs: object) -> None:
+        calls.append(args)
+
+    monkeypatch.setenv("ALARIC_REMOTE_HOST", "cluster")
+    monkeypatch.setenv("ALARIC_REMOTE_DEPLOYMENT_DIR", "/remote/deploy")
+    monkeypatch.setenv("ALARIC_REMOTE_ALARIC_DIR", "/remote/alaric")
+    monkeypatch.setenv("ALARIC_REMOTE_RESULT_DIR", "/remote/results")
+    monkeypatch.delenv("ALARIC_PROJECT", raising=False)
+    monkeypatch.setattr(deploy_module.subprocess, "run", fake_run)
+
+    deploy("remote", action_dir)
+
+    sigil = sigils["frag4-filter"]
+    assert ["ssh", "cluster", "mkdir", "-p", f"/remote/deploy/SIGIL/{sigil}", "/remote/deploy/DATA", "/remote/deploy/PROJECT"] in calls
+    assert ["ssh", "cluster", "ln", "-sfn", f"../SIGIL/{sigil}", "/remote/deploy/PROJECT/frag4-filter"] in calls
+    assert ["ssh", "cluster", "ln", "-sfn", f"/remote/results/{sigil}", f"/remote/deploy/SIGIL/{sigil}/results"] in calls
+    assert any(call[0] == "scp" and call[-1] == f"cluster:/remote/deploy/SIGIL/{sigil}/" for call in calls)
 
 
 def test_remote_chunk_python_paths_are_expandvars_compatible(tmp_path: Path) -> None:

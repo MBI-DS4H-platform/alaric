@@ -19,7 +19,7 @@ class ActionGraph:
         self.resolved: dict[str, ResolvedAction] = {}
         self._visiting: set[str] = set()
 
-    def topo(self) -> list[str]:
+    def topo(self, targets: list[str] | None = None) -> list[str]:
         ordered: list[str] = []
         permanent: set[str] = set()
 
@@ -38,7 +38,8 @@ class ActionGraph:
             permanent.add(name)
             ordered.append(name)
 
-        for name in sorted(self.specs):
+        names = sorted(self.specs) if targets is None else targets
+        for name in names:
             visit(name)
         return ordered
 
@@ -50,9 +51,9 @@ class ActionGraph:
                 result[field] = str(spec.raw[field])
         return result
 
-    def build(self) -> dict[str, ResolvedAction]:
+    def build(self, targets: list[str] | None = None) -> dict[str, ResolvedAction]:
         self.resolved = {}
-        for name in self.topo():
+        for name in self.topo(targets):
             spec = self.specs[name]
             deps = self.dependency_names(spec)
             for field, dep_name in deps.items():

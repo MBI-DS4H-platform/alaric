@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import posixpath
 import shlex
 import shutil
 import subprocess
@@ -14,6 +15,7 @@ from .graph import ActionGraph
 from .project import Project
 from .resolve import ResolvedAction
 from .schema import DEPENDENCY_FIELDS, OUTPUT_KIND
+from .sigil import compute_project_sigils
 
 # Actions that support chunked deployment, and their chunking axis:
 #   anchor / anchor-test -> conformers (--conformer-range)
@@ -126,7 +128,7 @@ def _prologue(local: bool, sigil: str) -> list[str]:
     if local:
         lines.append('cd "$(dirname "$0")"')
     else:
-        lines.append(f'cd "${{ALARIC_REMOTE_DEPLOYMENT_DIR:?}}/{sigil}"')
+        lines.append(f'cd "${{ALARIC_REMOTE_DEPLOYMENT_DIR:?}}/SIGIL/{sigil}"')
         # Honor a SLURM core reservation (e.g. `sbatch -c N`). `--nprocs` defaults to
         # os.cpu_count(), which reports the whole node; Python >=3.13 lets PYTHON_CPU_COUNT
         # override os.cpu_count(), so the backends pick up the allocation, not the node.
@@ -200,6 +202,14 @@ def _finalize_lines(
     return lines
 
 
+def _local_success_lines(sigil: str) -> list[str]:
+    return [
+        "rm -f results",
+        f"ln -s ../CACHE/results/{sigil} results",
+        f"cp ../CACHE/checksum/{sigil} result.txt",
+    ]
+
+
 def generate_check_sh(project: Project, action: ResolvedAction, *, location: str) -> str:
     """Verify each input dependency is materialized at the execution location.
 
@@ -211,6 +221,20 @@ def generate_check_sh(project: Project, action: ResolvedAction, *, location: str
     local = location != "remote"
     sigil = _read_sigil(action.path)
     lines = _prologue(local, sigil)
+    lines.extend(
+        [
+            'check_status() {',
+            '  status=$?',
+            '  if [ "$status" -eq 0 ]; then',
+            '    echo "check.sh: OK"',
+            "  else",
+            '    echo "check.sh: not OK"',
+            "  fi",
+            '  exit "$status"',
+            "}",
+            "trap check_status EXIT",
+        ]
+    )
     lines.append("")
     for field in DEPENDENCY_FIELDS[action.action]:
         dep = action.params.get(field)
@@ -252,6 +276,8 @@ def generate_run_sh(project: Project, action: ResolvedAction, deployer: str, nch
     )
     result_kind = _result_output_kind(action)
     lines.extend(_finalize_lines(action, output_dir, final_dir, sigil, result_kind, local, alaric_dir))
+    if local:
+        lines.extend(_local_success_lines(sigil))
     lines.append("")
     return "\n".join(lines)
 
@@ -318,6 +344,8 @@ def generate_chunk_files(
     if org_body:
         org_lines.append(org_body)
     org_lines.extend(_finalize_lines(action, output_dir, final_dir, sigil, result_kind, local, alaric_dir))
+    if local:
+        org_lines.extend(_local_success_lines(sigil))
     org_lines.append("")
     files["organize.sh"] = "\n".join(org_lines)
 
@@ -350,14 +378,22 @@ def _remote_push(*, host: str, action, sigil: str, files: dict[str, str], file_f
     DATA is a **global, content-addressed store** shared by every project/deployment:
     ``$ALARIC_REMOTE_DEPLOYMENT_DIR/DATA/<checksum>``. Each file param is uploaded there only
     if its checksum blob is not already present (dedup), uploaded atomically (temp + rename),
-    and then **hardlinked** into this action's deployment dir under its filename — which the
-    generated scripts reference as ``./<filename>``.
+    and then **hardlinked** into this action's ``SIGIL/<sigil>`` deployment dir under its
+    filename — which the generated scripts reference as ``./<filename>``.
     """
     deploy_root = os.environ["ALARIC_REMOTE_DEPLOYMENT_DIR"].rstrip("/")
-    dest = f"{deploy_root}/{sigil}"
+    result_root = os.environ["ALARIC_REMOTE_RESULT_DIR"].rstrip("/")
+    project_value = os.environ.get("ALARIC_PROJECT", "PROJECT").rstrip("/")
+    if not project_value:
+        raise MiddleError("ALARIC_PROJECT must not be empty")
+    dest = f"{deploy_root}/SIGIL/{sigil}"
+    project_dir = project_value if project_value.startswith("/") else f"{deploy_root}/{project_value}"
+    project_link_target = posixpath.relpath(dest, project_dir)
     global_data = f"{deploy_root}/DATA"
 
-    subprocess.run(["ssh", host, "mkdir", "-p", dest, global_data], check=True)
+    subprocess.run(["ssh", host, "mkdir", "-p", dest, global_data, project_dir], check=True)
+    subprocess.run(["ssh", host, "ln", "-sfn", project_link_target, f"{project_dir}/{action.name}"], check=True)
+    subprocess.run(["ssh", host, "ln", "-sfn", f"{result_root}/{sigil}", f"{dest}/results"], check=True)
     payload = [str(action.path / name) for name in files]
     subprocess.run(["scp", *payload, f"{host}:{dest}/"], check=True)
 
@@ -377,9 +413,11 @@ def deploy(deployer: str, action_dir: str | Path = ".", nchunks: int | None = No
     if deployer not in {"local", "local-chunk", "remote", "remote-chunk"}:
         raise MiddleError(f"unsupported deployer: {deployer}")
     project = Project.discover(action_dir)
-    graph = ActionGraph(project)
-    resolved = graph.build()
     action = project.get_action_dir(action_dir)
+    if not (action.path / "sigil.txt").is_file():
+        compute_project_sigils(project, targets=[action.name])
+    graph = ActionGraph(project)
+    resolved = graph.build([action.name])
     resolved_action = resolved[action.name]
     sigil = _read_sigil(action.path)
     if (action.path / "result.txt").exists():

@@ -63,12 +63,18 @@ def action_sigil(action: ResolvedAction, dep_sigils: dict[str, str]) -> tuple[st
     return f"{part1}-{part2}", record
 
 
-def compute_project_sigils(project: Project, *, force: bool = False, delete: bool = False) -> dict[str, str]:
+def compute_project_sigils(
+    project: Project,
+    *,
+    force: bool = False,
+    delete: bool = False,
+    targets: list[str] | None = None,
+) -> dict[str, str]:
     project.ensure_cache()
     graph = ActionGraph(project)
-    resolved = graph.build()
+    resolved = graph.build(targets)
     sigils: dict[str, str] = {}
-    for name in graph.topo():
+    for name in graph.topo(targets):
         action = resolved[name]
         dep_sigils: dict[str, str] = {}
         for field in DEPENDENCY_FIELDS[action.action]:
