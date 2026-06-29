@@ -15,8 +15,10 @@ from alaric.mask import main as mask_main
 import alaric.middle.deploy as deploy_module
 from alaric.middle.checksum import byte_checksum, write_array_sidecar
 from alaric.middle.deploy import deploy, generate_check_sh, generate_chunk_files, generate_run_sh
+from alaric.middle.errors import SchemaError
 from alaric.middle.graph import ActionGraph
 from alaric.middle.project import Project
+from alaric.middle.schema import normalize_action
 from alaric.middle.sigil import compute_project_sigils
 from alaric.score_add import main as score_add_main
 from alaric.score_concat import main as score_concat_main
@@ -188,6 +190,82 @@ def test_score_deploy_defaults_to_compiled_kernel(tmp_path: Path) -> None:
     assert "\n  jax \\\n" not in body
     assert f"ln -s ../CACHE/results/{sigils['frag4-score']} results" in body
     assert f"cp ../CACHE/checksum/{sigils['frag4-score']} result.txt" in body
+
+
+def test_anchor_test_requires_nconformers_or_conformer(tmp_path: Path) -> None:
+    spec = {
+        "action": "anchor-test",
+        "fragment": 5,
+        "sequence": "UU",
+        "exclude": "1abc",
+        "protein": "dom",
+        "resid": 1,
+        "nucleotide": "first",
+    }
+
+    with pytest.raises(SchemaError, match="exactly one of nconformers or conformer"):
+        normalize_action("frag5-restrict", tmp_path, spec)
+
+    spec["nconformers"] = 10
+    spec["conformer"] = 3
+    with pytest.raises(SchemaError, match="exactly one of nconformers or conformer"):
+        normalize_action("frag5-restrict", tmp_path, spec)
+
+
+def test_anchor_test_deploy_renders_single_conformer(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    d = tmp_path / "frag5-restrict"
+    d.mkdir()
+    (d / "alaric.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "action": "anchor-test",
+                "fragment": 5,
+                "sequence": "auto",
+                "exclude": "auto",
+                "protein": "dom",
+                "resid": 1,
+                "nucleotide": "first",
+                "conformer": 7,
+            },
+            sort_keys=False,
+        )
+    )
+    project = Project.discover(tmp_path)
+    compute_project_sigils(project)
+
+    body = generate_run_sh(project, ActionGraph(project).build()["frag5-restrict"], "local")
+
+    assert "--conformer-range 7 7" in body
+    assert "--conformer-range 1 7" not in body
+
+
+def test_anchor_test_single_conformer_chunk_deploys_once(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    d = tmp_path / "frag5-restrict"
+    d.mkdir()
+    (d / "alaric.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "action": "anchor-test",
+                "fragment": 5,
+                "sequence": "auto",
+                "exclude": "auto",
+                "protein": "dom",
+                "resid": 1,
+                "nucleotide": "first",
+                "conformer": 7,
+            },
+            sort_keys=False,
+        )
+    )
+    deploy("local-chunk", d, nchunks=3)
+
+    assert (d / "chunk1.sh").is_file()
+    assert not (d / "chunk2.sh").exists()
+    body = (d / "chunk1.sh").read_text()
+    assert "SINGLE_CONFORMER=7" in body
+    assert 'FIRST="$SINGLE_CONFORMER"' in body
 
 
 def test_grow_deploy_renders_restrict_input(tmp_path: Path) -> None:

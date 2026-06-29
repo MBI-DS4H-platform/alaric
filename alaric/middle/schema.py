@@ -16,7 +16,7 @@ MASK = "mask"
 
 ACTION_SCHEMAS: dict[str, set[str]] = {
     "anchor": {"action", "type", "fragment", "sequence", "exclude", "protein", "resid", "nucleotide", "dihedral", "angle", "margin"},
-    "anchor-test": {"action", "type", "fragment", "sequence", "exclude", "protein", "resid", "nucleotide", "dihedral", "angle", "margin", "nconformers"},
+    "anchor-test": {"action", "type", "fragment", "sequence", "exclude", "protein", "resid", "nucleotide", "dihedral", "angle", "margin", "nconformers", "conformer"},
     "grow": {"action", "type", "input", "restrict_input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
     "score": {"action", "type", "input", "sequence", "exclude", "protein", "nb_kernel"},
     "rmsd": {"action", "type", "input", "fragment", "exclude", "reference"},
@@ -28,7 +28,7 @@ ACTION_SCHEMAS: dict[str, set[str]] = {
 
 REQUIRED: dict[str, set[str]] = {
     "anchor": {"fragment", "sequence", "exclude", "protein", "resid", "nucleotide"},
-    "anchor-test": {"fragment", "sequence", "exclude", "protein", "resid", "nucleotide", "nconformers"},
+    "anchor-test": {"fragment", "sequence", "exclude", "protein", "resid", "nucleotide"},
     "grow": {"input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
     "score": {"input", "sequence", "exclude", "protein"},
     "rmsd": {"input", "fragment", "exclude"},
@@ -111,10 +111,20 @@ def normalize_action(name: str, path: Path, data: dict[str, Any]) -> ActionSpec:
         data["nucleotide"] = nuc
         data.setdefault("margin", 0.5)
         if action == "anchor-test":
-            nconformers = int(data["nconformers"])
-            if nconformers <= 0:
-                raise SchemaError(f"{path}: nconformers must be positive")
-            data["nconformers"] = nconformers
+            has_nconformers = "nconformers" in data
+            has_conformer = "conformer" in data
+            if has_nconformers == has_conformer:
+                raise SchemaError(f"{path}: anchor-test requires exactly one of nconformers or conformer")
+            if has_nconformers:
+                nconformers = int(data["nconformers"])
+                if nconformers <= 0:
+                    raise SchemaError(f"{path}: nconformers must be positive")
+                data["nconformers"] = nconformers
+            if has_conformer:
+                conformer = int(data["conformer"])
+                if conformer <= 0:
+                    raise SchemaError(f"{path}: conformer must be positive")
+                data["conformer"] = conformer
     if action == "grow" and data.get("direction") != "auto":
         direction = str(data["direction"]).lower()
         if direction in {"fwd", "forward"}:

@@ -122,6 +122,13 @@ def score_concat_command(alaric_dir: str, output_dir: str, chunks_dir: str, loca
     return "\n".join(lines)
 
 
+def conformer_range_args(p: dict[str, Any]) -> str:
+    if "conformer" in p:
+        conformer = q(p["conformer"])
+        return f"--conformer-range {conformer} {conformer}"
+    return f"--conformer-range 1 {q(p['nconformers'])}"
+
+
 def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str, location: str) -> dict[str, Any]:
     p = action.params
     context: dict[str, Any] = {
@@ -143,6 +150,8 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
                 "margin": q(p.get("margin", 0.5)),
                 "nucleotide_flag": "--first" if p["nucleotide"] == "first" else "--second",
                 "nconformers": q(p.get("nconformers", "")),
+                "single_conformer": q(p["conformer"]) if "conformer" in p else "",
+                "conformer_range_args": conformer_range_args(p) if action.action == "anchor-test" else "",
                 "exclude_args": exclude_args(p.get("exclude", [])),
                 "exclude_python": repr(p.get("exclude", [])),
                 "organize_command": organize_command(alaric_dir, output_dir, location),

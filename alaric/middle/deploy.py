@@ -299,6 +299,8 @@ def generate_chunk_files(
     alaric_dir = _alaric_dir_expr(local)
     output_dir, final_dir, setup = _compute_dirs(action, sigil, local)
     n = max(1, int(nchunks or 1))
+    if action.action == "anchor-test" and "conformer" in action.params:
+        n = 1
 
     template_text = _template_path(project, deployer, action.action).read_text()
     if ORGANIZE_DELIM in template_text:

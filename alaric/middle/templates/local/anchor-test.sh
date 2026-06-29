@@ -9,6 +9,6 @@
   --output {{ output_path }} \
   {{ exclude_args }} \
   --bucket-size 16 \
-  --conformer-range 1 {{ nconformers }} \
+  {{ conformer_range_args }} \
   ${ALARIC_ANCHOR_EXTRA_ARGS:-}
 {{ organize_command }}

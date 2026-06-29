@@ -7,7 +7,13 @@ chunk_range() {
   echo "$first $last"
 }
 TOTAL={{ nconformers }}
-read FIRST LAST < <(chunk_range "$TOTAL" "$IDX" "$NCHUNKS")
+SINGLE_CONFORMER={{ single_conformer }}
+if [ -n "$SINGLE_CONFORMER" ]; then
+  FIRST="$SINGLE_CONFORMER"
+  LAST="$SINGLE_CONFORMER"
+else
+  read FIRST LAST < <(chunk_range "$TOTAL" "$IDX" "$NCHUNKS")
+fi
 # Non-load-bearing tuning knobs (uncomment to override; they never change the result):
 anchor_opts=(
 #  --nprocs 8
