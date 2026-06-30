@@ -16,3 +16,7 @@ class GraphError(MiddleError):
 
 class ResultError(MiddleError):
     """Invalid result lifecycle operation."""
+
+
+class PoolGraphError(MiddleError):
+    """Invalid pose-pool connectivity/provenance graph."""

@@ -1,0 +1,508 @@
+{
+  "project": "/srv/shared/tests/1b7f-project-RUN",
+  "pools": {
+    "frag10-anchor": {
+      "fragment": 10,
+      "kind": "anchor",
+      "parents": [],
+      "sigil": "4af3626123-null",
+      "result_dir": "CACHE/results/4af3626123-null",
+      "materialized": false
+    },
+    "frag10-anchor-filter": {
+      "fragment": 10,
+      "kind": "filter",
+      "parents": [
+        {
+          "pool": "frag10-anchor",
+          "edge": "filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "d3c26fbc95-16714e016c",
+      "result_dir": "CACHE/results/d3c26fbc95-16714e016c",
+      "materialized": true,
+      "constraint": {
+        "threshold": -13.99,
+        "score_input": "frag10-anchor-score"
+      }
+    },
+    "frag10-anchor-filter-BAD": {
+      "fragment": 10,
+      "kind": "filter",
+      "parents": [
+        {
+          "pool": "frag10-anchor",
+          "edge": "filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "fd7679ac20-16714e016c",
+      "result_dir": "CACHE/results/fd7679ac20-16714e016c",
+      "materialized": true,
+      "constraint": {
+        "threshold": -17.96,
+        "score_input": "frag10-anchor-score"
+      }
+    },
+    "frag10-fwd-restrict": {
+      "fragment": 10,
+      "kind": "grow",
+      "parents": [
+        {
+          "pool": "frag9-fwd-filter",
+          "edge": "grow",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": true
+        },
+        {
+          "pool": "frag10-anchor-filter",
+          "edge": "restrict",
+          "array": null,
+          "orientation": null,
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "899cd24cc2-9a5c6c1346",
+      "result_dir": "CACHE/results/899cd24cc2-9a5c6c1346",
+      "materialized": true,
+      "direction": "forward"
+    },
+    "frag4-anchor-bwd": {
+      "fragment": 4,
+      "kind": "anchor",
+      "parents": [],
+      "sigil": "8de59d5594-null",
+      "result_dir": "CACHE/results/8de59d5594-null",
+      "materialized": false
+    },
+    "frag4-anchor-fwd": {
+      "fragment": 4,
+      "kind": "anchor",
+      "parents": [],
+      "sigil": "968191a0ab-null",
+      "result_dir": "CACHE/results/968191a0ab-null",
+      "materialized": false
+    },
+    "frag4-merged": {
+      "fragment": 4,
+      "kind": "merge",
+      "parents": [
+        {
+          "pool": "frag4-anchor-fwd",
+          "edge": "merge",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        },
+        {
+          "pool": "frag4-anchor-bwd",
+          "edge": "merge",
+          "array": "map-2.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "5f096c3636-50832ee6a5",
+      "result_dir": "CACHE/results/5f096c3636-50832ee6a5",
+      "materialized": false
+    },
+    "frag4-merged-filter": {
+      "fragment": 4,
+      "kind": "filter",
+      "parents": [
+        {
+          "pool": "frag4-merged",
+          "edge": "filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "9952a48a76-3c1f166c7a",
+      "result_dir": "CACHE/results/9952a48a76-3c1f166c7a",
+      "materialized": false,
+      "constraint": {
+        "threshold": -12.852,
+        "score_input": "frag4-merged-score"
+      }
+    },
+    "frag5-anchor": {
+      "fragment": 5,
+      "kind": "anchor",
+      "parents": [],
+      "sigil": "758a25333b-null",
+      "result_dir": "CACHE/results/758a25333b-null",
+      "materialized": false
+    },
+    "frag5-fwd": {
+      "fragment": 5,
+      "kind": "grow",
+      "parents": [
+        {
+          "pool": "frag4-merged-filter",
+          "edge": "grow",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": true
+        }
+      ],
+      "sigil": "9ab6e92687-5388d31efe",
+      "result_dir": "CACHE/results/9ab6e92687-5388d31efe",
+      "materialized": false,
+      "direction": "forward"
+    },
+    "frag5-fwd-filter": {
+      "fragment": 5,
+      "kind": "filter",
+      "parents": [
+        {
+          "pool": "frag5-fwd",
+          "edge": "filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "7e4655b4fb-bafe872516",
+      "result_dir": "CACHE/results/7e4655b4fb-bafe872516",
+      "materialized": false,
+      "constraint": {
+        "threshold": -19.5,
+        "score_input": "frag5-fwd-score-all"
+      }
+    },
+    "frag5-merged": {
+      "fragment": 5,
+      "kind": "merge",
+      "parents": [
+        {
+          "pool": "frag5-fwd-filter",
+          "edge": "merge",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        },
+        {
+          "pool": "frag5-anchor",
+          "edge": "merge",
+          "array": "map-2.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "5f096c3636-ec5d931f41",
+      "result_dir": "CACHE/results/5f096c3636-ec5d931f41",
+      "materialized": true
+    },
+    "frag6-fwd": {
+      "fragment": 6,
+      "kind": "grow",
+      "parents": [
+        {
+          "pool": "frag5-merged",
+          "edge": "grow",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": true
+        }
+      ],
+      "sigil": "97e1ead4ad-765cacd775",
+      "result_dir": "CACHE/results/97e1ead4ad-765cacd775",
+      "materialized": true,
+      "direction": "forward"
+    },
+    "frag6-fwd-filter": {
+      "fragment": 6,
+      "kind": "filter",
+      "parents": [
+        {
+          "pool": "frag6-fwd",
+          "edge": "filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "94218aa2f6-2e7c266a41",
+      "result_dir": "CACHE/results/94218aa2f6-2e7c266a41",
+      "materialized": true,
+      "constraint": {
+        "threshold": -16.59,
+        "score_input": "frag6-fwd-score"
+      }
+    },
+    "frag7-fwd": {
+      "fragment": 7,
+      "kind": "grow",
+      "parents": [
+        {
+          "pool": "frag6-fwd-filter",
+          "edge": "grow",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": true
+        }
+      ],
+      "sigil": "4c00843b7f-ebc3d6e8f5",
+      "result_dir": "CACHE/results/4c00843b7f-ebc3d6e8f5",
+      "materialized": true,
+      "direction": "forward"
+    },
+    "frag7-fwd-filter": {
+      "fragment": 7,
+      "kind": "filter",
+      "parents": [
+        {
+          "pool": "frag7-fwd",
+          "edge": "filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "acafac729b-5f27d5cff8",
+      "result_dir": "CACHE/results/acafac729b-5f27d5cff8",
+      "materialized": true,
+      "constraint": {
+        "threshold": -12.69,
+        "score_input": "frag7-fwd-score"
+      }
+    },
+    "frag8-fwd": {
+      "fragment": 8,
+      "kind": "grow",
+      "parents": [
+        {
+          "pool": "frag7-fwd-filter",
+          "edge": "grow",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": true
+        }
+      ],
+      "sigil": "384f68c2a6-6421569292",
+      "result_dir": "CACHE/results/384f68c2a6-6421569292",
+      "materialized": false,
+      "direction": "forward"
+    },
+    "frag8-fwd-filter": {
+      "fragment": 8,
+      "kind": "filter",
+      "parents": [
+        {
+          "pool": "frag8-fwd",
+          "edge": "filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "fbc5b9a808-9095e5682c",
+      "result_dir": "CACHE/results/fbc5b9a808-9095e5682c",
+      "materialized": true,
+      "constraint": {
+        "threshold": -22.29,
+        "score_input": "frag8-fwd-score"
+      }
+    },
+    "frag9-fwd": {
+      "fragment": 9,
+      "kind": "grow",
+      "parents": [
+        {
+          "pool": "frag8-fwd-filter",
+          "edge": "grow",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": true
+        }
+      ],
+      "sigil": "017226d01a-5d93b19ebf",
+      "result_dir": "CACHE/results/017226d01a-5d93b19ebf",
+      "materialized": true,
+      "direction": "forward"
+    },
+    "frag9-fwd-filter": {
+      "fragment": 9,
+      "kind": "filter",
+      "parents": [
+        {
+          "pool": "frag9-fwd",
+          "edge": "filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "8e4c610aad-5b71c0a511",
+      "result_dir": "CACHE/results/8e4c610aad-5b71c0a511",
+      "materialized": true,
+      "constraint": {
+        "threshold": -21.6,
+        "score_input": "frag9-fwd-score"
+      }
+    }
+  },
+  "representatives": {
+    "4": "frag4-merged-filter",
+    "5": "frag5-merged",
+    "6": "frag6-fwd-filter",
+    "7": "frag7-fwd-filter",
+    "8": "frag8-fwd-filter",
+    "9": "frag9-fwd-filter",
+    "10": "frag10-fwd-restrict"
+  },
+  "skipped_fragments": {},
+  "links": [
+    {
+      "grow_pool": "frag10-fwd-restrict",
+      "direction": "forward",
+      "source_fragment": 9,
+      "source_rep": "frag9-fwd-filter",
+      "target_fragment": 10,
+      "target_rep": "frag10-fwd-restrict",
+      "join_pool": "frag9-fwd-filter",
+      "target_to_join": [
+        {
+          "pool": "frag10-fwd-restrict",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag9-fwd-filter"
+        }
+      ],
+      "source_to_join": []
+    },
+    {
+      "grow_pool": "frag5-fwd",
+      "direction": "forward",
+      "source_fragment": 4,
+      "source_rep": "frag4-merged-filter",
+      "target_fragment": 5,
+      "target_rep": "frag5-merged",
+      "join_pool": "frag4-merged-filter",
+      "target_to_join": [
+        {
+          "pool": "frag5-merged",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "to": "frag5-fwd-filter"
+        },
+        {
+          "pool": "frag5-fwd-filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag5-fwd"
+        },
+        {
+          "pool": "frag5-fwd",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag4-merged-filter"
+        }
+      ],
+      "source_to_join": []
+    },
+    {
+      "grow_pool": "frag6-fwd",
+      "direction": "forward",
+      "source_fragment": 5,
+      "source_rep": "frag5-merged",
+      "target_fragment": 6,
+      "target_rep": "frag6-fwd-filter",
+      "join_pool": "frag5-merged",
+      "target_to_join": [
+        {
+          "pool": "frag6-fwd-filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag6-fwd"
+        },
+        {
+          "pool": "frag6-fwd",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag5-merged"
+        }
+      ],
+      "source_to_join": []
+    },
+    {
+      "grow_pool": "frag7-fwd",
+      "direction": "forward",
+      "source_fragment": 6,
+      "source_rep": "frag6-fwd-filter",
+      "target_fragment": 7,
+      "target_rep": "frag7-fwd-filter",
+      "join_pool": "frag6-fwd-filter",
+      "target_to_join": [
+        {
+          "pool": "frag7-fwd-filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag7-fwd"
+        },
+        {
+          "pool": "frag7-fwd",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag6-fwd-filter"
+        }
+      ],
+      "source_to_join": []
+    },
+    {
+      "grow_pool": "frag8-fwd",
+      "direction": "forward",
+      "source_fragment": 7,
+      "source_rep": "frag7-fwd-filter",
+      "target_fragment": 8,
+      "target_rep": "frag8-fwd-filter",
+      "join_pool": "frag7-fwd-filter",
+      "target_to_join": [
+        {
+          "pool": "frag8-fwd-filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag8-fwd"
+        },
+        {
+          "pool": "frag8-fwd",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag7-fwd-filter"
+        }
+      ],
+      "source_to_join": []
+    },
+    {
+      "grow_pool": "frag9-fwd",
+      "direction": "forward",
+      "source_fragment": 8,
+      "source_rep": "frag8-fwd-filter",
+      "target_fragment": 9,
+      "target_rep": "frag9-fwd-filter",
+      "join_pool": "frag8-fwd-filter",
+      "target_to_join": [
+        {
+          "pool": "frag9-fwd-filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag9-fwd"
+        },
+        {
+          "pool": "frag9-fwd",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag8-fwd-filter"
+        }
+      ],
+      "source_to_join": []
+    }
+  ]
+}

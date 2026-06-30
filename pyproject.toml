@@ -20,6 +20,8 @@ include = ["alaric*"]
 
 [project.scripts]
 alaric-sigil = "alaric.middle.sigil:main"
+alaric-pool-graph = "alaric.middle.pool_graph:main"
+alaric-chain = "alaric.middle.chain:main"
 alaric-deploy = "alaric.middle.deploy:main"
 alaric-result-clean = "alaric.middle.result:clean_main"
 alaric-result-check = "alaric.middle.result:check_main"
