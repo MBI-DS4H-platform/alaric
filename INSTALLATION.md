@@ -132,19 +132,67 @@ source ~/.bashrc
 If you use a different shell, put the same `export` commands in that shell's
 startup file.
 
-## 8. Quick verification
+## 8. Configure the fragment library
+
+Alaric also reads fragment-library paths from:
+
+```bash
+~/.alaric/fraglib.yaml
+```
+
+Create the configuration directory:
+
+```bash
+mkdir -p ~/.alaric
+```
+
+Then create `~/.alaric/fraglib.yaml`. Use paths that match where the fragment
+library is installed on your machine.
+
+Example file:
+
+```
+CONFORMER_DIR: /opt/fraglib/library
+ROTAMER_DIR: /opt/fraglib/rotaconformers
+CRMSD_DIR: /opt/fraglib/crmsd
+
+fraglen: 2
+conformers: $CONFORMER_DIR/dinuc-XX-0.5.npy
+conformer_replacements: $CONFORMER_DIR/dinuc-XX-0.5-replacement.npy
+conformer_replacement_origins: $CONFORMER_DIR/dinuc-XX-0.5-replacement.txt
+conformer_extensions: $CONFORMER_DIR/dinuc-XX-0.5-extension.npy
+conformer_extension_origins: $CONFORMER_DIR/dinuc-XX-0.5-extension.origin.txt
+rotamers: $ROTAMER_DIR/dinuc-XX-0.5.npy
+rotamers_indices: $ROTAMER_DIR/dinuc-XX-0.5.index.npy
+rotamer_extensions: $ROTAMER_DIR/dinuc-XX-0.5-extension.npy
+rotamer_extension_indices: $ROTAMER_DIR/dinuc-XX-0.5-extension.index.npy
+crmsds: $CRMSD_DIR/crmsd_matrix_XXX.npy
+```
+
+The `XX` and `XXX` strings are placeholders used by Alaric. Leave them exactly
+as shown. At runtime, Alaric replaces `XX` with a dinucleotide sequence such as
+`AA`, `AC`, or `GU`, and replaces `XXX` with a trinucleotide sequence for cRMSD
+lookups.
+
+The file may use `~`, environment variables, or variables defined earlier in the
+same YAML file.
+This file must exist on any machine that runs Alaric code. If you use remote
+execution, create `~/.alaric/fraglib.yaml` on the remote machine too, with paths
+that are valid from the remote machine.
+
+## 9. Quick verification
 
 In a fresh shell:
 
 ```bash
 source ~/miniforge3/etc/profile.d/conda.sh
 conda activate alaric
-python -c "import alaric; import forcefields; print('alaric installation OK')"
+python -c "import alaric; import forcefields; from alaric import library; library.config(verify_checksums=False); print('alaric installation OK')"
 alaric-chain --help
 ```
 
 If you use remote execution, also verify SSH access and the remote installation:
 
 ```bash
-ssh "$ALARIC_REMOTE_HOST" 'source ~/miniforge3/etc/profile.d/conda.sh && conda activate alaric && python -c "import alaric; import forcefields; print(\"remote alaric installation OK\")"'
+ssh "$ALARIC_REMOTE_HOST" 'source ~/miniforge3/etc/profile.d/conda.sh && conda activate alaric && python -c "import alaric; import forcefields; from alaric import library; library.config(verify_checksums=False); print(\"remote alaric installation OK\")"'
 ```
