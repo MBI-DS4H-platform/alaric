@@ -133,7 +133,7 @@ class ActionGraph:
         elif resolved.action == "identity":
             if final_fragment(p["input1"]) != final_fragment(p["input2"]):
                 raise GraphError(f"{resolved.name}: identity inputs must resolve to the same fragment")
-        elif resolved.action == "grow":
+        elif resolved.action in {"grow", "grow-test"}:
             restrict = p.get("restrict_input")
             if isinstance(restrict, ResolvedAction):
                 if final_fragment(restrict) != final_fragment(resolved):

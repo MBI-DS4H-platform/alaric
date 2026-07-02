@@ -175,7 +175,7 @@ def resolve_action(
     action = spec.action
     if "fragment" in p:
         p["fragment"] = resolve_fragment(p["fragment"], spec.name)
-    if action in {"anchor", "anchor-test", "grow"} and p.get("sequence") == "auto":
+    if action in {"anchor", "anchor-test", "grow", "grow-test"} and p.get("sequence") == "auto":
         p["sequence"] = resolve_sequence(project, int(p["fragment"]))
     if action == "score" and p.get("sequence") == "auto":
         dep = resolved_by_name.get(str(p["input"]))
@@ -197,7 +197,7 @@ def resolve_action(
             p["dihedral"] = _read_anchor_yaml(project, "dihedral")
         if p.get("angle") == "auto" or "angle" not in p:
             p["angle"] = _read_anchor_yaml(project, "angle")
-    if action == "grow":
+    if action in {"grow", "grow-test"}:
         p["direction"] = resolve_direction(p["direction"], spec.name)
         dep = resolved_by_name.get(str(p["input"]))
         if dep is None:

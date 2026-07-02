@@ -324,6 +324,58 @@ def test_grow_deploy_renders_restrict_input(tmp_path: Path) -> None:
     assert "restrict_input" in params
 
 
+def test_grow_test_requires_conformer(tmp_path: Path) -> None:
+    spec = {
+        "action": "grow-test",
+        "input": "frag4-filter",
+        "fragment": 5,
+        "sequence": "UU",
+        "exclude": "1abc",
+        "direction": "forward",
+        "crmsd": 0.25,
+        "ovrmsd": 0.75,
+    }
+
+    with pytest.raises(SchemaError, match="missing keys.*conformer"):
+        normalize_action("frag5-test", tmp_path, spec)
+
+    spec["conformer"] = 0
+    with pytest.raises(SchemaError, match="conformer must be positive"):
+        normalize_action("frag5-test", tmp_path, spec)
+
+
+def test_grow_test_deploy_renders_single_conformer(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    (tmp_path / "frag5-fwd" / "alaric.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "action": "grow-test",
+                "input": "frag4-filter",
+                "fragment": "auto",
+                "sequence": "auto",
+                "exclude": "auto",
+                "direction": "auto",
+                "crmsd": "auto",
+                "ovrmsd": "auto",
+                "conformer": 7,
+            },
+            sort_keys=False,
+        )
+    )
+    project = Project.discover(tmp_path)
+    compute_project_sigils(project)
+    action = ActionGraph(project).build()["frag5-fwd"]
+
+    body = generate_run_sh(project, action, "local")
+    assert "--conformer 7" in body
+
+    files = generate_chunk_files(project, action, "local-chunk", nchunks=2)
+    assert "--conformer 7" in files["chunk1.sh"]
+    assert "--pose-range \"$FIRST\" \"$LAST\"" in files["chunk1.sh"]
+    sigil = (tmp_path / "frag5-fwd" / "sigil.txt").read_text().strip()
+    assert (tmp_path / "CACHE" / "parameters" / sigil).is_file()
+
+
 def test_grow_deploy_propagates_auto_pdb_exclude(tmp_path: Path) -> None:
     _write_project(tmp_path)
     project = Project.discover(tmp_path)

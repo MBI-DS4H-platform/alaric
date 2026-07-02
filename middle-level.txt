@@ -78,6 +78,11 @@ direction: fwd or forward or bwd or backward, or auto (read from dirname "fragX-
 crmsd: 0.25 or auto (read the corresponding pair from constraints.json)
 ovrmsd: 0.75 or auto (read the corresponding pair from constraints.json)
 
+## grow-test
+
+Same as grow, plus:
+conformer: single 1-based target conformer index that grown poses may have
+
 ## identity
 
 This is a merging action

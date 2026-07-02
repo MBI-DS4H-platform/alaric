@@ -157,7 +157,7 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
                 "organize_command": organize_command(alaric_dir, output_dir, location),
             }
         )
-    elif action.action == "grow":
+    elif action.action in {"grow", "grow-test"}:
         source = p["input"]
         restrict = p.get("restrict_input")
         restrict_args = ""
@@ -178,6 +178,7 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
                 "exclude_args": exclude_args(p.get("exclude", [])),
                 "exclude_python": repr(p.get("exclude", [])),
                 "restrict_args": restrict_args,
+                "conformer_args": f"--conformer {q(p['conformer'])}" if action.action == "grow-test" else "",
                 "organize_command": organize_command(alaric_dir, output_dir, location),
             }
         )

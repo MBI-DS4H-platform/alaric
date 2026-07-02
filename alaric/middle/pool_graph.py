@@ -81,7 +81,7 @@ class PoolNode:
 def _pool_kind(action: ResolvedAction) -> str:
     if action.action in {"anchor", "anchor-test"}:
         return "anchor"
-    if action.action == "grow":
+    if action.action in {"grow", "grow-test"}:
         return "grow"
     if action.action == "filter":
         return "filter"
@@ -102,7 +102,7 @@ def _provenance_edges(action: ResolvedAction, fragment: int, frag_of: dict[str, 
         value = action.params.get(name_field)
         return value if isinstance(value, ResolvedAction) else None
 
-    if action.action == "grow":
+    if action.action in {"grow", "grow-test"}:
         src = dep("input")
         if src is not None:
             edges.append(
@@ -162,7 +162,7 @@ class PoolGraph:
                 kind=_pool_kind(action),
                 parents=_provenance_edges(action, fragment, frag_of),
             )
-            if action.action == "grow":
+            if action.action in {"grow", "grow-test"}:
                 node.direction = str(action.params.get("direction"))
             if action.action == "filter":
                 score_input = action.params.get("score_input")

@@ -168,6 +168,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional organized target pose directory restricting generated output poses.",
     )
     parser.add_argument(
+        "--conformer",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Restrict generated target poses to a single 1-based conformer index.",
+    )
+    parser.add_argument(
         "--pose-range",
         nargs=2,
         type=int,
@@ -516,6 +523,24 @@ def _select_target_conformers(
     rng = np.random.default_rng(seed)
     chosen = rng.choice(target_conformers, size=count, replace=False)
     return np.sort(chosen.astype(target_conformers.dtype, copy=False))
+
+
+def _select_single_target_conformer(
+    target_conformers: np.ndarray,
+    target_to_sources: dict[int, np.ndarray],
+    specific_index: int | None,
+) -> tuple[np.ndarray, dict[int, np.ndarray]]:
+    if specific_index is None:
+        return target_conformers, target_to_sources
+    if specific_index <= 0:
+        raise ValueError("--conformer must be positive")
+    conformer = specific_index - 1
+    if conformer not in target_to_sources or not np.any(target_conformers == conformer):
+        raise ValueError(
+            f"--conformer index {specific_index} is not available after cRMSD/restrict/exclusions"
+        )
+    selected = np.array([conformer], dtype=target_conformers.dtype)
+    return selected, {conformer: target_to_sources[conformer]}
 
 
 def _select_target_rotamer_positions(
@@ -1084,6 +1109,8 @@ def _run(args: argparse.Namespace) -> int:
         raise ValueError("--cache-size must be positive")
     if args.bucket_size < 1 or args.bucket_size > 65535:
         raise ValueError("--bucket-size must be in 1..65535")
+    if args.conformer is not None and args.test_conformers is not None:
+        raise ValueError("--conformer cannot be combined with --test-conformers")
 
     pose_range: tuple[int, int] | None = None
     if args.pose_range is not None:
@@ -1186,6 +1213,11 @@ def _run(args: argparse.Namespace) -> int:
             for target, sources in target_to_sources.items()
             if target < len(valid) and bool(valid[target])
         }
+    target_conformers, target_to_sources = _select_single_target_conformer(
+        target_conformers,
+        target_to_sources,
+        args.conformer,
+    )
     target_conformers = _select_target_conformers(
         target_conformers,
         args.test_conformers,

@@ -19,9 +19,9 @@ from .sigil import compute_project_sigils
 
 # Actions that support chunked deployment, and their chunking axis:
 #   anchor / anchor-test -> conformers (--conformer-range)
-#   grow                 -> source poses (--pose-range)
+#   grow / grow-test    -> source poses (--pose-range)
 #   score                -> source poses (POSE_START/POSE_END)
-CHUNKABLE = {"anchor", "anchor-test", "grow", "score"}
+CHUNKABLE = {"anchor", "anchor-test", "grow", "grow-test", "score"}
 # Separates the per-chunk body from the organize/finalize body in chunk templates.
 ORGANIZE_DELIM = "### ORGANIZE ###"
 # Remote env vars that are defined in the *local* deployer environment and must be
@@ -43,6 +43,13 @@ def _template_path(project: Project, deployer: str, action_name: str) -> Path:
         project.root / "templates" / deployer / f"{action_name}.sh",
         Path(__file__).resolve().parent / "templates" / deployer / f"{action_name}.sh",
     ]
+    if action_name == "grow-test":
+        candidates.extend(
+            [
+                project.root / "templates" / deployer / "grow.sh",
+                Path(__file__).resolve().parent / "templates" / deployer / "grow.sh",
+            ]
+        )
     for path in candidates:
         if path.is_file():
             return path
