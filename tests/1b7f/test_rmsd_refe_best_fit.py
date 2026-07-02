@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from contextlib import redirect_stdout
+import importlib.util
+import io
 from pathlib import Path
 import sys
 
@@ -15,6 +18,35 @@ from parse_pdb import parse_pdb  # noqa: E402
 from poses import PoseReader, pack_pool, write_arc_file  # noqa: E402
 from rmsd import iter_rmsd_chunks_with_library, write_npy_output_chunks  # noqa: E402
 from write_pdb import write_pdb  # noqa: E402
+
+
+def _load_refe_best_fit_pairs_module():
+    path = HERE / ".util" / "refe-best-fit-pairs.py"
+    spec = importlib.util.spec_from_file_location("refe_best_fit_pairs", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_refe_best_fit_pairs_fixture_matches_utility_output() -> None:
+    module = _load_refe_best_fit_pairs_module()
+    output = io.StringIO()
+
+    with redirect_stdout(output):
+        status = module.main(
+            [
+                str(HERE / "data" / "refe-best-fit.tsv"),
+                "--exclude",
+                "1b7f",
+            ]
+        )
+
+    assert status == 0
+    expected = (HERE / "data" / "refe-best-fit-pairs.tsv").read_text()
+    assert output.getvalue() == expected
 
 
 def test_rmsd_reproduces_refe_best_fit_fixture(tmp_path: Path) -> None:

@@ -5,4 +5,4 @@ sequence: auto
 exclude: auto
 direction: auto
 crmsd: 0.33
-ovrmsd: 0.56
+ovrmsd: 0.60

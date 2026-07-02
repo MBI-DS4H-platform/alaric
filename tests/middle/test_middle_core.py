@@ -324,6 +324,19 @@ def test_grow_deploy_renders_restrict_input(tmp_path: Path) -> None:
     assert "restrict_input" in params
 
 
+def test_grow_deploy_propagates_auto_pdb_exclude(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    project = Project.discover(tmp_path)
+    compute_project_sigils(project)
+    action = ActionGraph(project).build()["frag5-fwd"]
+
+    body = generate_run_sh(project, action, "local")
+    assert "--pdb-exclude 1abc" in body
+
+    files = generate_chunk_files(project, action, "local-chunk", nchunks=2)
+    assert "--pdb-exclude 1abc" in files["chunk1.sh"]
+
+
 def test_score_chunk_deploy_defaults_to_compiled_kernel(tmp_path: Path) -> None:
     _write_project(tmp_path)
     project = Project.discover(tmp_path)
