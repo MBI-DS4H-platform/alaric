@@ -4,5 +4,5 @@ fragment: auto
 sequence: auto
 exclude: auto
 direction: auto
-crmsd: auto
-ovrmsd: auto
+crmsd: 0.65
+ovrmsd: 0.94

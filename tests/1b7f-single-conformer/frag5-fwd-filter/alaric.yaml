@@ -1,4 +1,4 @@
 action: filter
 input: frag5-fwd
 score_input: frag5-fwd-score-all
-threshold: -19.50
+threshold: -22.28
