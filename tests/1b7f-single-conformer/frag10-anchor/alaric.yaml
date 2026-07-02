@@ -1,0 +1,8 @@
+action: anchor-test
+conformer: 1678
+fragment: auto
+sequence: auto
+exclude: auto
+nucleotide: second
+protein: 1b7f_dom1
+resid: 170
