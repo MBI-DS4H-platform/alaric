@@ -526,9 +526,8 @@ def _select_target_conformers(
 
 
 def _select_single_target_conformer(
-    target_library,
-    source_conformers: np.ndarray,
-    restrict_index: RestrictIndex | None,
+    target_conformers: np.ndarray,
+    target_to_sources: dict[int, np.ndarray],
     specific_index: int | None,
 ) -> tuple[np.ndarray, dict[int, np.ndarray]]:
     if specific_index is None:
@@ -536,22 +535,14 @@ def _select_single_target_conformer(
     if specific_index <= 0:
         raise ValueError("--conformer must be positive")
     conformer = specific_index - 1
-    if conformer >= len(target_library.coordinates):
-        raise ValueError(
-            f"--conformer index {specific_index} out of range for target library of size {len(target_library.coordinates)}"
-        )
-    if target_library.conformer_mask is not None and not bool(
-        target_library.conformer_mask[conformer]
+    if conformer not in target_to_sources or not np.any(
+        target_conformers == conformer
     ):
         raise ValueError(
-            f"--conformer index {specific_index} is not available after exclusions"
+            f"--conformer index {specific_index} is not available after cRMSD/restrict/exclusions"
         )
-    if restrict_index is not None and conformer not in restrict_index:
-        raise ValueError(
-            f"--conformer index {specific_index} is not available in --restrict-poses"
-        )
-    selected = np.array([conformer], dtype=np.int64)
-    return selected, {conformer: source_conformers.astype(np.int64, copy=True)}
+    selected = np.array([conformer], dtype=target_conformers.dtype)
+    return selected, {conformer: target_to_sources[conformer]}
 
 
 def _select_target_rotamer_positions(
@@ -1205,8 +1196,7 @@ def _run(args: argparse.Namespace) -> int:
         args.crmsd,
         source_on_rows=layout.source_on_rows,
     )
-    if args.conformer is None:
-        target_to_sources = _apply_restrict_conformers(target_to_sources, restrict_index)
+    target_to_sources = _apply_restrict_conformers(target_to_sources, restrict_index)
     target_conformers = np.array(sorted(target_to_sources.keys()), dtype=np.int64)
 
     print("[4/6] Loading target library...", file=sys.stderr)
@@ -1227,9 +1217,8 @@ def _run(args: argparse.Namespace) -> int:
         }
     if args.conformer is not None:
         target_conformers, target_to_sources = _select_single_target_conformer(
-            target_library,
-            source_pool.unique_conformers,
-            restrict_index,
+            target_conformers,
+            target_to_sources,
             args.conformer,
         )
     else:

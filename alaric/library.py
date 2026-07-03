@@ -12,6 +12,7 @@ from ruamel.yaml import YAML
 
 from rna_pdb import ppdb2nucseq
 from mutate import mutate
+from superimpose import superimpose_array
 
 Coordinates: TypeAlias = np.ndarray
 ReductionMap: TypeAlias = dict[str, list[tuple[str, ...]]]
@@ -143,6 +144,11 @@ class Library:
             Where False, the (extension) conformer must not be used, because of its PDB origin.
         Mutually exclusive with conformer_mapping
 
+    replacement_mask: Optional[np.ndarray]
+        Optional mask that indicates which primary conformers were replaced
+        based on their PDB origin. False for non-replaced primary conformers and
+        extension conformers.
+
     conformer_mapping: Optional[np.ndarray]
         Optional, present only if the conformer array were pruned based on PDB origin.
         Maps the filtered-out conformer indices to the original ones.
@@ -164,6 +170,7 @@ class Library:
     template: np.ndarray
     atom_mask: Optional[np.ndarray]
     conformer_mask: Optional[np.ndarray]
+    replacement_mask: Optional[np.ndarray]
     conformer_mapping: Optional[np.ndarray]
     rotaconformers: Optional[np.ndarray]
     rotaconformers_index: Optional[np.ndarray]
@@ -211,6 +218,9 @@ class Library:
                 raise ValueError(
                     "conformer_mask and conformer_mapping are mutually exclusive"
                 )
+        if self.replacement_mask is not None:
+            if len(self.replacement_mask) != len(self.coordinates):
+                raise ValueError("replacement_mask length must match coordinates")
         if self.rotaconformers is not None:
             if self.rotaconformers_index is None:
                 raise ValueError(
@@ -243,6 +253,9 @@ class Library:
 
         # Invariants for type checkers (should be guaranteed by the checks above).
         assert (self.conformer_mask is None) or (self.conformer_mapping is None)
+        assert (self.replacement_mask is None) or (
+            len(self.replacement_mask) == len(self.coordinates)
+        )
         assert (self.rotaconformers is None) == (self.rotaconformers_index is None)
         if self.rotaconformers is not None:
             assert self.rotaconformers_index is not None
@@ -417,6 +430,7 @@ class LibraryFactory:
         pdb_codes = _normalise_pdb_codes(pdb_code)
 
         primary_coordinates = self.primary_coordinates
+        replacement_mask = None
         if pdb_codes is not None and self.replacement_origins is not None:
             to_replace = _origin_indices_for_pdb_codes(
                 self.replacement_origins, pdb_codes
@@ -427,6 +441,8 @@ class LibraryFactory:
                 primary_coordinates[to_replace] = self.replacement_coordinates[
                     to_replace
                 ]
+                replacement_mask = np.zeros(len(primary_coordinates), dtype=bool)
+                replacement_mask[to_replace] = True
         conformer_mask = None
         conformer_mapping = None
         if self.extension_coordinates is not None:
@@ -456,6 +472,13 @@ class LibraryFactory:
                         )
 
             coordinates = np.concatenate((primary_coordinates, extension_coordinates))
+            if replacement_mask is not None:
+                replacement_mask = np.concatenate(
+                    (
+                        replacement_mask,
+                        np.zeros(len(extension_coordinates), dtype=bool),
+                    )
+                )
             del primary_coordinates, extension_coordinates
         else:
             coordinates = primary_coordinates
@@ -494,6 +517,7 @@ class LibraryFactory:
             template=template,
             atom_mask=atom_mask,
             conformer_mask=conformer_mask,
+            replacement_mask=replacement_mask,
             conformer_mapping=conformer_mapping,
             rotaconformers=rotaconformers,
             rotaconformers_index=rotaconformers_index,
@@ -846,24 +870,6 @@ def _sequence_path(filepattern: str, sequence: str) -> str:
     return filepattern.replace(placeholder, sequence)
 
 
-def _extension_origin_indices(
-    config_data: dict[str, object],
-    sequence: str,
-    pdb_codes: set[str],
-) -> np.ndarray:
-    primary_path = Path(
-        _sequence_path(_require_str(config_data, "conformers"), sequence)
-    )
-    primary_len = int(np.load(primary_path, mmap_mode="r").shape[0])
-
-    origins_path = Path(
-        _sequence_path(_require_str(config_data, "conformer_extension_origins"), sequence)
-    )
-    origins = [line.strip() for line in origins_path.read_text().splitlines()]
-    matching = _origin_indices_for_pdb_codes(origins, pdb_codes)
-    return primary_len + np.array(matching, dtype=np.intp)
-
-
 def load_crmsds(
     ab: str,
     bc: str,
@@ -873,9 +879,10 @@ def load_crmsds(
 
     The matrix is stored under the representative A/C trinucleotide sequence
     ABC, following the same G->A and U->C convention as the dinucleotide
-    library loader. If pdb_code is provided, extension conformers with that
-    origin are invalidated by setting their rows or columns to infinity.
-    Primary conformer replacement-table substitution is intentionally ignored.
+    library loader. If pdb_code is provided, primary conformers with that
+    origin are replaced before recomputing affected rows/columns, and extension
+    conformers with that origin are invalidated by setting their rows or columns
+    to infinity.
     """
     ab = ab.upper()
     bc = bc.upper()
@@ -886,8 +893,6 @@ def load_crmsds(
 
     pair_sequence = ab + bc[1]
     crmsd_sequence = _representative_sequence(pair_sequence)
-    ab_sequence = crmsd_sequence[:2]
-    bc_sequence = crmsd_sequence[1:]
 
     config_data = _fraglib_config()
 
@@ -900,26 +905,65 @@ def load_crmsds(
     if pdb_codes is None:
         return crmsds
 
-    _require_config_keys(
-        config_data,
-        ["conformers", "conformer_extension_origins"],
+    libraries, _templates = config(verify_checksums=False)
+    ab_library = libraries[ab].create(
+        pdb_code=pdb_codes,
+        nucleotide_mask=np.array([False, True]),
     )
-    rows = _extension_origin_indices(config_data, ab_sequence, pdb_codes)
-    cols = _extension_origin_indices(config_data, bc_sequence, pdb_codes)
-    if rows.size and int(rows.max()) >= crmsds.shape[0]:
+    bc_library = libraries[bc].create(
+        pdb_code=pdb_codes,
+        nucleotide_mask=np.array([True, False]),
+    )
+    ab_replacements = (
+        np.flatnonzero(ab_library.replacement_mask)
+        if ab_library.replacement_mask is not None
+        else np.empty((0,), dtype=np.intp)
+    )
+    bc_replacements = (
+        np.flatnonzero(bc_library.replacement_mask)
+        if bc_library.replacement_mask is not None
+        else np.empty((0,), dtype=np.intp)
+    )
+    if ab_replacements.size or bc_replacements.size:
+        crmsds = crmsds.astype(float, copy=True)
+    for row in ab_replacements.tolist():
+        crmsds[row, :] = superimpose_array(
+            bc_library.coordinates,
+            ab_library.coordinates[row],
+        )[1]
+    for col in bc_replacements.tolist():
+        crmsds[:, col] = superimpose_array(
+            ab_library.coordinates,
+            bc_library.coordinates[col],
+        )[1]
+
+    ab_eliminated = (
+        np.flatnonzero(~ab_library.conformer_mask)
+        if ab_library.conformer_mask is not None
+        else np.empty((0,), dtype=np.intp)
+    )
+    bc_eliminated = (
+        np.flatnonzero(~bc_library.conformer_mask)
+        if bc_library.conformer_mask is not None
+        else np.empty((0,), dtype=np.intp)
+    )
+    if ab_eliminated.size and int(ab_eliminated.max()) >= crmsds.shape[0]:
         raise ValueError(
-            f"Extension origin rows for {ab_sequence} exceed cRMSD matrix shape {crmsds.shape}"
+            f"Eliminated rows for {ab} exceed cRMSD matrix shape {crmsds.shape}"
         )
-    if cols.size and int(cols.max()) >= crmsds.shape[1]:
+    if bc_eliminated.size and int(bc_eliminated.max()) >= crmsds.shape[1]:
         raise ValueError(
-            f"Extension origin columns for {bc_sequence} exceed cRMSD matrix shape {crmsds.shape}"
+            f"Eliminated columns for {bc} exceed cRMSD matrix shape {crmsds.shape}"
         )
-    if (rows.size or cols.size) and not np.issubdtype(crmsds.dtype, np.floating):
+    if (ab_eliminated.size or bc_eliminated.size) and not np.issubdtype(
+        crmsds.dtype,
+        np.floating,
+    ):
         crmsds = crmsds.astype(float)
-    if rows.size:
-        crmsds[rows, :] = np.inf
-    if cols.size:
-        crmsds[:, cols] = np.inf
+    if ab_eliminated.size:
+        crmsds[ab_eliminated, :] = np.inf
+    if bc_eliminated.size:
+        crmsds[:, bc_eliminated] = np.inf
     return crmsds
 
 

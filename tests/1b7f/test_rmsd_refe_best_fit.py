@@ -13,7 +13,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / ".alaric"))
 sys.path.insert(0, str(HERE / ".util"))
 
-from library import config  # noqa: E402
+from library import config, load_crmsds  # noqa: E402
 from parse_pdb import parse_pdb  # noqa: E402
 from poses import PoseReader, pack_pool, write_arc_file  # noqa: E402
 from rmsd import iter_rmsd_chunks_with_library, write_npy_output_chunks  # noqa: E402
@@ -47,6 +47,38 @@ def test_refe_best_fit_pairs_fixture_matches_utility_output() -> None:
     assert status == 0
     expected = (HERE / "data" / "refe-best-fit-pairs.tsv").read_text()
     assert output.getvalue() == expected
+
+
+def test_crmsd_matrix_applies_primary_replacements() -> None:
+    crmsds = load_crmsds("UU", "UU", pdb_code="1b7f")
+    libraries, _ = config(verify_checksums=False)
+    library = libraries["UU"].create("1b7f")
+    fixture = np.genfromtxt(
+        HERE / "data" / "refe-best-fit.tsv",
+        names=True,
+        dtype=None,
+        encoding=None,
+    )
+    pairs = np.genfromtxt(
+        HERE / "data" / "refe-best-fit-pairs.tsv",
+        names=True,
+        dtype=None,
+        encoding=None,
+    )
+    frag7 = fixture[fixture["fragment"] == 7][0]
+    frag8 = fixture[fixture["fragment"] == 8][0]
+    pair78 = pairs[(pairs["down"] == 7) & (pairs["up"] == 8)][0]
+
+    source = int(frag7["conformer"]) - 1
+    target = int(frag8["conformer"]) - 1
+    assert library.replacement_mask is not None
+    assert library.replacement_mask[target]
+    assert np.isclose(crmsds[source, target], float(pair78["cRMSD"]), atol=1e-6)
+    assert library.conformer_mask is not None
+    eliminated = np.flatnonzero(~library.conformer_mask)
+    assert len(eliminated) > 0
+    assert np.isinf(crmsds[eliminated[0], :]).all()
+    assert np.isinf(crmsds[:, eliminated[0]]).all()
 
 
 def test_rmsd_reproduces_refe_best_fit_fixture(tmp_path: Path) -> None:
