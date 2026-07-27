@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,7 +33,14 @@ _ALARIC_DIR = Path(__file__).resolve().parents[1]
 if str(_ALARIC_DIR) not in sys.path:
     sys.path.insert(0, str(_ALARIC_DIR))
 
-from poses import PoseReader, discover_organized, select_pose_indices  # noqa: E402
+from poses import (  # noqa: E402
+    DEFAULT_BUCKET_SIZE,
+    PoseReader,
+    discover_organized,
+    pack_pool,
+    select_pose_indices,
+    write_arc_file,
+)
 
 from .errors import MiddleError  # noqa: E402
 
@@ -214,16 +222,16 @@ class ChainGraph:
         return Edges(low=t_out, high=s_out)
 
 
-# -- counting -------------------------------------------------------------
+# -- connectivity (shared by count and build) -----------------------------
 
 
 @dataclass
-class CountResult:
-    order: list[str]  # pool names in fragment order
+class Layers:
+    order: list[str]  # representative pool per fragment, in fragment order
     fragments: list[int]
-    kept: list[int]
-    unique: list[int]
-    total_chains: int
+    nposes: list[int]
+    edges: list[Edges]  # edges[j] connects layer j and j+1 (rep-index space)
+    kept_mask: list[np.ndarray]  # poses on at least one complete chain
 
 
 def _select_link(graph: ChainGraph, lower: str, upper: str) -> dict:
@@ -236,79 +244,177 @@ def _select_link(graph: ChainGraph, lower: str, upper: str) -> dict:
     )
 
 
-def _count_unique(graph: ChainGraph, pool: str, kept_idx: np.ndarray) -> int:
-    if kept_idx.size == 0:
-        return 0
-    chunk = select_pose_indices(graph._result_dir(pool), kept_idx)
-    rows = np.column_stack(
+def _connectivity(graph: ChainGraph, selected: list[str]) -> Layers:
+    order = sorted(selected, key=lambda p: graph.pools[p]["fragment"])
+    fragments = [graph.pools[p]["fragment"] for p in order]
+    nposes = [graph.nposes(p) for p in order]
+
+    if len(order) == 1:
+        return Layers(order, fragments, nposes, [], [np.ones(nposes[0], dtype=bool)])
+
+    edges = [
+        graph.edges_for_link(_select_link(graph, lower, upper))
+        for lower, upper in zip(order, order[1:])
+    ]
+    k = len(order)
+    # keep only poses on a complete chain: forward AND backward reachable
+    fwd = [np.zeros(n, dtype=bool) for n in nposes]
+    fwd[0][:] = True
+    for j in range(k - 1):
+        alive = fwd[j][edges[j].low]
+        fwd[j + 1][edges[j].high[alive]] = True
+    bwd = [np.zeros(n, dtype=bool) for n in nposes]
+    bwd[-1][:] = True
+    for j in range(k - 2, -1, -1):
+        alive = bwd[j + 1][edges[j].high]
+        bwd[j][edges[j].low[alive]] = True
+    kept_mask = [f & b for f, b in zip(fwd, bwd)]
+    return Layers(order, fragments, nposes, edges, kept_mask)
+
+
+def _kept_edges(layers: Layers, j: int) -> tuple[np.ndarray, np.ndarray]:
+    low = layers.edges[j].low
+    high = layers.edges[j].high
+    valid = layers.kept_mask[j][low] & layers.kept_mask[j + 1][high]
+    return low[valid], high[valid]
+
+
+# -- pose identity helpers ------------------------------------------------
+
+
+def _identities(chunk) -> np.ndarray:
+    """(N, 5) int64 rows of (conformer, rotamer, tx, ty, tz)."""
+    return np.column_stack(
         (
             chunk.conformers.astype(np.int64),
             chunk.rotamers.astype(np.int64),
             chunk.translations_grid.astype(np.int64),
         )
     )
+
+
+def _encode(rows: np.ndarray) -> np.ndarray:
+    """One opaque key per identity row, comparable with the same byte order
+    np.unique(axis=0) uses (so argsort here matches np.unique's ordering)."""
+    a = np.ascontiguousarray(rows.astype(np.int64))
+    return a.view(np.dtype((np.void, a.dtype.itemsize * a.shape[1]))).ravel()
+
+
+# -- counting -------------------------------------------------------------
+
+
+@dataclass
+class CountResult:
+    order: list[str]  # pool names in fragment order
+    fragments: list[int]
+    kept: list[int]
+    unique: list[int]
+    total_chains: int
+
+
+def _count_unique(graph: ChainGraph, pool: str, kept_idx: np.ndarray) -> int:
+    if kept_idx.size == 0:
+        return 0
+    rows = _identities(select_pose_indices(graph._result_dir(pool), kept_idx))
     return int(len(np.unique(rows, axis=0)))
 
 
-def count_chains(graph: ChainGraph, selected: list[str]) -> CountResult:
-    order = sorted(selected, key=lambda p: graph.pools[p]["fragment"])
-    fragments = [graph.pools[p]["fragment"] for p in order]
-    nposes = [graph.nposes(p) for p in order]
-
-    if len(order) == 1:
-        # a single representative: every pose is a trivial chain, no pruning
-        kept_idx = np.arange(nposes[0], dtype=np.int64)
-        return CountResult(
-            order=order,
-            fragments=fragments,
-            kept=[nposes[0]],
-            unique=[_count_unique(graph, order[0], kept_idx)],
-            total_chains=nposes[0],
-        )
-
-    edges: list[Edges] = []
-    for lower, upper in zip(order, order[1:]):
-        edges.append(graph.edges_for_link(_select_link(graph, lower, upper)))
-
-    k = len(order)
-    # forward reachability (layer 0 seeds everything)
-    fwd = [np.zeros(n, dtype=bool) for n in nposes]
-    fwd[0][:] = True
-    for j in range(k - 1):
-        alive = fwd[j][edges[j].low]
-        fwd[j + 1][edges[j].high[alive]] = True
-    # backward reachability (last layer seeds everything)
-    bwd = [np.zeros(n, dtype=bool) for n in nposes]
-    bwd[-1][:] = True
-    for j in range(k - 2, -1, -1):
-        alive = bwd[j + 1][edges[j].high]
-        bwd[j][edges[j].low[alive]] = True
-
-    kept_mask = [f & b for f, b in zip(fwd, bwd)]
-
-    # count chains: paths over kept poses
-    ways = np.where(kept_mask[0], 1, 0).astype(np.int64)
-    for j in range(k - 1):
-        valid = kept_mask[j][edges[j].low] & kept_mask[j + 1][edges[j].high]
-        lo = edges[j].low[valid]
-        hi = edges[j].high[valid]
-        nxt = np.zeros(nposes[j + 1], dtype=np.int64)
+def _count_paths(layers: Layers) -> int:
+    if len(layers.order) == 1:
+        return int(layers.kept_mask[0].sum())
+    ways = np.where(layers.kept_mask[0], 1, 0).astype(np.int64)
+    for j in range(len(layers.order) - 1):
+        lo, hi = _kept_edges(layers, j)
+        nxt = np.zeros(layers.nposes[j + 1], dtype=np.int64)
         np.add.at(nxt, hi, ways[lo])
         ways = nxt
-    total_chains = int(ways.sum())
+    return int(ways.sum())
 
-    kept = [int(m.sum()) for m in kept_mask]
-    unique = [
-        _count_unique(graph, pool, np.flatnonzero(mask).astype(np.int64))
-        for pool, mask in zip(order, kept_mask)
-    ]
+
+def count_chains(graph: ChainGraph, selected: list[str]) -> CountResult:
+    layers = _connectivity(graph, selected)
     return CountResult(
-        order=order,
-        fragments=fragments,
-        kept=kept,
-        unique=unique,
-        total_chains=total_chains,
+        order=layers.order,
+        fragments=layers.fragments,
+        kept=[int(m.sum()) for m in layers.kept_mask],
+        unique=[
+            _count_unique(graph, pool, np.flatnonzero(mask).astype(np.int64))
+            for pool, mask in zip(layers.order, layers.kept_mask)
+        ],
+        total_chains=_count_paths(layers),
     )
+
+
+# -- building -------------------------------------------------------------
+
+
+def _write_unique_pose_dir(
+    graph: ChainGraph, pool: str, kept_idx: np.ndarray, out_dir: Path
+) -> np.ndarray:
+    """Write the unique poses among ``kept_idx`` to ``out_dir`` and return, for
+    each kept pose (in ``kept_idx`` order), its 1-based index in that pose dir."""
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+    out_dir.mkdir(parents=True)
+    if kept_idx.size == 0:
+        return np.empty(0, dtype=np.int64)
+
+    kept_ids = _identities(select_pose_indices(graph._result_dir(pool), kept_idx))
+    unique_rows, inverse = np.unique(kept_ids, axis=0, return_inverse=True)
+    inverse = np.asarray(inverse).ravel()
+
+    packed = pack_pool(
+        unique_rows[:, 0].astype(np.uint16),
+        unique_rows[:, 1].astype(np.uint16),
+        unique_rows[:, 2:5].astype(np.int32),
+        bucket_size=DEFAULT_BUCKET_SIZE,
+    )
+    for i, (M, O, C, P) in enumerate(packed, start=1):
+        write_arc_file(out_dir / f"poses-{i}.arc", M, O, C, P, bucket_size=DEFAULT_BUCKET_SIZE)
+
+    # map np.unique order -> written global order, so the returned indices point
+    # at the poses as they are laid out in the pose dir.
+    written = _identities(select_pose_indices(out_dir, np.arange(len(unique_rows), dtype=np.int64)))
+    written_pos = np.argsort(_encode(written), kind="stable")  # written[written_pos] == unique_rows
+    return (written_pos[inverse] + 1).astype(np.int64)
+
+
+def _enumerate_paths(layers: Layers) -> np.ndarray:
+    """All complete chains as an (n_chains, n_fragments) array of rep pose ids."""
+    kept0 = np.flatnonzero(layers.kept_mask[0]).astype(np.int64)
+    paths = kept0[:, None]
+    for j in range(len(layers.order) - 1):
+        if len(paths) == 0:
+            break
+        lo, hi = _kept_edges(layers, j)
+        highs, pidx = _join(lo, hi, paths[:, -1], np.arange(len(paths), dtype=np.int64))
+        paths = np.column_stack((paths[pidx], highs))
+    if len(paths) == 0:
+        return np.empty((0, len(layers.order)), dtype=np.int64)
+    return paths
+
+
+def build_chains(
+    graph: ChainGraph, selected: list[str], output_dir: Path
+) -> tuple[Layers, np.ndarray]:
+    """Write one pose dir of unique poses per fragment under ``output_dir`` and
+    return the chains as 1-based indices into those pose dirs."""
+    layers = _connectivity(graph, selected)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    rep_to_pool: list[np.ndarray] = []
+    for pool, mask, n in zip(layers.order, layers.kept_mask, layers.nposes):
+        kept_idx = np.flatnonzero(mask).astype(np.int64)
+        one_based = _write_unique_pose_dir(graph, pool, kept_idx, output_dir / pool)
+        mapping = np.zeros(n, dtype=np.int64)
+        mapping[kept_idx] = one_based
+        rep_to_pool.append(mapping)
+
+    paths = _enumerate_paths(layers)
+    table = np.empty_like(paths)
+    for j in range(len(layers.order)):
+        table[:, j] = rep_to_pool[j][paths[:, j]]
+    return layers, table
 
 
 # -- selection ------------------------------------------------------------
@@ -360,13 +466,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("graph_json", help="JSON produced by alaric-pool-graph")
     parser.add_argument("--count", action="store_true", help="Counting mode.")
+    parser.add_argument(
+        "-o",
+        "--output-dir",
+        help="Build mode: dir to write one pose dir of unique poses per fragment.",
+    )
     parser.add_argument("--select", nargs="+", metavar="POOL", help="Use only these representatives.")
     parser.add_argument("--exclude", nargs="+", metavar="POOL", help="Drop these representatives.")
     parser.add_argument("--project-root", help="Override the project root for result dirs.")
     args = parser.parse_args(argv)
 
-    if not args.count:
-        parser.error("only --count is implemented")
+    if not args.count and not args.output_dir:
+        parser.error("build mode requires --output-dir (or use --count)")
 
     data = json.loads(Path(args.graph_json).read_text())
     project_root = Path(args.project_root) if args.project_root else Path(data["project"])
@@ -374,11 +485,15 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         selected = resolve_selection(graph, args.select, args.exclude)
-        result = count_chains(graph, selected)
+        if args.count:
+            print(_format_count(count_chains(graph, selected)))
+        else:
+            layers, table = build_chains(graph, selected, Path(args.output_dir))
+            sys.stdout.write("\t".join(layers.order) + "\n")
+            np.savetxt(sys.stdout, table, fmt="%d", delimiter="\t")
     except ChainError as exc:
         parser.exit(2, f"error: {exc}\n")
 
-    print(_format_count(result))
     return 0
 
 

@@ -14,7 +14,17 @@ sys.path.insert(0, str(ROOT / "alaric"))
 
 from poses import pack_pool, write_arc_file  # noqa: E402
 
-from alaric.middle.chain import ChainError, ChainGraph, count_chains, resolve_selection  # noqa: E402
+import sys as _sys
+_sys.path.insert(0, str(ROOT / "alaric"))
+from poses import PoseReader, select_pose_indices  # noqa: E402
+
+from alaric.middle.chain import (  # noqa: E402
+    ChainError,
+    ChainGraph,
+    build_chains,
+    count_chains,
+    resolve_selection,
+)
 
 
 # -- fixture helpers ------------------------------------------------------
@@ -97,6 +107,53 @@ def test_basic_count(tmp_path):
     assert res.kept == [2, 2, 3]      # A1 and B0 are dead ends, pruned
     assert res.unique == [2, 2, 2]    # C1 == C2 physically
     assert res.total_chains == 3      # A0-B1-C0, A2-B2-C1, A2-B2-C2
+
+
+def _read_ids(pose_dir: Path) -> list[tuple[int, int, int, int, int]]:
+    n = PoseReader.get_nposes(pose_dir)
+    ch = select_pose_indices(pose_dir, np.arange(n))
+    return [
+        (int(c), int(r), int(t[0]), int(t[1]), int(t[2]))
+        for c, r, t in zip(ch.conformers, ch.rotamers, ch.translations_grid)
+    ]
+
+
+def test_build_basic(tmp_path):
+    _basic_project(tmp_path)
+    g = _graph(tmp_path)
+    sel = resolve_selection(g, None, None)
+    cnt = count_chains(g, sel)
+    out = tmp_path / "out"
+    layers, table = build_chains(g, sel, out)
+
+    assert layers.order == ["r1", "r2", "r3"]
+    # one pose dir per fragment, each holding exactly the unique kept poses
+    for pool, uniq in zip(layers.order, cnt.unique):
+        assert PoseReader.get_nposes(out / pool) == uniq
+
+    # the table is every chain as 1-based indices into those pose dirs
+    assert table.shape == (cnt.total_chains, 3)
+    assert int(table.min()) >= 1
+    for j, pool in enumerate(layers.order):
+        assert int(table[:, j].max()) <= PoseReader.get_nposes(out / pool)
+    assert sorted(table.tolist()) == sorted([[1, 1, 1], [2, 2, 2], [2, 2, 2]])
+
+    # indices resolve to the right physical poses
+    assert _read_ids(out / "r1") == [(0, 0, 0, 0, 0), (0, 0, 2, 0, 0)]  # A0, A2
+    assert _read_ids(out / "r2") == [(0, 0, 1, 1, 0), (0, 0, 2, 1, 0)]  # B1, B2
+    assert _read_ids(out / "r3") == [(0, 0, 0, 2, 0), (0, 0, 1, 2, 0)]  # C0, C1(=C2)
+
+
+def test_build_matches_count(tmp_path):
+    # multi-step composition (through the filter intermediate) round-trips
+    _filter_step_project(tmp_path)
+    g = _graph(tmp_path)
+    sel = resolve_selection(g, None, None)
+    cnt = count_chains(g, sel)
+    layers, table = build_chains(g, sel, tmp_path / "out")
+    assert len(table) == cnt.total_chains
+    for pool, uniq in zip(layers.order, cnt.unique):
+        assert PoseReader.get_nposes(tmp_path / "out" / pool) == uniq
 
 
 def test_select_subset_two_layers(tmp_path):
