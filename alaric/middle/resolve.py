@@ -175,7 +175,7 @@ def resolve_action(
     action = spec.action
     if "fragment" in p:
         p["fragment"] = resolve_fragment(p["fragment"], spec.name)
-    if action in {"anchor", "anchor-test", "grow", "grow-test"} and p.get("sequence") == "auto":
+    if action in {"anchor", "anchor-test", "anchor-refe", "grow", "grow-test"} and p.get("sequence") == "auto":
         p["sequence"] = resolve_sequence(project, int(p["fragment"]))
     if action == "score" and p.get("sequence") == "auto":
         dep = resolved_by_name.get(str(p["input"]))
@@ -211,7 +211,9 @@ def resolve_action(
                 p["ovrmsd"] = ovrmsd
         if p.get("sequence") != "auto":
             p["source_sequence"] = final_sequence(dep)
-    if action == "rmsd":
+    if action == "anchor-refe" and p.get("ovrmsd") == "auto":
+        p["ovrmsd"] = float(_read_anchor_yaml(project, "ovrmsd"))
+    if action in {"rmsd", "anchor-refe"}:
         reference = str(p.get("reference", "reference.pdb"))
         ref_path = Path(reference)
         if not ref_path.is_absolute():

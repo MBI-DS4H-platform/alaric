@@ -79,7 +79,7 @@ class PoolNode:
 
 
 def _pool_kind(action: ResolvedAction) -> str:
-    if action.action in {"anchor", "anchor-test"}:
+    if action.action in {"anchor", "anchor-test", "anchor-refe"}:
         return "anchor"
     if action.action in {"grow", "grow-test"}:
         return "grow"

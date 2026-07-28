@@ -260,6 +260,13 @@ Actions overview
 Create initial fragment poses from stacking interaction.
 Prototype for 2 stackings uses the local nucleotide-stacking interaction classifier.
 
+Variant "anchor-refe": create initial fragment poses from a reference structure. Take the
+nucleobase coordinates of one nucleotide of the fragment from the reference, and generate all
+poses whose corresponding nucleobase is within an ovRMSD threshold of it. There is no cRMSD:
+unlike for whole nucleotides, there is essentially a single nucleobase conformation, so no
+conformer can be excluded. Shares the pose-generation kernel with "grow" (the reference is a
+single fixed source pose). Like "anchor", it is a source pool: its poses have no origin.
+
 ## B. Determine conformer pairs
 
 Determine which conformers the next fragment to grow can have.

@@ -17,6 +17,7 @@ MASK = "mask"
 ACTION_SCHEMAS: dict[str, set[str]] = {
     "anchor": {"action", "type", "fragment", "sequence", "exclude", "protein", "resid", "nucleotide", "dihedral", "angle", "margin"},
     "anchor-test": {"action", "type", "fragment", "sequence", "exclude", "protein", "resid", "nucleotide", "dihedral", "angle", "margin", "nconformers", "conformer"},
+    "anchor-refe": {"action", "type", "fragment", "sequence", "exclude", "nucleotide", "ovrmsd", "reference"},
     "grow": {"action", "type", "input", "restrict_input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
     "grow-test": {"action", "type", "input", "restrict_input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd", "conformer"},
     "score": {"action", "type", "input", "sequence", "exclude", "protein", "nb_kernel"},
@@ -30,6 +31,7 @@ ACTION_SCHEMAS: dict[str, set[str]] = {
 REQUIRED: dict[str, set[str]] = {
     "anchor": {"fragment", "sequence", "exclude", "protein", "resid", "nucleotide"},
     "anchor-test": {"fragment", "sequence", "exclude", "protein", "resid", "nucleotide"},
+    "anchor-refe": {"fragment", "sequence", "exclude", "nucleotide", "ovrmsd"},
     "grow": {"input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
     "grow-test": {"input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd", "conformer"},
     "score": {"input", "sequence", "exclude", "protein"},
@@ -43,6 +45,7 @@ REQUIRED: dict[str, set[str]] = {
 DEPENDENCY_FIELDS: dict[str, dict[str, str]] = {
     "anchor": {},
     "anchor-test": {},
+    "anchor-refe": {},
     "grow": {"input": POSE, "restrict_input": POSE},
     "grow-test": {"input": POSE, "restrict_input": POSE},
     "score": {"input": POSE},
@@ -56,6 +59,7 @@ DEPENDENCY_FIELDS: dict[str, dict[str, str]] = {
 OUTPUT_KIND = {
     "anchor": POSE,
     "anchor-test": POSE,
+    "anchor-refe": POSE,
     "grow": POSE,
     "grow-test": POSE,
     "score": SCORE,
@@ -69,6 +73,7 @@ OUTPUT_KIND = {
 AUTO_FIELDS = {
     "anchor": {"fragment", "sequence", "exclude", "protein", "dihedral", "angle"},
     "anchor-test": {"fragment", "sequence", "exclude", "protein", "dihedral", "angle"},
+    "anchor-refe": {"fragment", "sequence", "exclude", "ovrmsd"},
     "grow": {"fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
     "grow-test": {"fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
     "score": {"sequence", "exclude", "protein"},
@@ -109,12 +114,13 @@ def normalize_action(name: str, path: Path, data: dict[str, Any]) -> ActionSpec:
     if missing:
         raise SchemaError(f"{path}: missing keys for {action}: {', '.join(sorted(missing))}")
 
-    if action in {"anchor", "anchor-test"}:
+    if action in {"anchor", "anchor-test", "anchor-refe"}:
         nuc = str(data.get("nucleotide")).lower()
         if nuc not in {"first", "second"}:
             raise SchemaError(f"{path}: nucleotide must be first or second")
         data["nucleotide"] = nuc
-        data.setdefault("margin", 0.5)
+        if action != "anchor-refe":
+            data.setdefault("margin", 0.5)
         if action == "anchor-test":
             has_nconformers = "nconformers" in data
             has_conformer = "conformer" in data
@@ -147,7 +153,12 @@ def normalize_action(name: str, path: Path, data: dict[str, Any]) -> ActionSpec:
         data.setdefault("nb_kernel", "compiled")
         if data["nb_kernel"] not in {"compiled", "jax"}:
             raise SchemaError(f"{path}: nb_kernel must be compiled or jax")
-    if action == "rmsd":
+    if action == "anchor-refe" and data.get("ovrmsd") != "auto":
+        ovrmsd = float(data["ovrmsd"])
+        if ovrmsd <= 0:
+            raise SchemaError(f"{path}: ovrmsd must be positive")
+        data["ovrmsd"] = ovrmsd
+    if action in {"rmsd", "anchor-refe"}:
         data.setdefault("reference", "reference.pdb")
     if action == "filter":
         score_route = {"score_input", "threshold"} <= set(data)

@@ -19,9 +19,10 @@ from .sigil import compute_project_sigils
 
 # Actions that support chunked deployment, and their chunking axis:
 #   anchor / anchor-test -> conformers (--conformer-range)
+#   anchor-refe          -> conformers (--conformer-range)
 #   grow / grow-test    -> source poses (--pose-range)
 #   score                -> source poses (POSE_START/POSE_END)
-CHUNKABLE = {"anchor", "anchor-test", "grow", "grow-test", "score"}
+CHUNKABLE = {"anchor", "anchor-test", "anchor-refe", "grow", "grow-test", "score"}
 # Separates the per-chunk body from the organize/finalize body in chunk templates.
 ORGANIZE_DELIM = "### ORGANIZE ###"
 # Remote env vars that are defined in the *local* deployer environment and must be

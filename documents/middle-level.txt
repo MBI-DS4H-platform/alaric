@@ -29,6 +29,20 @@ nucleotide: first or second
 dihedral: 45 -45  , or auto (read from ../DATA/anchor.yaml)
 angle: 30, or auto (read from ../DATA/anchor.yaml)
 
+## anchor-refe
+
+Create initial fragment poses from a reference structure instead of from a stacking interaction:
+all poses whose nucleobase is within ovrmsd of the corresponding nucleobase in the reference.
+There is no cRMSD: the nucleobase is essentially rigid, so no conformer can be excluded on its
+internal conformation.
+
+fragment: 5 or auto (read from dirname "frag5-X")
+sequence: UU or auto (read sequence from ../DATA/sequence.txt or ../DATA/reference.pdb)
+exclude: 1b7f or auto (read from ../DATA/pdbcode.txt)
+nucleotide: first or second
+ovrmsd: 0.75, or auto (read from ../DATA/anchor.yaml)
+reference: reference.pdb (default). Read from ../DATA
+
 ## score
 
 This is a scoring action. This action dir can only be a score_input. Generates not poses but a 1D score.npy file

@@ -738,6 +738,8 @@ class _GrowWorkerConfig:
     translation_sets: TranslationSets
     target_rotamer_positions: object
     restrict_index: object
+    emit_provenance: bool = True
+    progress_desc: str = "Trace grow"
 
 
 _GROW_WORKER_CONFIG: _GrowWorkerConfig | None = None
@@ -764,7 +766,80 @@ def _grow_worker(target_conformers: np.ndarray) -> int:
         translation_sets=cfg.translation_sets,
         target_rotamer_positions=cfg.target_rotamer_positions,
         restrict_index=cfg.restrict_index,
+        emit_provenance=cfg.emit_provenance,
+        progress_desc=cfg.progress_desc,
     )
+
+
+def run_pooled_trace_grow(
+    source_caches: dict[int, SourceConformerCache],
+    target_library,
+    target_to_sources: dict[int, np.ndarray],
+    target_conformers: np.ndarray,
+    *,
+    ov_rmsd: float,
+    output_dir: Path,
+    cache_size: int,
+    bucket_size: int,
+    translation_sets: TranslationSets,
+    target_rotamer_positions: np.ndarray | None = None,
+    restrict_index: RestrictIndex | None = None,
+    nprocs: int = 1,
+    emit_provenance: bool = True,
+    progress_desc: str = "Trace grow",
+) -> int:
+    """Run the pooled trace kernel, over a fork pool of target conformers if asked.
+
+    Shared by grow (source = a pose pool) and anchor-refe (source = a single
+    reference nucleobase).
+    """
+    nprocs = min(int(nprocs), max(1, len(target_conformers)))
+    if nprocs <= 1:
+        return _pooled_trace_grow(
+            source_caches,
+            target_library,
+            target_to_sources,
+            target_conformers,
+            ov_rmsd=ov_rmsd,
+            output_dir=output_dir,
+            cache_size=cache_size,
+            bucket_size=bucket_size,
+            unorganized_subdirs=True,
+            translation_sets=translation_sets,
+            target_rotamer_positions=target_rotamer_positions,
+            restrict_index=restrict_index,
+            emit_provenance=emit_provenance,
+            progress_desc=progress_desc,
+        )
+
+    if "fork" not in mp.get_all_start_methods():
+        raise RuntimeError(
+            "--nprocs > 1 requires the 'fork' start method (Linux/macOS). "
+            "Use --nprocs 1 on this platform."
+        )
+    slices = [target_conformers[i::nprocs] for i in range(nprocs)]
+    ctx = mp.get_context("fork")
+    worker_cfg = _GrowWorkerConfig(
+        source_caches=source_caches,
+        target_library=target_library,
+        target_to_sources=target_to_sources,
+        ov_rmsd=ov_rmsd,
+        output_dir=output_dir,
+        cache_size=cache_size,
+        bucket_size=bucket_size,
+        translation_sets=translation_sets,
+        target_rotamer_positions=target_rotamer_positions,
+        restrict_index=restrict_index,
+        emit_provenance=emit_provenance,
+        progress_desc=progress_desc,
+    )
+    with ctx.Pool(
+        processes=nprocs,
+        initializer=_init_grow_worker,
+        initargs=(worker_cfg,),
+    ) as pool:
+        results = pool.map(_grow_worker, slices)
+    return sum(results)
 
 
 def _pooled_trace_grow(
@@ -781,6 +856,8 @@ def _pooled_trace_grow(
     translation_sets: TranslationSets,
     target_rotamer_positions: np.ndarray | None,
     restrict_index: RestrictIndex | None,
+    emit_provenance: bool = True,
+    progress_desc: str = "Trace grow",
 ) -> int:
     writer = PoseWriter(
         output_dir,
@@ -798,7 +875,7 @@ def _pooled_trace_grow(
     )
     progress = tqdm(
         total=trace_work_total,
-        desc="Trace grow",
+        desc=progress_desc,
         unit="rotpair",
         unit_scale=True,
         mininterval=2.0,
@@ -1088,7 +1165,9 @@ def _pooled_trace_grow(
                             out_conformers[emit_order],
                             out_rotamers[emit_order].astype(np.uint16, copy=False),
                             out_translations[emit_order].astype(np.int16, copy=False),
-                            provenance=out_provenance[emit_order],
+                            provenance=(
+                                out_provenance[emit_order] if emit_provenance else None
+                            ),
                         )
                 finally:
                     if trace_work:
@@ -1236,49 +1315,20 @@ def _run(args: argparse.Namespace) -> int:
 
     print("[5/6] Running pooled trace grow...", file=sys.stderr)
     translation_sets = _precompute_translation_sets()
-    nprocs = min(args.nprocs, max(1, len(target_conformers)))
-    if nprocs <= 1:
-        total_poses = _pooled_trace_grow(
-            source_caches,
-            target_library,
-            target_to_sources,
-            target_conformers,
-            ov_rmsd=args.ov_rmsd,
-            output_dir=output_dir,
-            cache_size=args.cache_size,
-            bucket_size=args.bucket_size,
-            unorganized_subdirs=True,
-            translation_sets=translation_sets,
-            target_rotamer_positions=target_rotamer_positions,
-            restrict_index=restrict_index,
-        )
-    else:
-        if "fork" not in mp.get_all_start_methods():
-            raise RuntimeError(
-                "--nprocs > 1 requires the 'fork' start method (Linux/macOS). "
-                "Use --nprocs 1 on this platform."
-            )
-        slices = [target_conformers[i::nprocs] for i in range(nprocs)]
-        ctx = mp.get_context("fork")
-        worker_cfg = _GrowWorkerConfig(
-            source_caches=source_caches,
-            target_library=target_library,
-            target_to_sources=target_to_sources,
-            ov_rmsd=args.ov_rmsd,
-            output_dir=output_dir,
-            cache_size=args.cache_size,
-            bucket_size=args.bucket_size,
-            translation_sets=translation_sets,
-            target_rotamer_positions=target_rotamer_positions,
-            restrict_index=restrict_index,
-        )
-        with ctx.Pool(
-            processes=nprocs,
-            initializer=_init_grow_worker,
-            initargs=(worker_cfg,),
-        ) as pool:
-            results = pool.map(_grow_worker, slices)
-        total_poses = sum(results)
+    total_poses = run_pooled_trace_grow(
+        source_caches,
+        target_library,
+        target_to_sources,
+        target_conformers,
+        ov_rmsd=args.ov_rmsd,
+        output_dir=output_dir,
+        cache_size=args.cache_size,
+        bucket_size=args.bucket_size,
+        translation_sets=translation_sets,
+        target_rotamer_positions=target_rotamer_positions,
+        restrict_index=restrict_index,
+        nprocs=args.nprocs,
+    )
 
     print("[6/6] Finalizing...", file=sys.stderr)
     elapsed = time.perf_counter() - t0

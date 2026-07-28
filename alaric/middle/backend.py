@@ -157,6 +157,19 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
                 "organize_command": organize_command(alaric_dir, output_dir, location),
             }
         )
+    elif action.action == "anchor-refe":
+        context.update(
+            {
+                "reference_path": data_file_path(p["__reference"], location),
+                "fragment": q(p["fragment"]),
+                "sequence": q(p["sequence"]),
+                "nucleotide_flag": "--first" if p["nucleotide"] == "first" else "--second",
+                "ovrmsd": q(p["ovrmsd"]),
+                "exclude_args": exclude_args(p.get("exclude", [])),
+                "exclude_python": repr(p.get("exclude", [])),
+                "organize_command": organize_command(alaric_dir, output_dir, location),
+            }
+        )
     elif action.action in {"grow", "grow-test"}:
         source = p["input"]
         restrict = p.get("restrict_input")
