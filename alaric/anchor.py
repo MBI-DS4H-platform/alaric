@@ -13,7 +13,6 @@ from typing import Sequence
 
 import numpy as np
 from scipy.spatial.transform import Rotation
-from scipy.spatial import cKDTree
 from tqdm import tqdm
 
 from library import config
@@ -31,22 +30,23 @@ from stack_geometry import (
 GRID_SPACING = sqrt(3) / 3
 LATERAL_SLOPE = 1.78966
 
-STACKING_MEAN = np.array([3.87095, 0.418246, 0.273519], dtype=np.float64)
-STACKING_COV = np.array(
-    [
-        [0.0940985, 0.0407767, 0.0290554],
-        [0.0407767, 0.0480912, 0.0176934],
-        [0.0290554, 0.0176934, 0.0356662],
-    ],
-    dtype=np.float64,
-)
-_STACKING_PRECISION = np.linalg.inv(STACKING_COV)
-_STACKING_NORM = (2 * np.pi) ** (3 / 2) * np.sqrt(np.linalg.det(STACKING_COV))
-GAUSSIAN_THRESHOLDS = {
-    "r90": 1.30 * _STACKING_NORM,
-    "r95": 0.88 * _STACKING_NORM,
-    "r99": 0.38 * _STACKING_NORM,
-}
+# Recall levels a precalculation directory can be built for.  These name cache
+# directories only: the runtime never evaluates the underlying filter, so it
+# does not need to know what model or thresholds produced them.
+PRECALCULATED_THRESHOLDS = ("r90", "r95", "r99")
+
+# Universal Hopf-fibration division of SO(3) used to build every precalculated
+# filter: 6 cube faces x HOPF_N x HOPF_N base directions x HOPF_NPSI fibre steps.
+# A cache's rotations.npy is the subsequence of these cells that the filter
+# retained, so a library rotamer is looked up by computing its cell, not by
+# searching for a nearby sample.
+HOPF_N = 16
+HOPF_NPSI = 64
+HOPF_CELLS = 6 * HOPF_N * HOPF_N * HOPF_NPSI
+
+# Fraction of a pose cell that must be inside the accepted region for the pose to
+# be emitted, measured as accepted cache translations over the cell's capacity.
+MIN_CELL_FRACTION = float(os.environ.get("ALARIC_ANCHOR_MIN_CELL_FRACTION", 1 / 3))
 
 
 @dataclass(frozen=True)
@@ -56,12 +56,17 @@ class _PrecalculatedAnchor:
     filtered_sizes: np.ndarray
     filtered_offsets: np.ndarray
     filtered_concat: np.ndarray
-    rotation_tree: cKDTree
-    rotation_tree_indices: np.ndarray
+    # HOPF_CELLS entries: cache row for each Hopf cell, -1 where the cell was
+    # not retained (nothing passes the filter anywhere in that cell).
+    cell_to_row: np.ndarray
     nucleotide_reference: np.ndarray
     protein_reference_to_world: np.ndarray
     translation_vectors_world: np.ndarray
-    gaussian_threshold: float
+    lattice_origin: np.ndarray
+    lattice_step: float
+    # Lattice points per pose cell, indexed by the cell's phase; see
+    # _build_capacity_table.  Turns the keep rule into a fraction of capacity.
+    capacity_table: np.ndarray
 
 
 @dataclass(frozen=True)
@@ -87,6 +92,7 @@ class _StackWorkConfig:
     offset_chunk_size: int
     writer_memory_lock: object | None
     precalculated_anchor: _PrecalculatedAnchor | None = None
+    min_cell_fraction: float = MIN_CELL_FRACTION
 
 
 @dataclass(frozen=True)
@@ -300,15 +306,15 @@ and the values in between are eliminated.""",
         "--precalculated-anchor",
         metavar="DIR",
         help=(
-            "Use a ring-level precalculated Gaussian filter from DIR. DIR may "
+            "Use a ring-level precalculated filter from DIR. DIR may "
             "contain the arrays directly or contain r90/r95/r99 subdirectories."
         ),
     )
     parser.add_argument(
         "--precalculated-threshold",
-        choices=sorted(GAUSSIAN_THRESHOLDS),
+        choices=sorted(PRECALCULATED_THRESHOLDS),
         help=(
-            "Gaussian cache threshold. Required unless it can be inferred from "
+            "Cache recall level. Required unless it can be inferred from "
             "the precalculation directory name."
         ),
     )
@@ -390,7 +396,7 @@ def _resolve_precalculated_directory(
     if not directory.is_dir():
         raise ValueError(f"precalculation directory does not exist: {directory}")
 
-    inferred = directory.name if directory.name in GAUSSIAN_THRESHOLDS else None
+    inferred = directory.name if directory.name in PRECALCULATED_THRESHOLDS else None
     if threshold_name is None:
         threshold_name = inferred
     elif inferred is not None and inferred != threshold_name:
@@ -502,11 +508,167 @@ def _validate_precalculated_arrays(
     return rotations, translations, filtered_sizes, offsets, filtered_concat
 
 
-def _build_rotation_tree(rotations: np.ndarray) -> tuple[cKDTree, np.ndarray]:
+def _hopf_cell_axes(face: np.ndarray, p: np.ndarray, q: np.ndarray) -> np.ndarray:
+    """Cube-face direction for Hopf base cells (face, p, q)."""
+    a = np.tan((np.pi / 4) * (2 * (p + 0.5) / HOPF_N - 1))
+    b = np.tan((np.pi / 4) * (2 * (q + 0.5) / HOPF_N - 1))
+    ones = np.ones_like(a)
+    axis = face // 2
+    sign = np.where(face % 2 == 0, 1.0, -1.0)
+    directions = np.empty(a.shape + (3,), dtype=np.float64)
+    for value, (major, first, second) in enumerate(((0, 1, 2), (1, 0, 2), (2, 0, 1))):
+        selected = axis == value
+        directions[selected, major] = (sign * ones)[selected]
+        directions[selected, first] = a[selected]
+        directions[selected, second] = b[selected]
+    return directions / np.linalg.norm(directions, axis=1)[:, None]
+
+
+def _hopf_cell_matrices(cells: np.ndarray) -> np.ndarray:
+    """Rotation matrix at the centre of each Hopf cell index."""
+    cells = np.asarray(cells, dtype=np.int64)
+    face, rest = np.divmod(cells, HOPF_N * HOPF_N * HOPF_NPSI)
+    p, rest = np.divmod(rest, HOPF_N * HOPF_NPSI)
+    q, m = np.divmod(rest, HOPF_NPSI)
+    axes = _hopf_cell_axes(face, p, q)
+    theta_s = np.arccos(np.clip(axes[:, 2], -1.0, 1.0))
+    phi_s = np.arctan2(axes[:, 1], axes[:, 0])
+    psi = 2 * np.pi * (m + 0.5) / HOPF_NPSI
+    # scipy quaternion order is (x, y, z, w); the generator lists (w, x, y, z).
+    quaternions = np.column_stack(
+        (
+            np.cos(theta_s / 2) * np.sin(psi / 2),
+            np.sin(theta_s / 2) * np.cos(phi_s + psi / 2),
+            np.sin(theta_s / 2) * np.sin(phi_s + psi / 2),
+            np.cos(theta_s / 2) * np.cos(psi / 2),
+        )
+    )
+    return Rotation.from_quat(quaternions).as_matrix()
+
+
+def _hopf_cell_indices(rotations: np.ndarray) -> np.ndarray:
+    """Hopf cell index of each rotation matrix; inverse of _hopf_cell_matrices."""
     quaternions = Rotation.from_matrix(rotations).as_quat()
-    doubled = np.concatenate((quaternions, -quaternions), axis=0)
-    indices = np.tile(np.arange(len(rotations), dtype=np.int32), 2)
-    return cKDTree(doubled), indices
+    x, y, z, w = (quaternions[:, i] for i in range(4))
+    # q and -q denote the same rotation and shift both half-angles by pi, so the
+    # fibre coordinate psi (mod 2pi) and the base coordinate phi_s are unchanged.
+    psi_half = np.arctan2(x, w)
+    psi = np.mod(2 * psi_half, 2 * np.pi)
+    phi_s = np.arctan2(z, y) - psi_half
+    theta_s = 2 * np.arctan2(np.hypot(y, z), np.hypot(w, x))
+    sin_theta = np.sin(theta_s)
+    axes = np.column_stack(
+        (sin_theta * np.cos(phi_s), sin_theta * np.sin(phi_s), np.cos(theta_s))
+    )
+    major = np.argmax(np.abs(axes), axis=1)
+    rows = np.arange(len(axes))
+    denominator = np.abs(axes[rows, major])
+    face = 2 * major + (axes[rows, major] < 0)
+    minor = np.array([[1, 2], [0, 2], [0, 1]])[major]
+    a = axes[rows, minor[:, 0]] / denominator
+    b = axes[rows, minor[:, 1]] / denominator
+    p = np.floor(HOPF_N * (1 + (4 / np.pi) * np.arctan(a)) / 2).astype(np.int64)
+    q = np.floor(HOPF_N * (1 + (4 / np.pi) * np.arctan(b)) / 2).astype(np.int64)
+    m = np.floor(HOPF_NPSI * psi / (2 * np.pi)).astype(np.int64)
+    np.clip(p, 0, HOPF_N - 1, out=p)
+    np.clip(q, 0, HOPF_N - 1, out=q)
+    np.clip(m, 0, HOPF_NPSI - 1, out=m)
+    return ((face * HOPF_N + p) * HOPF_N + q) * HOPF_NPSI + m
+
+
+def _build_cell_lookup(rotations: np.ndarray) -> np.ndarray:
+    """Map every Hopf cell to its cache row, or -1 when the cell was dropped."""
+    cells = _hopf_cell_indices(rotations)
+    if len(np.unique(cells)) != len(cells):
+        raise ValueError(
+            "precalculated rotations do not sit on distinct Hopf cells; the cache "
+            f"was not built on the assumed {HOPF_CELLS}-cell grid"
+        )
+    # float32 round-tripping in _rotamers_to_matrices costs ~1e-7; landing on the
+    # wrong cell would cost ~1e-1, so any tolerance between the two separates them.
+    residual = np.abs(_hopf_cell_matrices(cells) - rotations).max()
+    if residual > 1e-5:
+        raise ValueError(
+            "precalculated rotations are not Hopf cell centres of the assumed "
+            f"{HOPF_CELLS}-cell grid (max deviation {residual:.3e})"
+        )
+    cell_to_row = np.full(HOPF_CELLS, -1, dtype=np.int32)
+    cell_to_row[cells] = np.arange(len(cells), dtype=np.int32)
+    return cell_to_row
+
+
+def _lattice_geometry(translations: np.ndarray) -> tuple[np.ndarray, float]:
+    """Infer the generator's translation lattice (origin, step) from its samples."""
+    steps = []
+    for axis in range(3):
+        values = np.unique(np.round(translations[:, axis], 9))
+        if len(values) < 2:
+            raise ValueError("precalculated translations do not span a 3D lattice")
+        steps.append(np.diff(values).min())
+    step = float(min(steps))
+    if step <= 0:
+        raise ValueError("precalculated translations have a non-positive lattice step")
+    origin = translations.min(axis=0)
+    residual = np.abs(
+        (translations - origin) / step - np.rint((translations - origin) / step)
+    ).max()
+    if residual > 1e-6:
+        raise ValueError(
+            f"precalculated translations are not on a regular {step} lattice "
+            f"(max deviation {residual:.3e} of a step)"
+        )
+    return origin, step
+
+
+def _build_capacity_table(
+    step: float,
+    rotation: np.ndarray,
+    resolution: int = 64,
+) -> np.ndarray:
+    """Lattice points per pose cell, as a function of the cell's lattice phase.
+
+    A pose cell is an axis-aligned cube of side GRID_SPACING in world space, so in
+    lattice units it is a cube of side GRID_SPACING/step rotated by `rotation`.
+    How many lattice points it holds depends only on where its centre sits inside
+    a lattice cell, because the lattice is periodic and the rotation is fixed for
+    a whole run.  Tabulating that over one lattice cell makes the count O(1).
+    """
+    half = GRID_SPACING / (2 * step)
+    reach = int(np.ceil(half * np.sqrt(3))) + 1
+    axis = np.arange(-reach, reach + 1)
+    neighbourhood = np.stack(
+        np.meshgrid(axis, axis, axis, indexing="ij"), axis=-1
+    ).reshape(-1, 3)
+    grid = (np.arange(resolution) + 0.5) / resolution
+    phases = np.stack(
+        np.meshgrid(grid, grid, grid, indexing="ij"), axis=-1
+    ).reshape(-1, 3)
+    table = np.empty(len(phases), dtype=np.int16)
+    chunk = max(1, 2_000_000 // len(neighbourhood))
+    for start in range(0, len(phases), chunk):
+        block = phases[start : start + chunk]
+        delta = neighbourhood[None, :, :] - block[:, None, :]
+        table[start : start + chunk] = np.count_nonzero(
+            np.all(np.abs(delta @ rotation) <= half, axis=2), axis=1
+        )
+    return table.reshape(resolution, resolution, resolution)
+
+
+def _pose_cell_capacity(
+    grid: np.ndarray,
+    offsets: np.ndarray,
+    precalculated: _PrecalculatedAnchor,
+) -> np.ndarray:
+    """Lattice points that can land in each pose cell (its capacity)."""
+    centres = (
+        (grid * GRID_SPACING - offsets) @ precalculated.protein_reference_to_world.T
+    )
+    phase = np.mod(
+        (centres - precalculated.lattice_origin) / precalculated.lattice_step, 1.0
+    )
+    resolution = precalculated.capacity_table.shape[0]
+    index = np.minimum((phase * resolution).astype(np.int64), resolution - 1)
+    return precalculated.capacity_table[index[:, 0], index[:, 1], index[:, 2]]
 
 
 def _load_precalculated_anchor(
@@ -541,19 +703,22 @@ def _load_precalculated_anchor(
     protein_reference_to_world = _superimpose_rotation(
         protein_reference, protein_ring
     )
-    rotation_tree, rotation_tree_indices = _build_rotation_tree(rotations)
+    lattice_origin, lattice_step = _lattice_geometry(translations)
     return _PrecalculatedAnchor(
         rotations=rotations,
         translations=translations,
         filtered_sizes=sizes,
         filtered_offsets=offsets,
         filtered_concat=concat,
-        rotation_tree=rotation_tree,
-        rotation_tree_indices=rotation_tree_indices,
+        cell_to_row=_build_cell_lookup(rotations),
         nucleotide_reference=nucleotide_reference,
         protein_reference_to_world=protein_reference_to_world,
         translation_vectors_world=translations @ protein_reference_to_world,
-        gaussian_threshold=GAUSSIAN_THRESHOLDS[threshold_name],
+        lattice_origin=lattice_origin,
+        lattice_step=lattice_step,
+        capacity_table=_build_capacity_table(
+            lattice_step, protein_reference_to_world
+        ),
     )
 
 
@@ -741,31 +906,18 @@ def _build_reverse_table(reverse_map: dict) -> np.ndarray:
     return reverse_table
 
 
-def _gaussian_scores(features: np.ndarray) -> np.ndarray:
-    delta = features.astype(np.float64, copy=False) - STACKING_MEAN[None, :]
-    exponent = np.einsum("ij,jk,ik->i", delta, _STACKING_PRECISION, delta)
-    return np.exp(-0.5 * exponent)
-
-
 def _snap_cache_rotations(
     rotations: np.ndarray,
     precalculated: _PrecalculatedAnchor,
 ) -> np.ndarray:
-    quaternions = Rotation.from_matrix(rotations).as_quat()
-    # A cache contains only rotations that have at least one accepted translation.
-    # Near that retained-set boundary, the single nearest SO(3) sample need not be
-    # conservative for a correlated Gaussian.  Union a small nearest-neighbour
-    # stencil; the final direct Gaussian evaluation remains authoritative.
-    neighbour_count = min(16, len(precalculated.rotations))
-    _, tree_indices = precalculated.rotation_tree.query(
-        quaternions, k=neighbour_count
-    )
-    tree_indices = np.asarray(tree_indices, dtype=np.int64)
-    if tree_indices.ndim == 1:
-        tree_indices = tree_indices[:, None]
-    return precalculated.rotation_tree_indices[
-        tree_indices
-    ]
+    """Cache row per rotamer, or -1 when its Hopf cell holds no candidates.
+
+    The cache was built by evaluating the filter on the universal Hopf division
+    of SO(3), so each rotamer belongs to exactly one cell.  A cell the cache does
+    not list is a cell in which nothing passes: the rotamer is out of the region.
+    """
+    cells = _hopf_cell_indices(rotations)
+    return precalculated.cell_to_row[cells].astype(np.int64, copy=False)[:, None]
 
 
 def _translation_segments(
@@ -779,6 +931,8 @@ def _translation_segments(
 
     segment_by_rotation: dict[int, np.ndarray] = {}
     for cache_index in np.unique(cache_rotation_indices):
+        if cache_index < 0:
+            continue
         start = int(precalculated.filtered_offsets[cache_index])
         end = int(precalculated.filtered_offsets[cache_index + 1])
         segment_by_rotation[int(cache_index)] = precalculated.filtered_concat[
@@ -788,7 +942,7 @@ def _translation_segments(
     segment_by_stencil: dict[tuple[int, ...], np.ndarray] = {}
     segments: list[np.ndarray] = []
     for stencil in cache_rotation_indices:
-        key = tuple(int(x) for x in np.unique(stencil))
+        key = tuple(int(x) for x in np.unique(stencil) if x >= 0)
         segment = segment_by_stencil.get(key)
         if segment is None:
             parts = [segment_by_rotation[index] for index in key]
@@ -818,9 +972,16 @@ def _translation_segments(
 def _deduplicate_owner_grid(
     owners: np.ndarray,
     grid: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Collapse candidates onto pose grid points, counting the hits on each.
+
+    Several cache translations round onto the same pose grid point.  The number
+    that landed there, over the cell's capacity, is the fraction of the cell that
+    lies inside the accepted region -- which is what decides whether to emit the
+    pose, without ever consulting the underlying filter.
+    """
     if len(owners) == 0:
-        return owners, grid
+        return owners, grid, np.empty(0, dtype=np.int64)
     if owners.min() < 0 or owners.max() > np.iinfo(np.uint16).max:
         raise ValueError("candidate owner index exceeds uint16 range")
     if grid.min() < np.iinfo(np.int16).min or grid.max() > np.iinfo(
@@ -835,8 +996,8 @@ def _deduplicate_owner_grid(
         | (shifted[:, 1].astype(np.uint64) << np.uint64(16))
         | shifted[:, 2].astype(np.uint64)
     )
-    _, first = np.unique(keys, return_index=True)
-    return owners[first].astype(np.int32, copy=False), grid[first]
+    _, first, counts = np.unique(keys, return_index=True, return_counts=True)
+    return owners[first].astype(np.int32, copy=False), grid[first], counts
 
 
 def _process_conformer_precalculated(
@@ -895,16 +1056,7 @@ def _process_conformer_precalculated(
     snapped_cache_indices = _snap_cache_rotations(cache_rotations, precalculated)
 
     base_center = ring_coordinates.mean(axis=0)
-    base_plane = calc_plane(ring_coordinates)
     ring_centers = (base_center @ rotamer_matrices).astype(np.float32, copy=False)
-    ring_planes = base_plane @ rotamer_matrices
-    theta = np.arccos(
-        np.clip(
-            np.abs(np.einsum("ij,j->i", ring_planes, config.protein_plane)),
-            -1.0,
-            1.0,
-        )
-    ).astype(np.float32, copy=False)
 
     total_candidates = 0
     total_surviving = 0
@@ -927,46 +1079,26 @@ def _process_conformer_precalculated(
             - centers_batch[owners]
         )
         grid = np.round(pose_translations / GRID_SPACING).astype(np.int64)
-        owners, grid = _deduplicate_owner_grid(owners, grid)
+        owners, grid, counts = _deduplicate_owner_grid(owners, grid)
         if len(owners) == 0:
             continue
-        # Keep the direct reference implementation's float32 operation order;
-        # Gaussian threshold boundary rows are sensitive to reassociation here.
-        displacement_world = config.protein_center[None, :] - centers_batch
-        center_vec = (
-            grid.astype(np.float32) * GRID_SPACING
-            - displacement_world[owners]
+        capacity = _pose_cell_capacity(
+            grid,
+            config.protein_center[None, :] - centers_batch[owners],
+            precalculated,
         )
-        center_dis = np.linalg.norm(center_vec, axis=1)
-        nonzero = center_dis > 0.0
-        axial = np.abs(center_vec.dot(config.protein_plane))
-        cos_phi = np.zeros_like(center_dis, dtype=np.float32)
-        cos_phi[nonzero] = axial[nonzero] / center_dis[nonzero]
-        phi = np.arccos(np.clip(cos_phi, -1.0, 1.0))
-        features = np.column_stack(
-            (
-                center_dis.astype(np.float64, copy=False),
-                phi.astype(np.float64, copy=False),
-                theta[batch_start:batch_end][owners].astype(
-                    np.float64, copy=False
-                ),
-            )
-        )
-        keep = nonzero & (
-            _gaussian_scores(features) >= precalculated.gaussian_threshold
-        )
+        keep = counts >= config.min_cell_fraction * capacity
         if not np.any(keep):
             continue
-
-        kept_owners = owners[keep]
-        kept_grid = grid[keep].astype(np.int16, copy=False)
-        total_surviving += len(kept_owners)
+        owners = owners[keep]
+        grid = grid[keep]
+        total_surviving += len(owners)
         pose_writer.add_chunk(
-            np.full(len(kept_owners), conformer_index, dtype=np.uint16),
-            local_rotamer_indices[batch_start:batch_end][kept_owners].astype(
+            np.full(len(owners), conformer_index, dtype=np.uint16),
+            local_rotamer_indices[batch_start:batch_end][owners].astype(
                 np.uint16, copy=False
             ),
-            kept_grid,
+            grid.astype(np.int16, copy=False),
         )
     return total_candidates, total_surviving
 
@@ -1370,7 +1502,7 @@ def _run(args: argparse.Namespace) -> int:
                     "could not locate the canonical protein ring automatically: "
                     f"{protein_reference_path}; pass --anchor-reference-protein-ring"
                 )
-        print("[3/7] Loading precalculated Gaussian anchor filter...", file=sys.stderr)
+        print("[3/7] Loading precalculated anchor filter...", file=sys.stderr)
         precalculated_anchor = _load_precalculated_anchor(
             args.precalculated_anchor,
             args.precalculated_threshold,
@@ -1391,7 +1523,7 @@ def _run(args: argparse.Namespace) -> int:
     if precalculated_anchor is None:
         print("[5/7] Applying distance-vector filter...", file=sys.stderr)
     else:
-        print("[5/7] Applying final direct Gaussian filter...", file=sys.stderr)
+        print("[5/7] Collapsing cache candidates onto the pose grid...", file=sys.stderr)
     center_batch_size = (
         128
         if precalculated_anchor is not None
@@ -1451,7 +1583,7 @@ def _run(args: argparse.Namespace) -> int:
     )
     distance_pbar = tqdm(
         desc=(
-            "Offset-Gaussian filter"
+            "Offset-cache filter"
             if precalculated_anchor is not None
             else "Offset-distance filter"
         ),
