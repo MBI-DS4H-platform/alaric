@@ -13,6 +13,7 @@ from typing import Sequence
 
 import numpy as np
 from scipy.spatial.transform import Rotation
+from scipy.spatial import cKDTree
 from tqdm import tqdm
 
 from library import config
@@ -21,15 +22,46 @@ from parse_pdb import parse_pdb
 from poses import PoseWriter, discover_organized
 from rna_pdb import ppdb2nucseq
 from stack_geometry import (
-    RINGS,
     as_coordinates,
     calc_plane,
-    protein_ring_coordinates,
+    residue_ring_coordinates,
     residue_ring_atom_mask,
 )
 
 GRID_SPACING = sqrt(3) / 3
 LATERAL_SLOPE = 1.78966
+
+STACKING_MEAN = np.array([3.87095, 0.418246, 0.273519], dtype=np.float64)
+STACKING_COV = np.array(
+    [
+        [0.0940985, 0.0407767, 0.0290554],
+        [0.0407767, 0.0480912, 0.0176934],
+        [0.0290554, 0.0176934, 0.0356662],
+    ],
+    dtype=np.float64,
+)
+_STACKING_PRECISION = np.linalg.inv(STACKING_COV)
+_STACKING_NORM = (2 * np.pi) ** (3 / 2) * np.sqrt(np.linalg.det(STACKING_COV))
+GAUSSIAN_THRESHOLDS = {
+    "r90": 1.30 * _STACKING_NORM,
+    "r95": 0.88 * _STACKING_NORM,
+    "r99": 0.38 * _STACKING_NORM,
+}
+
+
+@dataclass(frozen=True)
+class _PrecalculatedAnchor:
+    rotations: np.ndarray
+    translations: np.ndarray
+    filtered_sizes: np.ndarray
+    filtered_offsets: np.ndarray
+    filtered_concat: np.ndarray
+    rotation_tree: cKDTree
+    rotation_tree_indices: np.ndarray
+    nucleotide_reference: np.ndarray
+    protein_reference_to_world: np.ndarray
+    translation_vectors_world: np.ndarray
+    gaussian_threshold: float
 
 
 @dataclass(frozen=True)
@@ -54,6 +86,7 @@ class _StackWorkConfig:
     center_batch_size: int
     offset_chunk_size: int
     writer_memory_lock: object | None
+    precalculated_anchor: _PrecalculatedAnchor | None = None
 
 
 @dataclass(frozen=True)
@@ -263,7 +296,265 @@ and the values in between are eliminated.""",
         metavar="PDB",
         help="One or more PDB codes to exclude from the fragment library.",
     )
+    parser.add_argument(
+        "--precalculated-anchor",
+        metavar="DIR",
+        help=(
+            "Use a ring-level precalculated Gaussian filter from DIR. DIR may "
+            "contain the arrays directly or contain r90/r95/r99 subdirectories."
+        ),
+    )
+    parser.add_argument(
+        "--precalculated-threshold",
+        choices=sorted(GAUSSIAN_THRESHOLDS),
+        help=(
+            "Gaussian cache threshold. Required unless it can be inferred from "
+            "the precalculation directory name."
+        ),
+    )
+    parser.add_argument(
+        "--anchor-reference-ring",
+        type=_existing_file,
+        metavar="FILE",
+        help="Canonical A/C nucleotide ring coordinates used to build the cache.",
+    )
+    parser.add_argument(
+        "--anchor-reference-protein-ring",
+        type=_existing_file,
+        metavar="FILE",
+        help=(
+            "Canonical protein ring coordinates. By default refe-RESNAME.npy is "
+            "loaded beside --anchor-reference-ring (TYR uses refe-PHE.npy)."
+        ),
+    )
     return parser
+
+
+def _read_compressed_npy(path: Path) -> np.ndarray:
+    try:
+        import zstandard as zstd
+    except ImportError as exc:
+        raise ImportError(f"zstandard is required to read {path}") from exc
+
+    with path.open("rb") as compressed:
+        with zstd.ZstdDecompressor().stream_reader(compressed) as reader:
+            version = np.lib.format.read_magic(reader)
+            if version == (1, 0):
+                shape, fortran_order, dtype = np.lib.format.read_array_header_1_0(
+                    reader
+                )
+            elif version in {(2, 0), (3, 0)}:
+                shape, fortran_order, dtype = np.lib.format.read_array_header_2_0(
+                    reader
+                )
+            else:
+                raise ValueError(f"unsupported .npy version {version} in {path}")
+            if dtype.hasobject:
+                raise ValueError(f"object arrays are not supported in {path}")
+            order = "F" if fortran_order else "C"
+            result = np.empty(shape, dtype=dtype, order=order)
+            flat = result.ravel(order=order)
+            target = memoryview(flat).cast("B")
+            position = 0
+            while position < len(target):
+                count = reader.readinto(target[position:])
+                if not count:
+                    raise ValueError(f"truncated compressed .npy array: {path}")
+                position += count
+            if reader.read(1):
+                raise ValueError(f"trailing data after compressed .npy array: {path}")
+            return result
+
+
+def _load_npy(path: Path) -> np.ndarray:
+    if path.name.endswith(".npy.zst"):
+        return _read_compressed_npy(path)
+    return np.load(path, allow_pickle=False)
+
+
+def _find_precalculated_array(directory: Path, name: str) -> Path:
+    for suffix in (".npy", ".npy.zst"):
+        candidate = directory / f"{name}{suffix}"
+        if candidate.is_file():
+            return candidate
+    raise ValueError(
+        f"missing {name}.npy or {name}.npy.zst in precalculation directory {directory}"
+    )
+
+
+def _resolve_precalculated_directory(
+    directory: str | Path,
+    threshold_name: str | None,
+) -> tuple[Path, str]:
+    directory = Path(directory)
+    if not directory.is_dir():
+        raise ValueError(f"precalculation directory does not exist: {directory}")
+
+    inferred = directory.name if directory.name in GAUSSIAN_THRESHOLDS else None
+    if threshold_name is None:
+        threshold_name = inferred
+    elif inferred is not None and inferred != threshold_name:
+        raise ValueError(
+            f"--precalculated-threshold {threshold_name} conflicts with directory {directory.name}"
+        )
+    if threshold_name is None:
+        raise ValueError(
+            "--precalculated-threshold is required when the cache directory name "
+            "is not r90, r95, or r99"
+        )
+    threshold_directory = directory / threshold_name
+    if threshold_directory.is_dir():
+        directory = threshold_directory
+    return directory, threshold_name
+
+
+def _load_reference_coordinates(path: str | Path) -> np.ndarray:
+    path = Path(path)
+    coordinates = _load_npy(path)
+    if coordinates.dtype.names is not None:
+        required = {"x", "y", "z"}
+        if not required.issubset(coordinates.dtype.names):
+            raise ValueError(f"structured reference array lacks x/y/z fields: {path}")
+        coordinates = as_coordinates(coordinates)
+    coordinates = np.asarray(coordinates, dtype=np.float64)
+    if coordinates.ndim != 2 or coordinates.shape[1] != 3:
+        raise ValueError(f"reference ring must have shape [N,3]: {path}")
+    if len(coordinates) < 3 or not np.all(np.isfinite(coordinates)):
+        raise ValueError(f"reference ring contains invalid coordinates: {path}")
+    return coordinates
+
+
+def _superimpose_rotation(source: np.ndarray, target: np.ndarray) -> np.ndarray:
+    """Return the row-vector rotation for centered source onto centered target."""
+    if source.shape != target.shape or source.ndim != 2 or source.shape[1] != 3:
+        raise ValueError(
+            f"rings to superimpose must have matching [N,3] shapes, got {source.shape} and {target.shape}"
+        )
+    source_centered = source - source.mean(axis=0)
+    target_centered = target - target.mean(axis=0)
+    if np.linalg.matrix_rank(source_centered, tol=1e-7) < 2:
+        raise ValueError("source ring coordinates are degenerate")
+    if np.linalg.matrix_rank(target_centered, tol=1e-7) < 2:
+        raise ValueError("target ring coordinates are degenerate")
+    v, _, wt = np.linalg.svd(source_centered.T @ target_centered)
+    if np.linalg.det(v) * np.linalg.det(wt) < 0:
+        v[:, -1] *= -1
+    return v @ wt
+
+
+def _protein_reference_name(resname: str) -> str:
+    return "PHE" if resname == "TYR" else resname
+
+
+def _validate_precalculated_arrays(
+    rotations: np.ndarray,
+    translations: np.ndarray,
+    filtered_sizes: np.ndarray,
+    filtered_concat: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    rotations = np.asarray(rotations)
+    rotations = _rotamers_to_matrices(rotations).astype(np.float64, copy=False)
+    if len(rotations) == 0:
+        raise ValueError("precalculated rotations must not be empty")
+    if not np.all(np.isfinite(rotations)):
+        raise ValueError("precalculated rotations contain non-finite values")
+    identity = np.eye(3)
+    if not np.allclose(np.swapaxes(rotations, 1, 2) @ rotations, identity, atol=1e-5):
+        raise ValueError("precalculated rotations are not orthonormal")
+    if not np.allclose(np.linalg.det(rotations), 1.0, atol=1e-5):
+        raise ValueError("precalculated rotations must have determinant +1")
+
+    translations = np.asarray(translations, dtype=np.float64)
+    if translations.ndim != 2 or translations.shape[1] != 3:
+        raise ValueError("precalculated translations must have shape [M,3]")
+    if len(translations) == 0:
+        raise ValueError("precalculated translations must not be empty")
+    if not np.all(np.isfinite(translations)):
+        raise ValueError("precalculated translations contain non-finite values")
+
+    filtered_sizes = np.asarray(filtered_sizes)
+    if filtered_sizes.ndim != 1 or len(filtered_sizes) != len(rotations):
+        raise ValueError("filtered-sizes must be a 1D array with one count per rotation")
+    if not np.issubdtype(filtered_sizes.dtype, np.integer):
+        raise ValueError("filtered-sizes must contain integers")
+    filtered_sizes = filtered_sizes.astype(np.int64, copy=False)
+    if filtered_sizes.size and filtered_sizes.min() < 0:
+        raise ValueError("filtered-sizes contains a negative count")
+
+    filtered_concat = np.asarray(filtered_concat)
+    if filtered_concat.ndim != 1 or not np.issubdtype(
+        filtered_concat.dtype, np.integer
+    ):
+        raise ValueError("filtered-concat must be a 1D integer array")
+    filtered_concat = filtered_concat.astype(np.int64, copy=False)
+    expected = int(filtered_sizes.sum(dtype=np.int64))
+    if expected != len(filtered_concat):
+        raise ValueError(
+            f"sum(filtered-sizes)={expected} does not equal len(filtered-concat)={len(filtered_concat)}"
+        )
+    if filtered_concat.size and (
+        filtered_concat.min() < 0 or filtered_concat.max() >= len(translations)
+    ):
+        raise ValueError("filtered-concat contains an out-of-range translation index")
+    offsets = np.empty(len(filtered_sizes) + 1, dtype=np.int64)
+    offsets[0] = 0
+    np.cumsum(filtered_sizes, out=offsets[1:])
+    return rotations, translations, filtered_sizes, offsets, filtered_concat
+
+
+def _build_rotation_tree(rotations: np.ndarray) -> tuple[cKDTree, np.ndarray]:
+    quaternions = Rotation.from_matrix(rotations).as_quat()
+    doubled = np.concatenate((quaternions, -quaternions), axis=0)
+    indices = np.tile(np.arange(len(rotations), dtype=np.int32), 2)
+    return cKDTree(doubled), indices
+
+
+def _load_precalculated_anchor(
+    directory: str | Path,
+    threshold_name: str | None,
+    nucleotide_reference_path: str | Path,
+    protein_reference_path: str | Path,
+    protein_ring: np.ndarray,
+) -> _PrecalculatedAnchor:
+    directory, threshold_name = _resolve_precalculated_directory(
+        directory, threshold_name
+    )
+    arrays = {
+        name: _load_npy(_find_precalculated_array(directory, name))
+        for name in (
+            "rotations",
+            "translations",
+            "filtered-sizes",
+            "filtered-concat",
+        )
+    }
+    rotations, translations, sizes, offsets, concat = (
+        _validate_precalculated_arrays(
+            arrays["rotations"],
+            arrays["translations"],
+            arrays["filtered-sizes"],
+            arrays["filtered-concat"],
+        )
+    )
+    nucleotide_reference = _load_reference_coordinates(nucleotide_reference_path)
+    protein_reference = _load_reference_coordinates(protein_reference_path)
+    protein_reference_to_world = _superimpose_rotation(
+        protein_reference, protein_ring
+    )
+    rotation_tree, rotation_tree_indices = _build_rotation_tree(rotations)
+    return _PrecalculatedAnchor(
+        rotations=rotations,
+        translations=translations,
+        filtered_sizes=sizes,
+        filtered_offsets=offsets,
+        filtered_concat=concat,
+        rotation_tree=rotation_tree,
+        rotation_tree_indices=rotation_tree_indices,
+        nucleotide_reference=nucleotide_reference,
+        protein_reference_to_world=protein_reference_to_world,
+        translation_vectors_world=translations @ protein_reference_to_world,
+        gaussian_threshold=GAUSSIAN_THRESHOLDS[threshold_name],
+    )
 
 
 def _calc_planes(coordinates: np.ndarray) -> np.ndarray:
@@ -450,12 +741,248 @@ def _build_reverse_table(reverse_map: dict) -> np.ndarray:
     return reverse_table
 
 
+def _gaussian_scores(features: np.ndarray) -> np.ndarray:
+    delta = features.astype(np.float64, copy=False) - STACKING_MEAN[None, :]
+    exponent = np.einsum("ij,jk,ik->i", delta, _STACKING_PRECISION, delta)
+    return np.exp(-0.5 * exponent)
+
+
+def _snap_cache_rotations(
+    rotations: np.ndarray,
+    precalculated: _PrecalculatedAnchor,
+) -> np.ndarray:
+    quaternions = Rotation.from_matrix(rotations).as_quat()
+    # A cache contains only rotations that have at least one accepted translation.
+    # Near that retained-set boundary, the single nearest SO(3) sample need not be
+    # conservative for a correlated Gaussian.  Union a small nearest-neighbour
+    # stencil; the final direct Gaussian evaluation remains authoritative.
+    neighbour_count = min(16, len(precalculated.rotations))
+    _, tree_indices = precalculated.rotation_tree.query(
+        quaternions, k=neighbour_count
+    )
+    tree_indices = np.asarray(tree_indices, dtype=np.int64)
+    if tree_indices.ndim == 1:
+        tree_indices = tree_indices[:, None]
+    return precalculated.rotation_tree_indices[
+        tree_indices
+    ]
+
+
+def _translation_segments(
+    cache_rotation_indices: np.ndarray,
+    precalculated: _PrecalculatedAnchor,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Expand cache segments once per unique lookup rotation in this batch."""
+    cache_rotation_indices = np.asarray(cache_rotation_indices)
+    if cache_rotation_indices.ndim == 1:
+        cache_rotation_indices = cache_rotation_indices[:, None]
+
+    segment_by_rotation: dict[int, np.ndarray] = {}
+    for cache_index in np.unique(cache_rotation_indices):
+        start = int(precalculated.filtered_offsets[cache_index])
+        end = int(precalculated.filtered_offsets[cache_index + 1])
+        segment_by_rotation[int(cache_index)] = precalculated.filtered_concat[
+            start:end
+        ]
+
+    segment_by_stencil: dict[tuple[int, ...], np.ndarray] = {}
+    segments: list[np.ndarray] = []
+    for stencil in cache_rotation_indices:
+        key = tuple(int(x) for x in np.unique(stencil))
+        segment = segment_by_stencil.get(key)
+        if segment is None:
+            parts = [segment_by_rotation[index] for index in key]
+            if not parts:
+                segment = np.empty(0, dtype=np.int64)
+            elif len(parts) == 1:
+                segment = parts[0]
+            else:
+                segment = np.unique(np.concatenate(parts))
+            segment_by_stencil[key] = segment
+        segments.append(segment)
+
+    sizes = np.fromiter(
+        (len(segment) for segment in segments),
+        dtype=np.int64,
+        count=len(segments),
+    )
+    if not np.any(sizes):
+        return np.empty(0, dtype=np.int32), np.empty(0, dtype=np.int64)
+    owners = np.repeat(np.arange(len(segments), dtype=np.int32), sizes)
+    translation_indices = np.concatenate(
+        [segment for segment in segments if len(segment)]
+    )
+    return owners, translation_indices
+
+
+def _deduplicate_owner_grid(
+    owners: np.ndarray,
+    grid: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    if len(owners) == 0:
+        return owners, grid
+    if owners.min() < 0 or owners.max() > np.iinfo(np.uint16).max:
+        raise ValueError("candidate owner index exceeds uint16 range")
+    if grid.min() < np.iinfo(np.int16).min or grid.max() > np.iinfo(
+        np.int16
+    ).max:
+        raise ValueError("precalculated translations exceed the int16 pose grid")
+
+    shifted = grid.astype(np.int64, copy=False) - np.iinfo(np.int16).min
+    keys = (
+        (owners.astype(np.uint64) << np.uint64(48))
+        | (shifted[:, 0].astype(np.uint64) << np.uint64(32))
+        | (shifted[:, 1].astype(np.uint64) << np.uint64(16))
+        | shifted[:, 2].astype(np.uint64)
+    )
+    _, first = np.unique(keys, return_index=True)
+    return owners[first].astype(np.int32, copy=False), grid[first]
+
+
+def _process_conformer_precalculated(
+    conformer_index: int,
+    config: _StackWorkConfig,
+    pose_writer: PoseWriter,
+) -> tuple[int, int]:
+    precalculated = config.precalculated_anchor
+    if precalculated is None:
+        raise RuntimeError("precalculated anchor configuration is missing")
+
+    ring_coordinates = config.coordinates[conformer_index, config.ring_mask]
+    if ring_coordinates.shape != precalculated.nucleotide_reference.shape:
+        raise ValueError(
+            "selected nucleotide ring and --anchor-reference-ring have different "
+            f"shapes: {ring_coordinates.shape} versus {precalculated.nucleotide_reference.shape}"
+        )
+
+    rotamer_end = int(config.rotaconformers_index[conformer_index])
+    rotamer_start = (
+        0
+        if conformer_index == 0
+        else int(config.rotaconformers_index[conformer_index - 1])
+    )
+    rotamer_count = rotamer_end - rotamer_start
+    if rotamer_count <= 0:
+        return 0, 0
+    if config.selected_rotamer_positions is None:
+        local_rotamer_indices = np.arange(rotamer_count, dtype=np.int64)
+        rotamer_block = config.rotaconformers[rotamer_start:rotamer_end]
+    else:
+        local_rotamer_indices = config.selected_rotamer_positions.astype(
+            np.int64, copy=False
+        )
+        rotamer_block = config.rotaconformers[rotamer_start + local_rotamer_indices]
+    if len(local_rotamer_indices) and local_rotamer_indices.max() > np.iinfo(
+        np.uint16
+    ).max:
+        raise ValueError(
+            "Rotamer index exceeds uint16 range; use --rotamer-range to constrain per-conformer rotamers"
+        )
+    if conformer_index > np.iinfo(np.uint16).max:
+        raise ValueError("Conformer index exceeds uint16 range")
+
+    rotamer_matrices = _rotamers_to_matrices(rotamer_block)
+    conformer_to_reference = _superimpose_rotation(
+        ring_coordinates, precalculated.nucleotide_reference
+    )
+    world_to_protein_reference = precalculated.protein_reference_to_world.T
+    cache_rotations = np.einsum(
+        "ij,njk,kl->nil",
+        conformer_to_reference.T,
+        rotamer_matrices,
+        world_to_protein_reference,
+    )
+    snapped_cache_indices = _snap_cache_rotations(cache_rotations, precalculated)
+
+    base_center = ring_coordinates.mean(axis=0)
+    base_plane = calc_plane(ring_coordinates)
+    ring_centers = (base_center @ rotamer_matrices).astype(np.float32, copy=False)
+    ring_planes = base_plane @ rotamer_matrices
+    theta = np.arccos(
+        np.clip(
+            np.abs(np.einsum("ij,j->i", ring_planes, config.protein_plane)),
+            -1.0,
+            1.0,
+        )
+    ).astype(np.float32, copy=False)
+
+    total_candidates = 0
+    total_surviving = 0
+    for batch_start in range(0, len(local_rotamer_indices), config.center_batch_size):
+        batch_end = min(
+            batch_start + config.center_batch_size, len(local_rotamer_indices)
+        )
+        batch_cache_indices = snapped_cache_indices[batch_start:batch_end]
+        owners, translation_indices = _translation_segments(
+            batch_cache_indices, precalculated
+        )
+        if len(owners) == 0:
+            continue
+        total_candidates += len(owners)
+
+        centers_batch = ring_centers[batch_start:batch_end]
+        pose_translations = (
+            config.protein_center[None, :]
+            + precalculated.translation_vectors_world[translation_indices]
+            - centers_batch[owners]
+        )
+        grid = np.round(pose_translations / GRID_SPACING).astype(np.int64)
+        owners, grid = _deduplicate_owner_grid(owners, grid)
+        if len(owners) == 0:
+            continue
+        # Keep the direct reference implementation's float32 operation order;
+        # Gaussian threshold boundary rows are sensitive to reassociation here.
+        displacement_world = config.protein_center[None, :] - centers_batch
+        center_vec = (
+            grid.astype(np.float32) * GRID_SPACING
+            - displacement_world[owners]
+        )
+        center_dis = np.linalg.norm(center_vec, axis=1)
+        nonzero = center_dis > 0.0
+        axial = np.abs(center_vec.dot(config.protein_plane))
+        cos_phi = np.zeros_like(center_dis, dtype=np.float32)
+        cos_phi[nonzero] = axial[nonzero] / center_dis[nonzero]
+        phi = np.arccos(np.clip(cos_phi, -1.0, 1.0))
+        features = np.column_stack(
+            (
+                center_dis.astype(np.float64, copy=False),
+                phi.astype(np.float64, copy=False),
+                theta[batch_start:batch_end][owners].astype(
+                    np.float64, copy=False
+                ),
+            )
+        )
+        keep = nonzero & (
+            _gaussian_scores(features) >= precalculated.gaussian_threshold
+        )
+        if not np.any(keep):
+            continue
+
+        kept_owners = owners[keep]
+        kept_grid = grid[keep].astype(np.int16, copy=False)
+        total_surviving += len(kept_owners)
+        pose_writer.add_chunk(
+            np.full(len(kept_owners), conformer_index, dtype=np.uint16),
+            local_rotamer_indices[batch_start:batch_end][kept_owners].astype(
+                np.uint16, copy=False
+            ),
+            kept_grid,
+        )
+    return total_candidates, total_surviving
+
+
 def _process_conformer(
     conformer_index: int,
     config: _StackWorkConfig,
     pose_writer: PoseWriter,
     reverse_table: np.ndarray | None,
 ) -> tuple[int, int, np.ndarray | None]:
+    if config.precalculated_anchor is not None:
+        candidates, surviving = _process_conformer_precalculated(
+            conformer_index, config, pose_writer
+        )
+        return candidates, surviving, reverse_table
+
     total_candidates = 0
     total_surviving = 0
 
@@ -759,6 +1286,21 @@ def _run(args: argparse.Namespace) -> int:
         raise ValueError("--poselock must be positive when set")
     if args.poselock is not None and args.poselock > args.nprocs:
         raise ValueError("--poselock must be smaller than or equal to --nprocs")
+    if args.precalculated_anchor is None:
+        if args.precalculated_threshold is not None:
+            raise ValueError(
+                "--precalculated-threshold requires --precalculated-anchor"
+            )
+        if args.anchor_reference_ring is not None:
+            raise ValueError("--anchor-reference-ring requires --precalculated-anchor")
+        if args.anchor_reference_protein_ring is not None:
+            raise ValueError(
+                "--anchor-reference-protein-ring requires --precalculated-anchor"
+            )
+    elif args.anchor_reference_ring is None:
+        raise ValueError(
+            "--anchor-reference-ring is required with --precalculated-anchor"
+        )
 
     output_dir = Path(args.output)
     if discover_organized(output_dir):
@@ -772,7 +1314,16 @@ def _run(args: argparse.Namespace) -> int:
     if np.any(protein_atoms["model"] == 1):
         protein_atoms = protein_atoms[protein_atoms["model"] == 1]
 
-    protein_ring = protein_ring_coordinates(protein_atoms, args.resid)
+    protein_ring, protein_resname = residue_ring_coordinates(
+        protein_atoms,
+        args.resid,
+        structure_label="protein",
+    )
+    supported_protein_rings = {"PHE", "TYR", "HIS", "ARG", "TRP"}
+    if protein_resname not in supported_protein_rings:
+        raise ValueError(
+            f"Residue {args.resid} ({protein_resname}) is not an aromatic supported protein ring"
+        )
     protein_center = protein_ring.mean(axis=0)
     protein_plane = calc_plane(protein_ring)
     protein_x = protein_ring[0] - protein_center
@@ -805,9 +1356,47 @@ def _run(args: argparse.Namespace) -> int:
         rotaconformers_index,
     )
 
+    precalculated_anchor = None
+    if args.precalculated_anchor is not None:
+        protein_reference_path = args.anchor_reference_protein_ring
+        if protein_reference_path is None:
+            reference_name = _protein_reference_name(protein_resname)
+            protein_reference_path = str(
+                Path(args.anchor_reference_ring).parent
+                / f"refe-{reference_name}.npy"
+            )
+            if not Path(protein_reference_path).is_file():
+                raise ValueError(
+                    "could not locate the canonical protein ring automatically: "
+                    f"{protein_reference_path}; pass --anchor-reference-protein-ring"
+                )
+        print("[3/7] Loading precalculated Gaussian anchor filter...", file=sys.stderr)
+        precalculated_anchor = _load_precalculated_anchor(
+            args.precalculated_anchor,
+            args.precalculated_threshold,
+            args.anchor_reference_ring,
+            protein_reference_path,
+            protein_ring,
+        )
+        selected_base = args.sequence[0 if args.first else 1]
+        expected_ring_size = 9 if selected_base in {"A", "G"} else 6
+        if len(precalculated_anchor.nucleotide_reference) != expected_ring_size:
+            canonical = "A/purine" if expected_ring_size == 9 else "C/pyrimidine"
+            raise ValueError(
+                f"selected base {selected_base} requires the {canonical} reference "
+                f"with {expected_ring_size} ring atoms, got {len(precalculated_anchor.nucleotide_reference)}"
+            )
+
     print("[4/7] Generating offset candidates...", file=sys.stderr)
-    print("[5/7] Applying distance-vector filter...", file=sys.stderr)
-    center_batch_size = 512 if args.rotamer_range is not None else 256
+    if precalculated_anchor is None:
+        print("[5/7] Applying distance-vector filter...", file=sys.stderr)
+    else:
+        print("[5/7] Applying final direct Gaussian filter...", file=sys.stderr)
+    center_batch_size = (
+        128
+        if precalculated_anchor is not None
+        else (512 if args.rotamer_range is not None else 256)
+    )
     offset_chunk_size = 2_000_000
     total_candidates = 0
     total_surviving = 0
@@ -847,15 +1436,28 @@ def _run(args: argparse.Namespace) -> int:
         center_batch_size=center_batch_size,
         offset_chunk_size=offset_chunk_size,
         writer_memory_lock=writer_memory_lock,
+        precalculated_anchor=precalculated_anchor,
     )
 
     conformer_pbar = tqdm(
         total=len(selected_conformers),
-        desc="Conformer-angle filter",
+        desc=(
+            "Conformer-cache filter"
+            if precalculated_anchor is not None
+            else "Conformer-angle filter"
+        ),
         unit="conf",
         mininterval=2.0,
     )
-    distance_pbar = tqdm(desc="Offset-distance filter", unit="cand", mininterval=2.0)
+    distance_pbar = tqdm(
+        desc=(
+            "Offset-Gaussian filter"
+            if precalculated_anchor is not None
+            else "Offset-distance filter"
+        ),
+        unit="cand",
+        mininterval=2.0,
+    )
     writer_pbar = None
     writer_started = [False]
     try:
