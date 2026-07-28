@@ -25,12 +25,12 @@ anchor_opts=(
   --protein {{ protein_path }} \
   --resid {{ resid }} \
   --sequence {{ sequence }} \
-  --dihedral {{ dihedral_args }} \
-  --angle {{ angle }} \
+  {{ angle_dihedral_args }} \
   --margin {{ margin }} \
   {{ nucleotide_flag }} \
   --output {{ output_path }} \
   {{ exclude_args }} \
+  {{ precalculated_args }} \
   --bucket-size 16 \
   --conformer-range "$FIRST" "$LAST" \
   --unorganized-subdirs \

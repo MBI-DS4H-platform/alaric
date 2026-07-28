@@ -23,11 +23,17 @@ For merging actions, there is the following validation: both inputs must have th
 fragment: 5 or auto (read from dirname "frag5-X")
 sequence: UU or auto (read sequence from ../DATA/sequence.txt or ../DATA/reference.pdb)
 exclude: 1b7f or auto (read from ../DATA/pdbcode.txt)
-protein: 1b7f or auto . In both cases, read from ../DATA, either 1b7f-aa.pdb or protein-aa.pdb for auto 
+protein: 1b7f or auto . In both cases, read from ../DATA, either 1b7f-aa.pdb or protein-aa.pdb for auto
 resid: 123
 nucleotide: first or second
-dihedral: 45 -45  , or auto (read from ../DATA/anchor.yaml)
-angle: 30, or auto (read from ../DATA/anchor.yaml)
+
+Either provide angle+dihedral (for brute-force anchoring), or precomputed_filter_name+precomputed_filter_threshold (for ring-level precalculation):
+
+dihedral: 45 -45  , or auto (read from ../DATA/anchor.yaml) [omit if using precomputed filters]
+angle: 30, or auto (read from ../DATA/anchor.yaml) [omit if using precomputed filters]
+
+precomputed_filter_name: gaussian [optional; must be paired with precomputed_filter_threshold]
+precomputed_filter_threshold: r90 or r95 or r99 [optional; loads from ./precomputed-filters/<name>/<threshold>/*.npy.zst]
 
 ## anchor-refe
 

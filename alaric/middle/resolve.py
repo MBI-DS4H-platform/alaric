@@ -164,6 +164,37 @@ def _pair_thresholds(project: Project, source_fragment: int, target_fragment: in
     raise ResolveError(f"constraints.json has no pair thresholds for {down}->{up}")
 
 
+def _resolve_precomputed_filter_directory(project: Project, filter_name: str, threshold: str) -> Path:
+    """Resolve precomputed filter name and threshold to the actual directory path."""
+    # Assume precomputed-filters is a sibling of the project or in the alaric repo
+    candidate_paths = [
+        project.root / "precomputed-filters" / filter_name / threshold,
+        Path(__file__).resolve().parents[2] / "precomputed-filters" / filter_name / threshold,
+    ]
+    for path in candidate_paths:
+        if path.is_dir():
+            return path
+    raise ResolveError(
+        f"cannot locate precomputed filter directory for {filter_name}/{threshold}; "
+        f"tried: {', '.join(str(p) for p in candidate_paths)}"
+    )
+
+
+def _resolve_ring_reference_file(alaric_root: Path, ring_type: str, ring_code: str) -> Path:
+    """Resolve ring reference file (.npy) for a given ring type and code."""
+    candidate_paths = [
+        alaric_root / "ring-refe" / f"refe-{ring_code}.npy",
+        Path(__file__).resolve().parents[2] / "ring-refe" / f"refe-{ring_code}.npy",
+    ]
+    for path in candidate_paths:
+        if path.is_file():
+            return path
+    raise ResolveError(
+        f"cannot locate {ring_type} ring reference file for {ring_code}; "
+        f"tried: {', '.join(str(p) for p in candidate_paths)}"
+    )
+
+
 def resolve_action(
     project: Project,
     spec: ActionSpec,
@@ -193,10 +224,28 @@ def resolve_action(
         p["__protein"] = path.name
         files["protein"] = path
     if action in {"anchor", "anchor-test"}:
-        if p.get("dihedral") == "auto" or "dihedral" not in p:
-            p["dihedral"] = _read_anchor_yaml(project, "dihedral")
-        if p.get("angle") == "auto" or "angle" not in p:
-            p["angle"] = _read_anchor_yaml(project, "angle")
+        # Handle precomputed filter parameters: both must be present or both must be absent
+        has_filter_name = "precomputed_filter_name" in p
+        has_filter_threshold = "precomputed_filter_threshold" in p
+        if has_filter_name != has_filter_threshold:
+            raise ResolveError(
+                "precomputed_filter_name and precomputed_filter_threshold must both be present or both absent"
+            )
+        if has_filter_name and has_filter_threshold:
+            filter_name = str(p["precomputed_filter_name"])
+            threshold = str(p["precomputed_filter_threshold"])
+            filter_dir = _resolve_precomputed_filter_directory(project, filter_name, threshold)
+            p["__precomputed_filter_dir"] = str(filter_dir)
+            # Reference files for the nucleotide (always A for dinucleotide base pair)
+            nuc_ref = _resolve_ring_reference_file(project.root, "nucleotide", "A")
+            p["__anchor_reference_ring"] = nuc_ref.name
+            files["anchor_reference_ring"] = nuc_ref
+        else:
+            # Without precomputed filters, angle and dihedral are required
+            if p.get("dihedral") == "auto" or "dihedral" not in p:
+                p["dihedral"] = _read_anchor_yaml(project, "dihedral")
+            if p.get("angle") == "auto" or "angle" not in p:
+                p["angle"] = _read_anchor_yaml(project, "angle")
     if action in {"grow", "grow-test"}:
         p["direction"] = resolve_direction(p["direction"], spec.name)
         dep = resolved_by_name.get(str(p["input"]))

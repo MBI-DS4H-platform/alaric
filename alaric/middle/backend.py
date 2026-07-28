@@ -139,14 +139,27 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
         "output_path_python": python_path(output_dir),
     }
     if action.action in {"anchor", "anchor-test"}:
-        dihedral = p["dihedral"]
+        precalc_args = ""
+        angle_dihedral_args = ""
+        if p.get("__precomputed_filter_dir"):
+            precalc_dir = p["__precomputed_filter_dir"]
+            if location == "remote":
+                # On remote, precomputed filter directory is available from ALARIC_REMOTE_ALARIC_DIR
+                # or needs to be staged; for now assume it's relative to alaric repo
+                precalc_dir = f"${{ALARIC_REMOTE_ALARIC_DIR:?}}/../precomputed-filters/{p['precomputed_filter_name']}/{p['precomputed_filter_threshold']}"
+            ref_ring = data_file_path(p["__anchor_reference_ring"], location)
+            precalc_args = f"--precalculated-anchor {shell_path(precalc_dir)} --anchor-reference-ring {ref_ring}"
+        else:
+            # Without precomputed filters, angle and dihedral are required
+            dihedral = p["dihedral"]
+            dihedral_str = dihedral if isinstance(dihedral, str) else " ".join(q(v) for v in dihedral)
+            angle_dihedral_args = f"--dihedral {dihedral_str} --angle {q(p['angle'])}"
         context.update(
             {
                 "protein_path": data_file_path(p["__protein"], location),
                 "resid": q(p["resid"]),
                 "sequence": q(p["sequence"]),
-                "dihedral_args": dihedral if isinstance(dihedral, str) else " ".join(q(v) for v in dihedral),
-                "angle": q(p["angle"]),
+                "angle_dihedral_args": angle_dihedral_args,
                 "margin": q(p.get("margin", 0.5)),
                 "nucleotide_flag": "--first" if p["nucleotide"] == "first" else "--second",
                 "nconformers": q(p.get("nconformers", "")),
@@ -154,6 +167,7 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
                 "conformer_range_args": conformer_range_args(p) if action.action == "anchor-test" else "",
                 "exclude_args": exclude_args(p.get("exclude", [])),
                 "exclude_python": repr(p.get("exclude", [])),
+                "precalculated_args": precalc_args,
                 "organize_command": organize_command(alaric_dir, output_dir, location),
             }
         )
