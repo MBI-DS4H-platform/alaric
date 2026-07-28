@@ -194,8 +194,8 @@ and the values in between are eliminated.""",
     parser.add_argument(
         "--angle",
         type=float,
-        required=True,
-        help="Maximum stacking angle (in degrees).",
+        required=False,
+        help="Maximum stacking angle (in degrees). Required unless --precalculated-anchor is used.",
     )
     parser.add_argument(
         "--margin",
@@ -1429,6 +1429,10 @@ def _run(args: argparse.Namespace) -> int:
             raise ValueError(
                 "--anchor-reference-protein-ring requires --precalculated-anchor"
             )
+        if args.angle is None:
+            raise ValueError("--angle is required without --precalculated-anchor")
+        if args.dihedral is None:
+            raise ValueError("--dihedral is required without --precalculated-anchor")
     elif args.anchor_reference_ring is None:
         raise ValueError(
             "--anchor-reference-ring is required with --precalculated-anchor"

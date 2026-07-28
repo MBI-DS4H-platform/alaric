@@ -144,13 +144,19 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
         if p.get("__precomputed_filter_dir"):
             precalc_dir = p["__precomputed_filter_dir"]
             if location == "remote":
-                # On remote, precomputed filter directory and reference ring are in alaric repo
+                # On remote, precomputed filter directory and reference rings are in alaric repo
                 precalc_dir = f"${{ALARIC_REMOTE_ALARIC_DIR:?}}/../precomputed-filters/{p['precomputed_filter_name']}/{p['precomputed_filter_threshold']}"
                 ref_ring = f"${{ALARIC_REMOTE_ALARIC_DIR:?}}/../ring-refe/{p['__anchor_reference_ring']}"
+                protein_ref_ring = f"${{ALARIC_REMOTE_ALARIC_DIR:?}}/../ring-refe/{p['__anchor_reference_protein_ring']}"
             else:
-                # On local, reference ring is in ALARIC_DIR/../ring-refe/
+                # On local, reference rings are in ALARIC_DIR/../ring-refe/
                 ref_ring = f"${{ALARIC_DIR:?}}/../ring-refe/{p['__anchor_reference_ring']}"
-            precalc_args = f"--precalculated-anchor {shell_path(precalc_dir)} --anchor-reference-ring {ref_ring}"
+                protein_ref_ring = f"${{ALARIC_DIR:?}}/../ring-refe/{p['__anchor_reference_protein_ring']}"
+            precalc_args = (
+                f"--precalculated-anchor {shell_path(precalc_dir)} "
+                f"--anchor-reference-ring {ref_ring} "
+                f"--anchor-reference-protein-ring {protein_ref_ring}"
+            )
         else:
             # Without precomputed filters, angle and dihedral are required
             dihedral = p["dihedral"]

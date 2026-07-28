@@ -180,6 +180,22 @@ def _resolve_precomputed_filter_directory(project: Project, filter_name: str, th
     )
 
 
+def _protein_residue_from_pdb(pdb_path: Path, resid: int) -> str:
+    """Extract protein residue name from PDB file at given residue ID."""
+    for line in pdb_path.read_text(errors="replace").splitlines():
+        if not line.startswith(("ATOM", "HETATM")):
+            continue
+        resname = line[17:20].strip().upper()
+        resid_text = line[22:26].strip()
+        try:
+            file_resid = int(resid_text)
+        except ValueError:
+            continue
+        if file_resid == resid:
+            return resname
+    raise ResolveError(f"residue {resid} not found in {pdb_path}")
+
+
 def _nucleotide_to_ring_code(nucleotide: str) -> str:
     """Map nucleotide to ring reference code (A for purines, C for pyrimidines)."""
     nuc = nucleotide.upper()
@@ -259,6 +275,17 @@ def resolve_action(
             # Validate that reference file exists; will be referenced from ALARIC_DIR/../ring-refe/
             _resolve_ring_reference_file(project.root, ring_code)
             p["__anchor_reference_ring"] = f"refe-{ring_code}.npy"
+
+            # Resolve protein ring reference based on residue type
+            protein_path = files.get("protein")
+            if protein_path is None:
+                # If protein wasn't resolved yet (shouldn't happen), derive it
+                _, protein_path = resolve_protein(project, p.get("protein", "auto"), all_atom=False)
+            resid = int(p["resid"])
+            protein_resname = _protein_residue_from_pdb(protein_path, resid)
+            # Validate that reference file exists
+            _resolve_ring_reference_file(project.root, protein_resname)
+            p["__anchor_reference_protein_ring"] = f"refe-{protein_resname}.npy"
         else:
             # Without precomputed filters, angle and dihedral are required
             if p.get("dihedral") == "auto" or "dihedral" not in p:
