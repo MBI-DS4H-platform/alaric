@@ -180,8 +180,21 @@ def _resolve_precomputed_filter_directory(project: Project, filter_name: str, th
     )
 
 
-def _resolve_ring_reference_file(alaric_root: Path, ring_type: str, ring_code: str) -> Path:
-    """Resolve ring reference file (.npy) for a given ring type and code."""
+def _nucleotide_to_ring_code(nucleotide: str) -> str:
+    """Map nucleotide to ring reference code (A for purines, C for pyrimidines)."""
+    nuc = nucleotide.upper()
+    # Purines: A, G -> refe-A.npy
+    # Pyrimidines: C, U -> refe-C.npy
+    if nuc in {"A", "G"}:
+        return "A"
+    elif nuc in {"C", "U"}:
+        return "C"
+    else:
+        raise ResolveError(f"unsupported nucleotide: {nucleotide}")
+
+
+def _resolve_ring_reference_file(alaric_root: Path, ring_code: str) -> Path:
+    """Resolve ring reference file (.npy) for a given ring code."""
     candidate_paths = [
         alaric_root / "ring-refe" / f"refe-{ring_code}.npy",
         Path(__file__).resolve().parents[2] / "ring-refe" / f"refe-{ring_code}.npy",
@@ -190,7 +203,7 @@ def _resolve_ring_reference_file(alaric_root: Path, ring_type: str, ring_code: s
         if path.is_file():
             return path
     raise ResolveError(
-        f"cannot locate {ring_type} ring reference file for {ring_code}; "
+        f"cannot locate ring reference file for {ring_code}; "
         f"tried: {', '.join(str(p) for p in candidate_paths)}"
     )
 
@@ -236,10 +249,16 @@ def resolve_action(
             threshold = str(p["precomputed_filter_threshold"])
             filter_dir = _resolve_precomputed_filter_directory(project, filter_name, threshold)
             p["__precomputed_filter_dir"] = str(filter_dir)
-            # Reference files for the nucleotide (always A for dinucleotide base pair)
-            nuc_ref = _resolve_ring_reference_file(project.root, "nucleotide", "A")
-            p["__anchor_reference_ring"] = nuc_ref.name
-            files["anchor_reference_ring"] = nuc_ref
+            # Reference file depends on which nucleotide (first or second) in the sequence
+            sequence = str(p["sequence"]).upper()
+            nucleotide_idx = 0 if p["nucleotide"] == "first" else 1
+            if nucleotide_idx >= len(sequence):
+                raise ResolveError(f"sequence {sequence} too short for nucleotide:{p['nucleotide']}")
+            nucleotide = sequence[nucleotide_idx]
+            ring_code = _nucleotide_to_ring_code(nucleotide)
+            # Validate that reference file exists; will be referenced from ALARIC_DIR/../ring-refe/
+            _resolve_ring_reference_file(project.root, ring_code)
+            p["__anchor_reference_ring"] = f"refe-{ring_code}.npy"
         else:
             # Without precomputed filters, angle and dihedral are required
             if p.get("dihedral") == "auto" or "dihedral" not in p:

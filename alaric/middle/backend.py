@@ -144,10 +144,12 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
         if p.get("__precomputed_filter_dir"):
             precalc_dir = p["__precomputed_filter_dir"]
             if location == "remote":
-                # On remote, precomputed filter directory is available from ALARIC_REMOTE_ALARIC_DIR
-                # or needs to be staged; for now assume it's relative to alaric repo
+                # On remote, precomputed filter directory and reference ring are in alaric repo
                 precalc_dir = f"${{ALARIC_REMOTE_ALARIC_DIR:?}}/../precomputed-filters/{p['precomputed_filter_name']}/{p['precomputed_filter_threshold']}"
-            ref_ring = data_file_path(p["__anchor_reference_ring"], location)
+                ref_ring = f"${{ALARIC_REMOTE_ALARIC_DIR:?}}/../ring-refe/{p['__anchor_reference_ring']}"
+            else:
+                # On local, reference ring is in ALARIC_DIR/../ring-refe/
+                ref_ring = f"${{ALARIC_DIR:?}}/../ring-refe/{p['__anchor_reference_ring']}"
             precalc_args = f"--precalculated-anchor {shell_path(precalc_dir)} --anchor-reference-ring {ref_ring}"
         else:
             # Without precomputed filters, angle and dihedral are required
