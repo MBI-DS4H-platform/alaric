@@ -185,14 +185,6 @@ that are valid from the remote machine.
 In a fresh shell:
 
 ```bash
-source ~/miniforge3/etc/profile.d/conda.sh
 conda activate alaric
-python -c "import alaric; import forcefields; from alaric import library; library.config(verify_checksums=False); print('alaric installation OK')"
 alaric-chain --help
-```
-
-If you use remote execution, also verify SSH access and the remote installation:
-
-```bash
-ssh "$ALARIC_REMOTE_HOST" 'source ~/miniforge3/etc/profile.d/conda.sh && conda activate alaric && python -c "import alaric; import forcefields; from alaric import library; library.config(verify_checksums=False); print(\"remote alaric installation OK\")"'
 ```
