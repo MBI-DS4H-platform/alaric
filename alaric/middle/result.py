@@ -89,6 +89,9 @@ def download(action_dir: str | Path = ".") -> None:
     subprocess.run(["rsync", "-a", "--partial", f"{host}:{_remote_base(sigil)}/", str(tmp) + "/"], check=True)
     tmp.rename(result)
     check(action_dir)
+    link = action.path / "results"
+    link.unlink(missing_ok=True)
+    link.symlink_to(os.path.relpath(result, action.path))
 
 
 def upload(action_dir: str | Path = ".") -> None:
