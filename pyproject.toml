@@ -18,6 +18,9 @@ dependencies = [
 [tool.setuptools.packages.find]
 include = ["alaric*"]
 
+[tool.setuptools]
+script-files = ["util/alaric-count-poses"]
+
 [project.scripts]
 alaric-sigil = "alaric.middle.sigil:main"
 alaric-pool-graph = "alaric.middle.pool_graph:main"
