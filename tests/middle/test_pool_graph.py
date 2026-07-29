@@ -28,10 +28,10 @@ def _anchor(fragment: int, nucleotide: str = "first") -> dict:
     }
 
 
-def _grow(input_name: str, fragment: int) -> dict:
+def _grow(input_name: str, fragment: int, direction: str = "forward") -> dict:
     return {
         "action": "grow", "input": input_name, "fragment": fragment, "sequence": "UU",
-        "exclude": "1abc", "direction": "forward", "crmsd": 0.25, "ovrmsd": 0.75,
+        "exclude": "1abc", "direction": direction, "crmsd": 0.25, "ovrmsd": 0.75,
     }
 
 
@@ -157,3 +157,160 @@ def test_ambiguous_fragment_raises(tmp_path):
     _ambiguous_project(tmp_path)
     with pytest.raises(PoolGraphError, match="multiple chain lineages"):
         PoolGraph(Project(tmp_path))
+
+
+def test_ambiguity_message_points_at_select(tmp_path):
+    _ambiguous_project(tmp_path)
+    with pytest.raises(PoolGraphError, match="Use --select"):
+        PoolGraph(Project(tmp_path))
+
+
+def test_select_within_one_lineage_picks_a_sink(tmp_path):
+    """Two sinks, one lineage: --select just names the representative, dropping nothing."""
+    _ambiguous_project(tmp_path)
+    graph = PoolGraph(Project(tmp_path), select=["frag5-filter-a"])
+    assert graph.representatives == {4: "frag4-anchor", 5: "frag5-filter-a"}
+    assert graph.dropped == {}
+
+
+def test_select_sibling_sink_that_cannot_compose_raises(tmp_path):
+    """frag6 is grown from the *other* sink, so selecting this one is uncomposable."""
+    _ambiguous_project(tmp_path)
+    _mk(tmp_path, "frag6-fwd", _grow("frag5-filter-b", 6))
+    with pytest.raises(PoolGraphError, match="does not descend from"):
+        PoolGraph(Project(tmp_path), select=["frag5-filter-a"])
+
+
+# -- fragments visited twice (sweeps) -------------------------------------
+
+
+def _roundtrip_project(root: Path) -> None:
+    """anchor frag2 -> grow backward into frag1 -> grow forward into frag2 again.
+
+    frag2 ends up with two disjoint lineages: A from the anchor, B regrown from frag1.
+    """
+    _data(root)
+    _mk(root, "frag2-anchor", _anchor(2))                       # lineage A
+    _mk(root, "frag2-anchor-score", _score("frag2-anchor"))
+    _mk(root, "frag2-filtered", _filter("frag2-anchor", "frag2-anchor-score"))
+    _mk(root, "frag1-bwd", _grow("frag2-filtered", 1, "backward"))
+    _mk(root, "frag1-bwd-score", _score("frag1-bwd"))
+    _mk(root, "frag1-bwd-filter", _filter("frag1-bwd", "frag1-bwd-score"))
+    _mk(root, "frag1-filtered-uniq", {"action": "identity", "input1": "frag1-bwd-filter",
+                                      "input2": "frag1-bwd-filter"})
+    _mk(root, "frag2-fwd", _grow("frag1-filtered-uniq", 2))     # lineage B
+
+
+def test_roundtrip_is_ambiguous_without_select(tmp_path):
+    _roundtrip_project(tmp_path)
+    with pytest.raises(PoolGraphError, match="frag2-filtered, frag2-fwd"):
+        PoolGraph(Project(tmp_path))
+
+
+def test_select_drops_the_other_lineage(tmp_path):
+    _roundtrip_project(tmp_path)
+    graph = PoolGraph(Project(tmp_path), select=["frag2-fwd"])
+    assert graph.representatives == {1: "frag1-filtered-uniq", 2: "frag2-fwd"}
+    assert sorted(graph.dropped) == ["frag2-anchor", "frag2-filtered"]
+    # frag1-bwd is orphaned by the drop (its grow source is gone) but its lineage is
+    # still the source side of the forward grow, so it must survive
+    assert "frag1-bwd" in graph.pools
+    assert graph.pools["frag1-bwd"].parents == []
+    links = graph.links()
+    assert [(l["source_rep"], l["target_rep"]) for l in links] == [
+        ("frag1-filtered-uniq", "frag2-fwd")
+    ]
+    assert links[0]["join_pool"] == "frag1-filtered-uniq"
+
+
+def test_select_orphans_a_competing_downstream_lineage(tmp_path):
+    """Something else grown off the dropped lineage falls out without being named."""
+    _roundtrip_project(tmp_path)
+    _mk(tmp_path, "frag3-alt", _grow("frag2-filtered", 3))   # off lineage A
+    _mk(tmp_path, "frag3-fwd", _grow("frag2-fwd", 3))        # off lineage B
+    graph = PoolGraph(Project(tmp_path), select=["frag2-fwd"])
+    assert graph.representatives == {
+        1: "frag1-filtered-uniq", 2: "frag2-fwd", 3: "frag3-fwd",
+    }
+    # frag3-alt is not dropped, just no longer anchored -> loses to frag3-fwd
+    assert "frag3-alt" not in graph.dropped
+
+
+# -- orphans left behind by a drop ----------------------------------------
+
+
+def _two_lineage_project(root: Path, *, downstream: str | None) -> None:
+    """frag5 reached both by a grow from frag4 and by its own anchor.
+
+    ``downstream`` optionally grows something off the anchor-lineage side of frag5,
+    directly ("grow") or through a filter ("filter").
+    """
+    _data(root)
+    _mk(root, "frag4-anchor", _anchor(4))
+    _mk(root, "frag5-fwd", _grow("frag4-anchor", 5))       # lineage A
+    _mk(root, "frag5-anchor", _anchor(5, "second"))        # lineage B
+    _mk(root, "frag6-fwd", _grow("frag5-anchor", 6))       # grown off lineage B
+    if downstream == "grow":
+        _mk(root, "frag7-fwd", _grow("frag6-fwd", 7))
+    elif downstream == "filter":
+        _mk(root, "frag6-fwd-score", _score("frag6-fwd"))
+        _mk(root, "frag6-fwd-filter", _filter("frag6-fwd", "frag6-fwd-score"))
+        _mk(root, "frag7-fwd", _grow("frag6-fwd-filter", 7))
+
+
+def test_orphan_with_nothing_downstream_is_skipped(tmp_path):
+    _two_lineage_project(tmp_path, downstream=None)
+    graph = PoolGraph(Project(tmp_path), select=["frag5-fwd"])
+    assert graph.representatives == {4: "frag4-anchor", 5: "frag5-fwd"}
+    assert "orphaned by --select" in graph.skipped[6]
+
+
+def test_orphan_grown_onward_leaves_a_gap(tmp_path):
+    _two_lineage_project(tmp_path, downstream="grow")
+    with pytest.raises(PoolGraphError, match="the chain has a gap"):
+        PoolGraph(Project(tmp_path), select=["frag5-fwd"])
+
+
+def test_gap_is_caught_through_an_intervening_filter(tmp_path):
+    """The orphan itself grows nothing -- a filter sits between it and the next grow."""
+    _two_lineage_project(tmp_path, downstream="filter")
+    with pytest.raises(PoolGraphError, match="the chain has a gap"):
+        PoolGraph(Project(tmp_path), select=["frag5-fwd"])
+
+
+def test_target_is_the_other_remedy_for_a_gap(tmp_path):
+    _two_lineage_project(tmp_path, downstream="filter")
+    graph = PoolGraph(Project(tmp_path), targets=["frag5-fwd"])
+    assert graph.representatives == {4: "frag4-anchor", 5: "frag5-fwd"}
+    assert graph.dropped == {}
+
+
+# -- selection validation and provenance ----------------------------------
+
+
+def test_select_unknown_pool_raises(tmp_path):
+    _roundtrip_project(tmp_path)
+    with pytest.raises(PoolGraphError, match="unknown pool"):
+        PoolGraph(Project(tmp_path), select=["nope"])
+
+
+def test_select_two_pools_in_one_fragment_raises(tmp_path):
+    _roundtrip_project(tmp_path)
+    with pytest.raises(PoolGraphError, match="select at most one pool per fragment"):
+        PoolGraph(Project(tmp_path), select=["frag2-fwd", "frag2-filtered"])
+
+
+def test_json_records_the_selection(tmp_path):
+    _roundtrip_project(tmp_path)
+    data = PoolGraph(Project(tmp_path), select=["frag2-fwd"]).to_dict()
+    assert data["selected"] == ["frag2-fwd"]
+    assert sorted(data["dropped_pools"]) == ["frag2-anchor", "frag2-filtered"]
+    assert "fragment 2" in data["dropped_pools"]["frag2-filtered"]
+    assert "frag2-filtered" not in data["pools"]
+
+
+def test_unselected_projects_carry_empty_provenance(tmp_path):
+    _full_project(tmp_path)
+    data = PoolGraph(Project(tmp_path)).to_dict()
+    assert data["selected"] == []
+    assert data["dropped_pools"] == {}

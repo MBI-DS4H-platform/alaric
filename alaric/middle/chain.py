@@ -14,8 +14,10 @@ Counting mode (``--count``):
      distinct surviving poses: conformer + rotamer + translation), plus the
      total number of chains.
 
-``--select`` / ``--exclude`` restrict the representatives used; every named pool
+``--target`` / ``--exclude`` restrict the representatives used; every named pool
 must be a representative (otherwise the error lists the representatives).
+(Choosing *which* pool represents a fragment is not done here -- that is
+``alaric-pool-graph --select``, and it is already baked into the graph JSON.)
 """
 
 from __future__ import annotations
@@ -422,7 +424,7 @@ def build_chains(
 
 def resolve_selection(
     graph: ChainGraph,
-    select: list[str] | None,
+    target: list[str] | None,
     exclude: list[str] | None,
 ) -> list[str]:
     reps = set(graph.representatives.values())
@@ -437,9 +439,9 @@ def resolve_selection(
             )
 
     chosen = set(reps)
-    if select:
-        check(select, "--select")
-        chosen = set(select)
+    if target:
+        check(target, "--target")
+        chosen = set(target)
     if exclude:
         check(exclude, "--exclude")
         chosen -= set(exclude)
@@ -471,7 +473,7 @@ def main(argv: list[str] | None = None) -> int:
         "--output-dir",
         help="Build mode: dir to write one pose dir of unique poses per fragment.",
     )
-    parser.add_argument("--select", nargs="+", metavar="POOL", help="Use only these representatives.")
+    parser.add_argument("--target", nargs="+", metavar="POOL", help="Use only these representatives.")
     parser.add_argument("--exclude", nargs="+", metavar="POOL", help="Drop these representatives.")
     parser.add_argument("--project-root", help="Override the project root for result dirs.")
     args = parser.parse_args(argv)
@@ -484,7 +486,7 @@ def main(argv: list[str] | None = None) -> int:
     graph = ChainGraph(data, project_root)
 
     try:
-        selected = resolve_selection(graph, args.select, args.exclude)
+        selected = resolve_selection(graph, args.target, args.exclude)
         if args.count:
             print(_format_count(count_chains(graph, selected)))
         else:

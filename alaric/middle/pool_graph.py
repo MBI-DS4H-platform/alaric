@@ -16,8 +16,18 @@ provenance arrays that connect it to its parent pool(s):
 For chain building it then picks, per fragment, the **representative** pool: the
 unique last descendant (most-filtered sink) whose lineage is wired into a
 cross-fragment grow. Fragments with no such lineage are skipped; fragments with
-more than one such lineage are an error. Finally it emits, per grow, the ordered
-list of arrays a chain builder must compose to connect two representatives.
+more than one such lineage are an error, resolvable with ``--select``. Finally it
+emits, per grow, the ordered list of arrays a chain builder must compose to
+connect two representatives.
+
+A fragment gets more than one lineage when the pipeline visits it twice -- e.g. a
+sweep that anchors frag2, grows backward into frag1, then grows forward into frag2
+again. The two frag2 pools are disjoint (their per-pose relation runs out through
+frag1 and back, which the intra-fragment lineage walk cannot see), so the choice is
+the user's: ``--select`` names the pool to represent the fragment and drops the
+fragment's other lineages from consideration. Dropping a lineage can orphan pools
+that were grown from it; those fall out silently unless the chain would end up with
+a **gap** between consecutive representatives, which is an error naming the gap.
 
 The output is a small skeleton (pool-level, with references to the on-disk arrays),
 not the gigapose-scale per-pose chains themselves.
@@ -141,7 +151,12 @@ def _read_sigil(action: ResolvedAction) -> str | None:
 
 
 class PoolGraph:
-    def __init__(self, project: Project, targets: list[str] | None = None):
+    def __init__(
+        self,
+        project: Project,
+        targets: list[str] | None = None,
+        select: list[str] | None = None,
+    ):
         self.project = project
         graph = ActionGraph(project)
         resolved = graph.build(targets)
@@ -178,15 +193,63 @@ class PoolGraph:
                 node.materialized = result_dir.is_dir()
             self.pools[name] = node
 
+        self._index_fragments()
+
+        self.selected: list[str] = list(select or [])
+        self.dropped: dict[str, str] = {}  # pool -> why it left consideration
+        self.representatives: dict[int, str] = {}
+        self.skipped: dict[int, str] = {}
+        overrides = self._apply_selection()
+        self._select_representatives(overrides)
+        self._check_contiguous()
+
+    def _index_fragments(self) -> None:
         self.pools_by_fragment: dict[int, list[str]] = {}
         for name, node in self.pools.items():
             self.pools_by_fragment.setdefault(node.fragment, []).append(name)
         for names in self.pools_by_fragment.values():
             names.sort()
 
-        self.representatives: dict[int, str] = {}
-        self.skipped: dict[int, str] = {}
-        self._select_representatives()
+    # -- explicit selection ------------------------------------------------
+
+    def _apply_selection(self) -> dict[int, str]:
+        """Honour ``--select``: one rule, applied per named pool.
+
+        The named pool becomes its fragment's representative, and every *other*
+        lineage of that fragment is dropped from consideration. When the competing
+        sinks share a lineage there is nothing else to drop and the rule degenerates
+        to plain selection.
+        """
+        overrides: dict[int, str] = {}
+        drop: set[str] = set()
+        for pool in self.selected:
+            node = self.pools.get(pool)
+            if node is None:
+                raise PoolGraphError(f"--select: unknown pool {pool!r}")
+            fragment = node.fragment
+            if fragment in overrides and overrides[fragment] != pool:
+                raise PoolGraphError(
+                    f"--select: {overrides[fragment]} and {pool} are both fragment "
+                    f"{fragment}; select at most one pool per fragment"
+                )
+            overrides[fragment] = pool
+            components = self._components(fragment)
+            keep = next(c for c in components if pool in c)
+            for component in components:
+                if component is not keep:
+                    drop |= component
+        for name in drop:
+            self.dropped[name] = (
+                f"not on the lineage selected for fragment {self.pools[name].fragment}"
+            )
+            del self.pools[name]
+        # edges into a dropped pool go with it; the pools they belonged to survive,
+        # because a pool's poses are real whether or not its provenance is in view.
+        for node in self.pools.values():
+            node.parents = [e for e in node.parents if e.parent not in drop]
+        if drop:
+            self._index_fragments()
+        return overrides
 
     # -- within-fragment topology helpers ---------------------------------
 
@@ -207,14 +270,18 @@ class PoolGraph:
         return out
 
     def _chain_anchored(self) -> set[str]:
-        """Pools wired into a cross-fragment grow: grown pools and grow sources."""
+        """Pools wired into a cross-fragment grow: grown pools and grow sources.
+
+        Keyed on a surviving grow *edge*, not on the action kind: ``--select`` can
+        drop the lineage a grow drew from, and the orphan left behind is no longer
+        wired into anything.
+        """
         anchored: set[str] = set()
         for name, node in self.pools.items():
-            if node.kind == "grow":
-                anchored.add(name)  # grown from a neighbour fragment
-                for e in node.parents:
-                    if e.kind == "grow":
-                        anchored.add(e.parent)  # the source pool, used to grow
+            for e in node.parents:
+                if e.kind == "grow":
+                    anchored.add(name)  # grown from a neighbour fragment
+                    anchored.add(e.parent)  # the source pool, used to grow
         return anchored
 
     def _components(self, fragment: int) -> list[set[str]]:
@@ -253,9 +320,13 @@ class PoolGraph:
                     is_parent.add(e.parent)
         return {n for n in names if n not in is_parent}
 
-    def _select_representatives(self) -> None:
+    def _select_representatives(self, overrides: dict[int, str] | None = None) -> None:
+        overrides = overrides or {}
         anchored = self._chain_anchored()
         for fragment in sorted(self.pools_by_fragment):
+            if fragment in overrides:
+                self.representatives[fragment] = overrides[fragment]
+                continue
             components = self._components(fragment)
             relevant = [c for c in components if c & anchored]
             sinks = self._sinks(fragment)
@@ -263,16 +334,51 @@ class PoolGraph:
                 n for n in sinks if any(n in c for c in relevant)
             )
             if not relevant_sinks:
-                self.skipped[fragment] = (
-                    "no chain-connected lineage (not wired into a grow)"
-                )
+                self.skipped[fragment] = self._skip_reason(fragment)
                 continue
             if len(relevant_sinks) > 1:
                 raise PoolGraphError(
                     f"fragment {fragment} has multiple chain lineages "
-                    f"({', '.join(relevant_sinks)}); the representative is ambiguous"
+                    f"({', '.join(relevant_sinks)}); the representative is ambiguous. "
+                    f"Use --select to name the one to represent this fragment"
                 )
             self.representatives[fragment] = relevant_sinks[0]
+
+    def _skip_reason(self, fragment: int) -> str:
+        """Why a fragment has no representative -- orphaned by --select, or never wired."""
+        orphaned = sorted(
+            name
+            for name in self.pools_by_fragment.get(fragment, [])
+            if self.pools[name].kind == "grow"
+            and not any(e.kind == "grow" for e in self.pools[name].parents)
+        )
+        if orphaned:
+            return (
+                f"lineage orphaned by --select (grow source dropped): "
+                f"{', '.join(orphaned)}"
+            )
+        return "no chain-connected lineage (not wired into a grow)"
+
+    def _check_contiguous(self) -> None:
+        """Consecutive representatives must be joined by a link.
+
+        Dropping a lineage can leave a pool that is still grown *onward* -- it keeps
+        a representative but has nothing joining it to the fragment below, so the
+        chain would carry a hole. Catch that here, where the cause is known, rather
+        than in the chain builder, where it is not.
+        """
+        linked = {frozenset((l["source_rep"], l["target_rep"])) for l in self.links()}
+        order = [self.representatives[f] for f in sorted(self.representatives)]
+        for lower, upper in zip(order, order[1:]):
+            if frozenset((lower, upper)) in linked:
+                continue
+            raise PoolGraphError(
+                f"no grow joins {lower} (frag{self.pools[lower].fragment}) to "
+                f"{upper} (frag{self.pools[upper].fragment}), so the chain has a gap. "
+                f"{upper} was grown from a lineage that --select dropped; either "
+                f"--select a different pool, or use --target to leave {upper} and "
+                f"everything grown from it out of the graph"
+            )
 
     # -- path composition --------------------------------------------------
 
@@ -394,6 +500,8 @@ class PoolGraph:
             "pools": pools,
             "representatives": {str(k): v for k, v in sorted(self.representatives.items())},
             "skipped_fragments": {str(k): v for k, v in sorted(self.skipped.items())},
+            "selected": list(self.selected),
+            "dropped_pools": dict(sorted(self.dropped.items())),
             "links": self.links(),
         }
 
@@ -426,9 +534,13 @@ class PoolGraph:
         return "\n".join(lines)
 
 
-def build_pool_graph(start: str | Path = ".", targets: list[str] | None = None) -> PoolGraph:
+def build_pool_graph(
+    start: str | Path = ".",
+    targets: list[str] | None = None,
+    select: list[str] | None = None,
+) -> PoolGraph:
     project = Project.discover(start)
-    return PoolGraph(project, targets)
+    return PoolGraph(project, targets, select)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -455,9 +567,21 @@ def main(argv: list[str] | None = None) -> int:
         dest="targets",
         help="Restrict to this action and its dependencies (repeatable).",
     )
+    parser.add_argument(
+        "--select",
+        action="append",
+        dest="select",
+        metavar="POOL",
+        help="Make POOL represent its fragment, dropping the fragment's other "
+        "lineages. Use when a fragment is visited twice (repeatable, once per "
+        "fragment).",
+    )
     args = parser.parse_args(argv)
 
-    graph = build_pool_graph(args.project_root, args.targets)
+    try:
+        graph = build_pool_graph(args.project_root, args.targets, args.select)
+    except PoolGraphError as exc:
+        parser.exit(2, f"error: {exc}\n")
     if args.format == "dot":
         text = graph.to_dot() + "\n"
     else:
