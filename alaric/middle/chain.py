@@ -14,6 +14,14 @@ Counting mode (``--count``):
      distinct surviving poses: conformer + rotamer + translation), plus the
      total number of chains.
 
+Build mode (``-o``) writes, into the output dir:
+  - one pose dir per fragment, holding that fragment's *unique* surviving poses;
+  - ``chains.txt``: a header line of pool names in fragment order, then one row per
+    chain of 1-based pose indices into those pose dirs;
+  - ``chains.json``: per column the pool, fragment and dinucleotide sequence, plus the
+    excluded PDB code -- what a consumer needs to turn the indices back into
+    coordinates (see ``alaric-chain-coordinates``).
+
 ``--target`` / ``--exclude`` restrict the representatives used; every named pool
 must be a representative (otherwise the error lists the representatives).
 (Choosing *which* pool represents a fragment is not done here -- that is
@@ -45,10 +53,17 @@ from poses import (  # noqa: E402
 )
 
 from .errors import MiddleError  # noqa: E402
+from .project import Project  # noqa: E402
+from .resolve import resolve_exclude, resolve_sequence  # noqa: E402
 
 
 class ChainError(MiddleError):
     """Invalid chain-building request or data."""
+
+
+# Build-mode outputs, written into the output dir next to the per-fragment pose dirs.
+CHAINS_FILE = "chains.txt"
+CHAINS_METADATA_FILE = "chains.json"
 
 
 # -- variable-length relational primitives --------------------------------
@@ -419,6 +434,80 @@ def build_chains(
     return layers, table
 
 
+# -- build-mode output files ----------------------------------------------
+
+
+def _pose_dir_nposes(pose_dir: Path) -> int:
+    return PoseReader.get_nposes(pose_dir) if discover_organized(pose_dir) else 0
+
+
+def chain_metadata(
+    graph: ChainGraph,
+    layers: Layers,
+    table: np.ndarray,
+    output_dir: Path,
+    *,
+    graph_json: Path | None = None,
+) -> dict:
+    """Describe the built chains: one entry per column, in fragment order.
+
+    ``sequence`` and ``exclude`` are what a consumer needs to turn pose ids back into
+    coordinates, but they are resolved best-effort: a graph may point at a project root
+    without ``DATA/``, and the chains are valid regardless. Consumers that need them
+    (``alaric-chain-pdb``) ask for a command-line override instead of failing here.
+    """
+    project = Project(Path(graph.project_root))
+    try:
+        exclude = resolve_exclude(project, "auto")
+    except MiddleError:
+        exclude = None
+
+    columns = []
+    for pool, fragment in zip(layers.order, layers.fragments):
+        try:
+            sequence = resolve_sequence(project, fragment)
+        except MiddleError:
+            sequence = None
+        columns.append(
+            {
+                "pool": pool,
+                "fragment": fragment,
+                "pose_dir": pool,
+                "nposes": _pose_dir_nposes(output_dir / pool),
+                "sequence": sequence,
+            }
+        )
+
+    return {
+        "project": str(graph.project_root),
+        "graph": str(graph_json) if graph_json is not None else None,
+        "chains_file": CHAINS_FILE,
+        "nchains": int(len(table)),
+        "exclude": exclude,
+        "columns": columns,
+    }
+
+
+def write_chain_outputs(
+    graph: ChainGraph,
+    layers: Layers,
+    table: np.ndarray,
+    output_dir: Path,
+    *,
+    graph_json: Path | None = None,
+) -> dict:
+    """Write the chain index table and its metadata sidecar into ``output_dir``."""
+    output_dir = Path(output_dir)
+    with (output_dir / CHAINS_FILE).open("w") as handle:
+        handle.write("\t".join(layers.order) + "\n")
+        np.savetxt(handle, table, fmt="%d", delimiter="\t")
+    metadata = chain_metadata(graph, layers, table, output_dir, graph_json=graph_json)
+    (output_dir / CHAINS_METADATA_FILE).write_text(
+        json.dumps(metadata, indent=2) + "\n"
+    )
+    return metadata
+
+
 # -- selection ------------------------------------------------------------
 
 
@@ -450,6 +539,21 @@ def resolve_selection(
     return sorted(chosen, key=lambda p: graph.pools[p]["fragment"])
 
 
+def _format_build(metadata: dict, output_dir: Path) -> str:
+    columns = metadata["columns"]
+    width = max([len("pool")] + [len(c["pool"]) for c in columns])
+    lines = [f"{'frag':>4}  {'pool':<{width}}  {'seq':<3}  {'poses':>14}"]
+    for column in columns:
+        lines.append(
+            f"{column['fragment']:>4}  {column['pool']:<{width}}  "
+            f"{column['sequence'] or '?':<3}  {column['nposes']:>14}"
+        )
+    lines.append(f"total chains: {metadata['nchains']}")
+    lines.append(f"wrote {output_dir / CHAINS_FILE}")
+    lines.append(f"wrote {output_dir / CHAINS_METADATA_FILE}")
+    return "\n".join(lines)
+
+
 def _format_count(result: CountResult) -> str:
     width = max((len(p) for p in result.order), default=4)
     lines = [f"{'frag':>4}  {'pool':<{width}}  {'kept':>14}  {'unique':>14}"]
@@ -471,7 +575,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "-o",
         "--output-dir",
-        help="Build mode: dir to write one pose dir of unique poses per fragment.",
+        help="Build mode: dir to write one pose dir of unique poses per fragment, "
+        f"plus the chains as pose indices ({CHAINS_FILE}) and their metadata "
+        f"({CHAINS_METADATA_FILE}).",
     )
     parser.add_argument("--target", nargs="+", metavar="POOL", help="Use only these representatives.")
     parser.add_argument("--exclude", nargs="+", metavar="POOL", help="Drop these representatives.")
@@ -490,9 +596,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.count:
             print(_format_count(count_chains(graph, selected)))
         else:
-            layers, table = build_chains(graph, selected, Path(args.output_dir))
-            sys.stdout.write("\t".join(layers.order) + "\n")
-            np.savetxt(sys.stdout, table, fmt="%d", delimiter="\t")
+            output_dir = Path(args.output_dir)
+            layers, table = build_chains(graph, selected, output_dir)
+            metadata = write_chain_outputs(
+                graph,
+                layers,
+                table,
+                output_dir,
+                graph_json=Path(args.graph_json).resolve(),
+            )
+            print(_format_build(metadata, output_dir))
     except ChainError as exc:
         parser.exit(2, f"error: {exc}\n")
 

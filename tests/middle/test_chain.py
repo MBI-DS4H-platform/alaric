@@ -19,11 +19,14 @@ _sys.path.insert(0, str(ROOT / "alaric"))
 from poses import PoseReader, select_pose_indices  # noqa: E402
 
 from alaric.middle.chain import (  # noqa: E402
+    CHAINS_FILE,
+    CHAINS_METADATA_FILE,
     ChainError,
     ChainGraph,
     build_chains,
     count_chains,
     resolve_selection,
+    write_chain_outputs,
 )
 
 
@@ -142,6 +145,36 @@ def test_build_basic(tmp_path):
     assert _read_ids(out / "r1") == [(0, 0, 0, 0, 0), (0, 0, 2, 0, 0)]  # A0, A2
     assert _read_ids(out / "r2") == [(0, 0, 1, 1, 0), (0, 0, 2, 1, 0)]  # B1, B2
     assert _read_ids(out / "r3") == [(0, 0, 0, 2, 0), (0, 0, 1, 2, 0)]  # C0, C1(=C2)
+
+
+def test_build_writes_chains_file_and_metadata(tmp_path):
+    _basic_project(tmp_path)
+    g = _graph(tmp_path)
+    sel = resolve_selection(g, None, None)
+    out = tmp_path / "out"
+    layers, table = build_chains(g, sel, out)
+    metadata = write_chain_outputs(
+        g, layers, table, out, graph_json=tmp_path / "graph.json"
+    )
+
+    # the index table is the pool header plus one row per chain
+    lines = (out / CHAINS_FILE).read_text().splitlines()
+    assert lines[0].split("\t") == layers.order
+    written = np.loadtxt(out / CHAINS_FILE, dtype=np.int64, skiprows=1, ndmin=2)
+    assert written.tolist() == table.tolist()
+
+    assert json.loads((out / CHAINS_METADATA_FILE).read_text()) == metadata
+    assert metadata["nchains"] == len(table)
+    assert metadata["chains_file"] == CHAINS_FILE
+    assert metadata["graph"] == str(tmp_path / "graph.json")
+    assert [c["pool"] for c in metadata["columns"]] == layers.order
+    assert [c["fragment"] for c in metadata["columns"]] == [1, 2, 3]
+    assert [c["nposes"] for c in metadata["columns"]] == [
+        PoseReader.get_nposes(out / pool) for pool in layers.order
+    ]
+    # the fixture project has no DATA/, so these stay unresolved rather than failing
+    assert [c["sequence"] for c in metadata["columns"]] == [None, None, None]
+    assert metadata["exclude"] is None
 
 
 def test_build_matches_count(tmp_path):
