@@ -1,0 +1,4 @@
+action: filter
+input: frag4-merged
+score_input: frag4-merged-score
+threshold: -14.58

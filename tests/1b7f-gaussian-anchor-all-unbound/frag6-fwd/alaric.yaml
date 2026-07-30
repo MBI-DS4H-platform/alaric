@@ -1,0 +1,8 @@
+action: grow
+input: frag5-fwd-restrict
+fragment: auto
+sequence: auto
+exclude: auto
+direction: auto
+crmsd: 0.83
+ovrmsd: 1.21

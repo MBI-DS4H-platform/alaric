@@ -1,0 +1,4 @@
+action: filter
+input: frag7-fwd-uniq
+score_input: frag7-fwd-score
+threshold: -14.56

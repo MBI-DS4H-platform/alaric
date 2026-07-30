@@ -1,0 +1,8 @@
+action: grow
+input: frag9-fwd-filter
+fragment: auto
+sequence: auto
+exclude: auto
+direction: fwd
+crmsd: 0.39
+ovrmsd: 0.80
