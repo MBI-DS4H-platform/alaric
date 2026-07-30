@@ -154,3 +154,61 @@ def test_missing_pose_dir_is_rejected(tmp_path, chain_rmsd):
     (chain_dir / "pool2").rmdir()
     with pytest.raises(chain_rmsd.ChainRmsdError, match="pose dir not found"):
         chain_rmsd.calculate_chain_rmsds(chain_dir)
+
+
+def test_pairwise_matrix_is_symmetric_float32_and_rounded(tmp_path, chain_rmsd):
+    coordinates = np.array(
+        [
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+            [[0.0, 0.0, 0.0], [3.0, 0.0, 0.0]],
+            [[0.0, 0.0, 0.0], [1.0, 4.0, 0.0]],
+        ],
+        dtype=np.float32,
+    )
+    output = tmp_path / "pairwise.npy"
+    chain_rmsd.write_pairwise_matrix(output, coordinates, block_size=1)
+
+    found = np.load(output)
+    assert found.dtype == np.float32
+    assert found.shape == (3, 3)
+    assert np.array_equal(found, found.T)
+    np.testing.assert_array_equal(np.diag(found), np.zeros(3, dtype=np.float32))
+    expected = np.array(
+        [[0.0, np.sqrt(2.0), np.sqrt(8.0)], [np.sqrt(2.0), 0.0, np.sqrt(10.0)], [np.sqrt(8.0), np.sqrt(10.0), 0.0]],
+        dtype=np.float32,
+    )
+    np.testing.assert_allclose(found, np.round(expected, 3), rtol=0, atol=0)
+
+
+def test_pairwise_limit_is_checked_before_materializing(tmp_path, monkeypatch, chain_rmsd):
+    monkeypatch.setattr(
+        chain_rmsd,
+        "load_metadata",
+        lambda _path: {"nchains": chain_rmsd.MAX_PAIRWISE_CHAINS + 1},
+    )
+    with pytest.raises(chain_rmsd.ChainRmsdError, match="at most 50,000"):
+        chain_rmsd.write_pairwise_chain_rmsd(tmp_path, tmp_path / "matrix.npy")
+
+
+def test_pairwise_mode_materializes_without_a_reference_pdb(
+    tmp_path, monkeypatch, chain_rmsd
+):
+    atoms = np.zeros((2, 1), dtype=[("x", "f4"), ("y", "f4"), ("z", "f4")])
+    atoms[1]["x"] = 2.0
+    monkeypatch.setattr(chain_rmsd, "load_metadata", lambda _path: {"nchains": 2})
+    monkeypatch.setattr(chain_rmsd, "_excluded_pdb_code", lambda _path: "1b7f")
+
+    seen = {}
+
+    def materialize(path, *, exclude, verify_checksums):
+        seen.update(path=path, exclude=exclude, verify_checksums=verify_checksums)
+        return atoms, 0
+
+    monkeypatch.setattr(chain_rmsd, "materialize_chain_coordinates", materialize)
+    output = tmp_path / "pairwise.npy"
+    chain_rmsd.write_pairwise_chain_rmsd(tmp_path, output, verify_checksums=True)
+
+    assert seen == {"path": tmp_path, "exclude": ["1b7f"], "verify_checksums": True}
+    assert np.array_equal(
+        np.load(output), np.array([[0.0, 2.0], [2.0, 0.0]], dtype=np.float32)
+    )

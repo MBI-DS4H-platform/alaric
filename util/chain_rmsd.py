@@ -5,6 +5,9 @@ The per-fragment columns are ordinary dinucleotide RMSDs.  The leading column
 approximates the RMSD of ``alaric-chain-coordinates`` output without writing
 coordinates: each nucleotide shared by two fragments is assigned the arithmetic
 mean of the two corresponding mononucleotide RMSDs.
+
+``--pairwise`` instead materializes those averaged chain coordinates and writes
+the all-versus-all, same-frame RMSD matrix.
 """
 
 from __future__ import annotations
@@ -37,11 +40,14 @@ from rmsd import (  # noqa: E402
 
 from alaric.middle.chain_coordinates import (  # noqa: E402
     ChainCoordinatesError,
+    chain_coordinates as materialize_chain_coordinates,
     load_metadata,
     read_chain_table,
 )
 
 OUTPUT_FILE = "chain_rmsd.txt"
+MAX_PAIRWISE_CHAINS = 50_000
+PAIRWISE_BLOCK_SIZE = 512
 
 
 class ChainRmsdError(RuntimeError):
@@ -128,13 +134,10 @@ def _rmsd_vectors(
     return full, first, second
 
 
-def _data_inputs(chain_dir: Path) -> tuple[Path, str]:
+def _excluded_pdb_code(chain_dir: Path) -> str:
     data_dir = chain_dir.absolute().parent / "DATA"
     if not data_dir.is_dir():
         raise ChainRmsdError(f"required sibling DATA directory not found: {data_dir}")
-    reference = data_dir / "reference.pdb"
-    if not reference.is_file():
-        raise ChainRmsdError(f"required reference PDB not found: {reference}")
     pdbcode = data_dir / "pdbcode.txt"
     if not pdbcode.is_file():
         raise ChainRmsdError(f"required excluded PDB code not found: {pdbcode}")
@@ -142,9 +145,19 @@ def _data_inputs(chain_dir: Path) -> tuple[Path, str]:
     if not code:
         raise ChainRmsdError(f"excluded PDB code is empty: {pdbcode}")
     try:
-        return reference, _pdb_code(code)
+        return _pdb_code(code)
     except argparse.ArgumentTypeError as exc:
         raise ChainRmsdError(f"{pdbcode}: {exc}") from None
+
+
+def _data_inputs(chain_dir: Path) -> tuple[Path, str]:
+    data_dir = chain_dir.absolute().parent / "DATA"
+    if not data_dir.is_dir():
+        raise ChainRmsdError(f"required sibling DATA directory not found: {data_dir}")
+    reference = data_dir / "reference.pdb"
+    if not reference.is_file():
+        raise ChainRmsdError(f"required reference PDB not found: {reference}")
+    return reference, _excluded_pdb_code(chain_dir)
 
 
 def _columns(chain_dir: Path, metadata: dict) -> list[Column]:
@@ -258,6 +271,98 @@ def write_table(output_path: Path, headers: list[str], values: np.ndarray) -> No
         np.savetxt(handle, values, delimiter="\t", fmt=f"%.{RMSD_DECIMALS}f")
 
 
+def write_pairwise_matrix(
+    output_path: Path,
+    coordinates: np.ndarray,
+    *,
+    block_size: int = PAIRWISE_BLOCK_SIZE,
+) -> None:
+    """Write a float32 matrix of same-frame RMSDs between averaged chains."""
+    coordinates = np.asarray(coordinates, dtype=np.float32)
+    if coordinates.ndim != 3 or coordinates.shape[2] != 3:
+        raise ChainRmsdError("chain coordinates must have shape (nchains, natoms, 3)")
+    nchains, natoms, _ = coordinates.shape
+    if nchains > MAX_PAIRWISE_CHAINS:
+        raise ChainRmsdError(
+            f"--pairwise supports at most {MAX_PAIRWISE_CHAINS:,} chains, got {nchains:,}"
+        )
+    if natoms == 0:
+        raise ChainRmsdError("chain coordinates contain no atoms")
+    if block_size <= 0:
+        raise ValueError("pairwise block size must be positive")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    matrix = np.lib.format.open_memmap(
+        output_path,
+        mode="w+",
+        dtype=np.float32,
+        shape=(nchains, nchains),
+    )
+    flat = np.ascontiguousarray(coordinates.reshape(nchains, natoms * 3))
+    norms = np.einsum("ij,ij->i", flat, flat, dtype=np.float32)
+    try:
+        for row_start in range(0, nchains, block_size):
+            row_stop = min(row_start + block_size, nchains)
+            row_coords = flat[row_start:row_stop]
+            for col_start in range(row_start, nchains, block_size):
+                col_stop = min(col_start + block_size, nchains)
+                cross = row_coords @ flat[col_start:col_stop].T
+                squared = (
+                    norms[row_start:row_stop, None]
+                    + norms[None, col_start:col_stop]
+                    - 2.0 * cross
+                )
+                values = np.sqrt(np.maximum(squared, 0.0) / natoms)
+                values = np.round(values, RMSD_DECIMALS).astype(np.float32, copy=False)
+                matrix[row_start:row_stop, col_start:col_stop] = values
+                if col_start != row_start:
+                    matrix[col_start:col_stop, row_start:row_stop] = values.T
+        np.fill_diagonal(matrix, 0.0)
+        matrix.flush()
+    finally:
+        del matrix
+
+
+def write_pairwise_chain_rmsd(
+    chain_dir: Path,
+    output_path: Path,
+    *,
+    verify_checksums: bool = False,
+) -> None:
+    """Materialize averaged chains and write their pairwise RMSD matrix."""
+    chain_dir = Path(chain_dir)
+    output_path = Path(output_path)
+    if output_path.suffix.lower() != ".npy":
+        raise ChainRmsdError("--pairwise output must have a .npy suffix")
+    try:
+        metadata = load_metadata(chain_dir)
+    except ChainCoordinatesError as exc:
+        raise ChainRmsdError(str(exc)) from None
+    nchains = int(metadata.get("nchains", 0))
+    if nchains <= 0:
+        raise ChainRmsdError("chain table contains no chains")
+    if nchains > MAX_PAIRWISE_CHAINS:
+        raise ChainRmsdError(
+            f"--pairwise supports at most {MAX_PAIRWISE_CHAINS:,} chains, got {nchains:,}"
+        )
+
+    excluded = _excluded_pdb_code(chain_dir)
+    try:
+        atoms, start = materialize_chain_coordinates(
+            chain_dir,
+            exclude=[excluded],
+            verify_checksums=verify_checksums,
+        )
+    except ChainCoordinatesError as exc:
+        raise ChainRmsdError(str(exc)) from None
+    if start != 0 or len(atoms) != nchains:
+        raise ChainRmsdError(
+            f"expected {nchains} materialized chains, got {len(atoms)}"
+        )
+    coordinates = np.stack((atoms["x"], atoms["y"], atoms["z"]), axis=-1)
+    write_pairwise_matrix(output_path, coordinates)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="chain_rmsd",
@@ -271,6 +376,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         type=Path,
         help="Output table (default: CHAIN_DIR/chain_rmsd.txt).",
+    )
+    parser.add_argument(
+        "--pairwise",
+        type=Path,
+        metavar="OUTPUT.npy",
+        help=(
+            "Write an all-versus-all float32 RMSD matrix for averaged chains "
+            f"(maximum {MAX_PAIRWISE_CHAINS:,} chains), instead of the reference RMSD table."
+        ),
     )
     parser.add_argument(
         "--chunksize",
@@ -288,6 +402,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.pairwise is not None and args.output is not None:
+        raise SystemExit("error: --pairwise cannot be combined with --output")
+    if args.pairwise is not None:
+        try:
+            write_pairwise_chain_rmsd(
+                args.chain_dir,
+                args.pairwise,
+                verify_checksums=args.verify_checksums,
+            )
+        except (ChainRmsdError, OSError, ValueError) as exc:
+            raise SystemExit(f"error: {exc}") from None
+        print(f"wrote pairwise RMSD matrix to {args.pairwise}")
+        return 0
+
     output = args.output or args.chain_dir / OUTPUT_FILE
     try:
         headers, values = calculate_chain_rmsds(
