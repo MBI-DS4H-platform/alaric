@@ -16,7 +16,6 @@ import sys
 
 import numpy as np
 
-
 _ROOT = Path(__file__).resolve().parents[1]
 _ALARIC_DIR = _ROOT / "alaric"
 if str(_ALARIC_DIR) not in sys.path:
@@ -41,7 +40,6 @@ from alaric.middle.chain_coordinates import (  # noqa: E402
     load_metadata,
     read_chain_table,
 )
-
 
 OUTPUT_FILE = "chain_rmsd.txt"
 
@@ -131,7 +129,7 @@ def _rmsd_vectors(
 
 
 def _data_inputs(chain_dir: Path) -> tuple[Path, str]:
-    data_dir = chain_dir.parent / "DATA"
+    data_dir = chain_dir.absolute().parent / "DATA"
     if not data_dir.is_dir():
         raise ChainRmsdError(f"required sibling DATA directory not found: {data_dir}")
     reference = data_dir / "reference.pdb"
@@ -170,7 +168,9 @@ def _columns(chain_dir: Path, metadata: dict) -> list[Column]:
                 fragment=int(entry["fragment"]),
                 pose_dir=pose_dir,
                 nposes=nposes,
-                sequence=str(entry["sequence"]).upper() if entry.get("sequence") else "",
+                sequence=(
+                    str(entry["sequence"]).upper() if entry.get("sequence") else ""
+                ),
             )
         )
     return result
@@ -267,15 +267,20 @@ def build_parser() -> argparse.ArgumentParser:
         "chain_dir", type=Path, help="Build-mode output directory of alaric-chain."
     )
     parser.add_argument(
-        "-o", "--output", type=Path,
+        "-o",
+        "--output",
+        type=Path,
         help="Output table (default: CHAIN_DIR/chain_rmsd.txt).",
     )
     parser.add_argument(
-        "--chunksize", type=_positive_int, default=DEFAULT_POSE_CHUNK_SIZE,
+        "--chunksize",
+        type=_positive_int,
+        default=DEFAULT_POSE_CHUNK_SIZE,
         help=f"Poses to process per RMSD chunk (default: {DEFAULT_POSE_CHUNK_SIZE}).",
     )
     parser.add_argument(
-        "--verify-checksums", action="store_true",
+        "--verify-checksums",
+        action="store_true",
         help="Enable fraglib checksum verification when loading the library config.",
     )
     return parser
