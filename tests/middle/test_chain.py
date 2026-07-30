@@ -23,6 +23,8 @@ from alaric.middle.chain import (  # noqa: E402
     CHAINS_METADATA_FILE,
     ChainError,
     ChainGraph,
+    _identities,
+    _write_unique_pose_dir,
     build_chains,
     count_chains,
     resolve_selection,
@@ -107,9 +109,9 @@ def test_basic_count(tmp_path):
     g = _graph(tmp_path)
     res = count_chains(g, resolve_selection(g, None, None))
     assert res.order == ["r1", "r2", "r3"]
-    assert res.kept == [2, 2, 3]      # A1 and B0 are dead ends, pruned
-    assert res.unique == [2, 2, 2]    # C1 == C2 physically
-    assert res.total_chains == 3      # A0-B1-C0, A2-B2-C1, A2-B2-C2
+    assert res.kept == [2, 2, 2]      # A1 and B0 are dead ends, pruned; C1/C2 dedup
+    assert res.unique == [2, 2, 2]
+    assert res.total_chains == 2      # A0-B1-C0, A2-B2-C1/C2
 
 
 def _read_ids(pose_dir: Path) -> list[tuple[int, int, int, int, int]]:
@@ -139,7 +141,7 @@ def test_build_basic(tmp_path):
     assert int(table.min()) >= 1
     for j, pool in enumerate(layers.order):
         assert int(table[:, j].max()) <= PoseReader.get_nposes(out / pool)
-    assert sorted(table.tolist()) == sorted([[1, 1, 1], [2, 2, 2], [2, 2, 2]])
+    assert sorted(table.tolist()) == sorted([[1, 1, 1], [2, 2, 2]])
 
     # indices resolve to the right physical poses
     assert _read_ids(out / "r1") == [(0, 0, 0, 0, 0), (0, 0, 2, 0, 0)]  # A0, A2
@@ -187,6 +189,39 @@ def test_build_matches_count(tmp_path):
     assert len(table) == cnt.total_chains
     for pool, uniq in zip(layers.order, cnt.unique):
         assert PoseReader.get_nposes(tmp_path / "out" / pool) == uniq
+
+
+def test_written_pose_indices_follow_numeric_identity_order(tmp_path):
+    """Packing reorders buckets; returned 1-based indices must still be exact."""
+    source = tmp_path / "source"
+    source.mkdir()
+    poses = [
+        (1, 0, (32, 0, 0)),
+        (2, 0, (0, 0, 0)),
+        (256, 0, (0, 0, 0)),
+        (3, 0, (48, 0, 0)),
+    ]
+    packed = pack_pool(
+        np.array([p[0] for p in poses], dtype=np.uint16),
+        np.array([p[1] for p in poses], dtype=np.uint16),
+        np.array([p[2] for p in poses], dtype=np.int32),
+        bucket_size=16,
+        sort_offsets=False,
+    )
+    for number, (M, O, C, P) in enumerate(packed, start=1):
+        write_arc_file(source / f"poses-{number}.arc", M, O, C, P, bucket_size=16)
+
+    class Graph:
+        def _result_dir(self, _pool):
+            return source
+
+    source_ids = np.arange(PoseReader.get_nposes(source), dtype=np.int64)
+    one_based = _write_unique_pose_dir(Graph(), "pool", source_ids, tmp_path / "out")
+    source_rows = _identities(select_pose_indices(source, source_ids))
+    written_rows = _identities(
+        select_pose_indices(tmp_path / "out", one_based - 1)
+    )
+    assert np.array_equal(written_rows, source_rows)
 
 
 def test_select_subset_two_layers(tmp_path):
@@ -313,7 +348,7 @@ def test_merge_step_composition(tmp_path):
 # -- dedup one-to-many collapses duplicate edges --------------------------
 
 
-def test_dedup_keeps_parallel_edges(tmp_path):
+def test_dedup_collapses_parallel_edges_before_counting_chains(tmp_path):
     root = tmp_path
     _write_pose_dir(root / "rs", [(0, 0, (0, 0, 0)), (0, 0, (1, 0, 0)), (0, 0, (2, 0, 0))])
     # gfwd: G0,G1 identical (both grown from S0), G2<-S1, G3<-S2
@@ -336,7 +371,7 @@ def test_dedup_keeps_parallel_edges(tmp_path):
     )
     g = _graph(root)
     res = count_chains(g, resolve_selection(g, None, None))
-    # edges are not deduplicated: M0 reaches S0 via both G0 and G1, so (S0,M0)
-    # counts as two distinct tree branches -> 4 chains, not 3
+    # Deduplicating the pose pool before path enumeration also merges the two
+    # identical (S0, M0) edges, so there are three physical chains.
     assert res.kept == [3, 3]
-    assert res.total_chains == 4
+    assert res.total_chains == 3

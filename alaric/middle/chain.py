@@ -249,6 +249,10 @@ class Layers:
     nposes: list[int]
     edges: list[Edges]  # edges[j] connects layer j and j+1 (rep-index space)
     kept_mask: list[np.ndarray]  # poses on at least one complete chain
+    # Canonical representative-pool pose id for each layer pose.  The layers are
+    # deduplicated before paths are enumerated, so this points back to the
+    # physical pose to materialize in the output directory.
+    source_pose_ids: list[np.ndarray]
 
 
 def _select_link(graph: ChainGraph, lower: str, upper: str) -> dict:
@@ -267,7 +271,15 @@ def _connectivity(graph: ChainGraph, selected: list[str]) -> Layers:
     nposes = [graph.nposes(p) for p in order]
 
     if len(order) == 1:
-        return Layers(order, fragments, nposes, [], [np.ones(nposes[0], dtype=bool)])
+        layers = Layers(
+            order,
+            fragments,
+            nposes,
+            [],
+            [np.ones(nposes[0], dtype=bool)],
+            [np.arange(nposes[0], dtype=np.int64)],
+        )
+        return _deduplicate_layers(graph, layers)
 
     edges = [
         graph.edges_for_link(_select_link(graph, lower, upper))
@@ -286,7 +298,15 @@ def _connectivity(graph: ChainGraph, selected: list[str]) -> Layers:
         alive = bwd[j + 1][edges[j].high]
         bwd[j][edges[j].low[alive]] = True
     kept_mask = [f & b for f, b in zip(fwd, bwd)]
-    return Layers(order, fragments, nposes, edges, kept_mask)
+    layers = Layers(
+        order,
+        fragments,
+        nposes,
+        edges,
+        kept_mask,
+        [np.arange(n, dtype=np.int64) for n in nposes],
+    )
+    return _deduplicate_layers(graph, layers)
 
 
 def _kept_edges(layers: Layers, j: int) -> tuple[np.ndarray, np.ndarray]:
@@ -310,11 +330,56 @@ def _identities(chunk) -> np.ndarray:
     )
 
 
-def _encode(rows: np.ndarray) -> np.ndarray:
-    """One opaque key per identity row, comparable with the same byte order
-    np.unique(axis=0) uses (so argsort here matches np.unique's ordering)."""
-    a = np.ascontiguousarray(rows.astype(np.int64))
-    return a.view(np.dtype((np.void, a.dtype.itemsize * a.shape[1]))).ravel()
+def _deduplicate_layers(graph: ChainGraph, layers: Layers) -> Layers:
+    """Collapse physically identical surviving poses before path enumeration.
+
+    Connectivity is first pruned on the provenance graph, then equivalent poses
+    in each surviving layer become one node.  Their incident edges are remapped
+    and deduplicated, so a chain is a sequence of physical poses rather than a
+    sequence of duplicate provenance rows.
+    """
+    raw_to_unique: list[np.ndarray] = []
+    source_pose_ids: list[np.ndarray] = []
+    nposes: list[int] = []
+
+    for pool, mask, n in zip(layers.order, layers.kept_mask, layers.nposes):
+        kept = np.flatnonzero(mask).astype(np.int64)
+        mapping = np.full(n, -1, dtype=np.int64)
+        if kept.size:
+            identities = _identities(select_pose_indices(graph._result_dir(pool), kept))
+            _unique, first, inverse = np.unique(
+                identities, axis=0, return_index=True, return_inverse=True
+            )
+            inverse = np.asarray(inverse, dtype=np.int64).ravel()
+            mapping[kept] = inverse
+            source_pose_ids.append(kept[np.asarray(first, dtype=np.int64)])
+            nposes.append(len(first))
+        else:
+            source_pose_ids.append(np.empty(0, dtype=np.int64))
+            nposes.append(0)
+        raw_to_unique.append(mapping)
+
+    edges: list[Edges] = []
+    for j, edge in enumerate(layers.edges):
+        low = raw_to_unique[j][edge.low]
+        high = raw_to_unique[j + 1][edge.high]
+        valid = (low >= 0) & (high >= 0)
+        if not np.any(valid):
+            edges.append(
+                Edges(np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64))
+            )
+            continue
+        pairs = np.unique(np.column_stack((low[valid], high[valid])), axis=0)
+        edges.append(Edges(low=pairs[:, 0], high=pairs[:, 1]))
+
+    return Layers(
+        layers.order,
+        layers.fragments,
+        nposes,
+        edges,
+        [np.ones(n, dtype=bool) for n in nposes],
+        source_pose_ids,
+    )
 
 
 # -- counting -------------------------------------------------------------
@@ -327,13 +392,6 @@ class CountResult:
     kept: list[int]
     unique: list[int]
     total_chains: int
-
-
-def _count_unique(graph: ChainGraph, pool: str, kept_idx: np.ndarray) -> int:
-    if kept_idx.size == 0:
-        return 0
-    rows = _identities(select_pose_indices(graph._result_dir(pool), kept_idx))
-    return int(len(np.unique(rows, axis=0)))
 
 
 def _count_paths(layers: Layers) -> int:
@@ -354,10 +412,7 @@ def count_chains(graph: ChainGraph, selected: list[str]) -> CountResult:
         order=layers.order,
         fragments=layers.fragments,
         kept=[int(m.sum()) for m in layers.kept_mask],
-        unique=[
-            _count_unique(graph, pool, np.flatnonzero(mask).astype(np.int64))
-            for pool, mask in zip(layers.order, layers.kept_mask)
-        ],
+        unique=[int(m.sum()) for m in layers.kept_mask],
         total_chains=_count_paths(layers),
     )
 
@@ -389,10 +444,16 @@ def _write_unique_pose_dir(
     for i, (M, O, C, P) in enumerate(packed, start=1):
         write_arc_file(out_dir / f"poses-{i}.arc", M, O, C, P, bucket_size=DEFAULT_BUCKET_SIZE)
 
-    # map np.unique order -> written global order, so the returned indices point
-    # at the poses as they are laid out in the pose dir.
+    # Map np.unique's numeric lexicographic row order to written global order.
+    # Sorting a native-endian int64 row viewed as raw bytes is wrong (and gave a
+    # different ordering from np.unique on little-endian hosts), so sort fields
+    # numerically instead.
     written = _identities(select_pose_indices(out_dir, np.arange(len(unique_rows), dtype=np.int64)))
-    written_pos = np.argsort(_encode(written), kind="stable")  # written[written_pos] == unique_rows
+    written_pos = np.lexsort(
+        tuple(written[:, col] for col in range(written.shape[1] - 1, -1, -1))
+    )
+    if not np.array_equal(written[written_pos], unique_rows):
+        raise ChainError(f"{pool}: packed pose order cannot be mapped back to input poses")
     return (written_pos[inverse] + 1).astype(np.int64)
 
 
@@ -420,9 +481,12 @@ def build_chains(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     rep_to_pool: list[np.ndarray] = []
-    for pool, mask, n in zip(layers.order, layers.kept_mask, layers.nposes):
+    for j, (pool, mask, n) in enumerate(
+        zip(layers.order, layers.kept_mask, layers.nposes)
+    ):
         kept_idx = np.flatnonzero(mask).astype(np.int64)
-        one_based = _write_unique_pose_dir(graph, pool, kept_idx, output_dir / pool)
+        source_ids = layers.source_pose_ids[j][kept_idx]
+        one_based = _write_unique_pose_dir(graph, pool, source_ids, output_dir / pool)
         mapping = np.zeros(n, dtype=np.int64)
         mapping[kept_idx] = one_based
         rep_to_pool.append(mapping)
