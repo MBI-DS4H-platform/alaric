@@ -1,0 +1,5 @@
+action: score
+sequence: auto
+exclude: auto
+protein: 3sxl_dom2
+input: frag4-merged

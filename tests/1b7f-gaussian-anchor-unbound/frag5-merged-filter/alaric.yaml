@@ -1,0 +1,4 @@
+action: filter
+input: frag5-merged
+score_input: frag5-merged-score-all
+threshold: -21.44
