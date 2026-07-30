@@ -137,9 +137,12 @@ def _prologue(local: bool, sigil: str) -> list[str]:
         lines.append('cd "$(dirname "$0")"')
     else:
         lines.append(f'cd "${{ALARIC_REMOTE_DEPLOYMENT_DIR:?}}/SIGIL/{sigil}"')
-        # Honor a SLURM core reservation (e.g. `sbatch -c N`). `--nprocs` defaults to
-        # os.cpu_count(), which reports the whole node; Python >=3.13 lets PYTHON_CPU_COUNT
-        # override os.cpu_count(), so the backends pick up the allocation, not the node.
+        # Honor a SLURM core reservation (e.g. `sbatch -c N`), which os.cpu_count() would
+        # overshoot by reporting the whole node. Python >=3.13 lets PYTHON_CPU_COUNT override
+        # os.cpu_count(); 3.12 ignores it, so the backends do not rely on the interpreter --
+        # alaric/nprocs.py:default_nprocs() reads these variables itself (and falls back to
+        # SLURM_CPUS_PER_TASK / CPU affinity, so the allocation is honored even without this
+        # export). Exporting it anyway keeps third-party code under >=3.13 in line too.
         lines.extend(
             [
                 'if [ -n "${SLURM_CPUS_PER_TASK:-}" ]; then',

@@ -16,6 +16,7 @@ from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 
 from library import config
+from nprocs import default_nprocs
 from offsets import get_discrete_offsets
 from parse_pdb import parse_pdb
 from poses import PoseWriter, discover_organized
@@ -252,9 +253,12 @@ and the values in between are eliminated.""",
     parser.add_argument(
         "--nprocs",
         type=int,
-        default=os.cpu_count() or 1,
+        default=default_nprocs(),
         metavar="N",
-        help="Number of worker processes used to evaluate conformers (default: CPU count).",
+        help=(
+            "Number of worker processes used to evaluate conformers "
+            "(default: the SLURM CPU allocation if any, else the CPU count)."
+        ),
     )
     parser.add_argument(
         "--poselock",

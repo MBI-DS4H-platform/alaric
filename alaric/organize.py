@@ -27,6 +27,7 @@ from typing import Sequence
 import numpy as np
 from tqdm import tqdm
 
+from nprocs import default_nprocs
 from poses import (
     ARC_SUFFIX,
     ARC_ZSTD_SUFFIX,
@@ -76,7 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=1_000_000,
         help="Maximum pose rows to hold in memory for streaming scatter/write steps.",
     )
-    parser.add_argument("--nprocs", type=int, default=os.cpu_count() or 1)
+    parser.add_argument("--nprocs", type=int, default=default_nprocs())
     parser.add_argument(
         "--compress",
         action="store_true",
@@ -1273,7 +1274,7 @@ def organize_pose_dir(
     capacity: int = 2_000_000_000,
     max_poses_per_file: int = 100_000_000,
     chunk_poses: int = 1_000_000,
-    nprocs: int = os.cpu_count() or 1,
+    nprocs: int = default_nprocs(),
     compress: bool = False,
     local_tempdir: bool = False,
     local_stagedir: bool = False,

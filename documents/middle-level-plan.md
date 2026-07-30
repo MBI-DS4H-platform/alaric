@@ -244,6 +244,31 @@ Remote strategy (anchor/grow producers):
    to point that staging at node-local scratch. Size scratch for the decompressed footprint
    (~6 B/pose, ~4× on-disk).
 
+**Worker counts honor the SLURM CPU allocation, not the node.** Actions that default their
+worker count (`anchor --nprocs`, `rmsd --nprocs`, `organize --nprocs`, and the pose-index
+thread pool in `middle/checksum.py`) resolve it through `alaric/nprocs.py:default_nprocs()`,
+which checks in order:
+
+    ALARIC_NPROCS -> PYTHON_CPU_COUNT -> SLURM_CPUS_PER_TASK -> SLURM_CPUS_ON_NODE
+                  -> len(os.sched_getaffinity(0)) -> os.cpu_count() or 1
+
+Values that do not parse as a positive integer are skipped rather than fatal, so
+`PYTHON_CPU_COUNT=default` (legal under Python >=3.13) falls through to the next source.
+`ALARIC_NPROCS` is the deployment-wide manual override; an explicit `--nprocs` on the command
+line still beats everything.
+
+Rationale: `os.cpu_count()` reports the whole node and therefore oversubscribes an
+`sbatch -c N` reservation. The remote prologue exports `PYTHON_CPU_COUNT` from
+`SLURM_CPUS_PER_TASK`, which **only** works under Python >=3.13 — 3.12 ignores the variable
+entirely, so relying on the interpreter silently gave back the full node core count. Reading
+the allocation in Python makes this version-independent, and the affinity fallback covers
+cgroup-confined tasks that expose no SLURM env vars at all. `grow` and `anchor-refe` are
+deliberately excluded: their `--nprocs` defaults to 1 in the code, which is a real default,
+not an oversight.
+
+Worker counts are non-load-bearing, so resolving them from the environment cannot change a
+checksum.
+
 **Non-load-bearing knobs must be present in the chunk templates in commented-out form**
 (spec: middle-level.txt:153), via a bash array expanded with the `set -u`-safe idiom
 `${opts[@]+"${opts[@]}"}` (older HPC bash errors on empty `"${opts[@]}"`). The set

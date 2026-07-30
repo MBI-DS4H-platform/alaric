@@ -7,6 +7,7 @@ poses.py
 organize.py
 rna_pdb.py
 mutate.py
+nprocs.py
 ../fraglib/templates/A-ppdb.npy
 ../fraglib/templates/C-ppdb.npy
 ../fraglib/templates/G-ppdb.npy

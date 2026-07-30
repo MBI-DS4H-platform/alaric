@@ -6,7 +6,6 @@ import concurrent.futures as cf
 import gc
 from math import sqrt
 import multiprocessing as mp
-import os
 from pathlib import Path
 import sys
 from typing import Iterator
@@ -18,6 +17,7 @@ _ALARIC_DIR = Path(__file__).resolve().parent
 if str(_ALARIC_DIR) not in sys.path:
     sys.path.insert(0, str(_ALARIC_DIR))
 
+from nprocs import default_nprocs
 from poses import DEFAULT_POSE_CHUNK_SIZE, PoseChunk, PoseReader
 
 
@@ -157,8 +157,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--nprocs",
         type=_positive_int,
-        default=os.cpu_count() or 1,
-        help="Number of worker processes for RMSD evaluation.",
+        default=default_nprocs(),
+        help=(
+            "Number of worker processes for RMSD evaluation "
+            "(default: the SLURM CPU allocation if any, else the CPU count)."
+        ),
     )
     parser.add_argument(
         "--parallel-min-poses",

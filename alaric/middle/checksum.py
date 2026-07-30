@@ -13,6 +13,11 @@ from seamless.compression_utils import strip_compression_suffix
 from seamless.checksum.calculate_checksum import calculate_checksum
 from seamless.checksum.serialize import serialize_sync as serialize
 
+try:
+    from ..nprocs import default_nprocs
+except ImportError:  # direct script execution with ALARIC_DIR on PYTHONPATH
+    from nprocs import default_nprocs
+
 
 def sha256_bytes(data: bytes) -> str:
     return calculate_checksum(data)
@@ -92,9 +97,9 @@ def pose_index(pose_dir: Path) -> dict[str, str]:
     # hashlib both release the GIL, so a thread pool gives real parallelism (CPU) and overlaps
     # NFS reads. ``ThreadPoolExecutor.map`` preserves input order, and ``serialize(plain)``
     # sorts keys anyway, so the resulting INDEX is byte-identical to the serial version.
-    # Worker count follows os.cpu_count(), which honors the SLURM allocation via the
-    # PYTHON_CPU_COUNT exported in the generated scripts.
-    workers = min(len(paths), max(1, os.cpu_count() or 1))
+    # Worker count follows default_nprocs(), which honors a SLURM allocation on every
+    # supported Python version (os.cpu_count() would report the whole node under 3.12).
+    workers = min(len(paths), default_nprocs())
     if workers <= 1:
         return dict(_member(path) for path in paths)
     with ThreadPoolExecutor(max_workers=workers) as executor:
