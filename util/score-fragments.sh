@@ -34,7 +34,7 @@ fi
 Y=$1
 DATADIR=$2
 
-receptor_pdb="${DATADIR}/${Y}.pdb"
+receptor_pdb="${DATADIR}/${Y}-aa.pdb"
 if [[ ! -f "${receptor_pdb}" ]]; then
   echo "Receptor PDB not found: ${receptor_pdb}" >&2
   exit 1
