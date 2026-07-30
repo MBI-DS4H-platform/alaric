@@ -1,0 +1,3 @@
+action: identity
+input1: frag10-fwd-filter
+input2: frag10-anchor

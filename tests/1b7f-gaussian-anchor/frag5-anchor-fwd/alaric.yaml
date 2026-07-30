@@ -1,0 +1,9 @@
+action: anchor
+fragment: auto
+sequence: auto
+exclude: auto
+nucleotide: first
+protein: 1b7f_dom2
+precomputed_filter_name: gaussian
+precomputed_filter_threshold: r90
+resid: 256

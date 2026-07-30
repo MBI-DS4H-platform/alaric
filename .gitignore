@@ -21,8 +21,11 @@ tests/1b7f/frag4-fwd/
 tests/1b7f/frag4-merged/
 tests/1b7f/frag4-identity/
 tests/1b7f/frag4-det-*/
+tests/*/CACHE
+tests/*/DATA
 tests/1b7f-gaussian-anchor/*/*
-!tests/1b7f-gaussian-anchor/*/alaric.yaml
+!tests/1b7f-gaussian-anchor/frag*
+!tests/1b7f-gaussian-anchor/frag*/alaric.yaml
 tests/1b7f-gaussian-anchor-unbound/*/*
 !tests/1b7f-gaussian-anchor-unbound/frag*
 !tests/1b7f-gaussian-anchor-unbound/frag*/alaric.yaml

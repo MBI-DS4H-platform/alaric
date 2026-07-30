@@ -1,0 +1,4 @@
+action: filter
+input: frag10-fwd
+score_input: frag10-fwd-score
+threshold: -13.99
