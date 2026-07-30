@@ -28,3 +28,5 @@ unorganized-*.arc.zst
 .ORGANIZED-DONE
 tests/1b7f-project-*/
 alaric.egg-info/
+
+build/

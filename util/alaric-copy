@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+    echo "Usage: alaric-copy DIR" >&2
+    exit 2
+fi
+
+DIR=$1
+LEAF=$(basename -- "$DIR")
+A=$DIR/alaric.yaml
+
+if [[ -e $LEAF ]]; then
+    echo "alaric-copy: destination already exists: $LEAF" >&2
+    exit 1
+fi
+
+if [[ ! -f $A ]]; then
+    echo "alaric-copy: source file does not exist: $A" >&2
+    exit 1
+fi
+
+mkdir -- "$LEAF"
+cp -- "$A" "$LEAF/"

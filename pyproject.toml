@@ -19,7 +19,7 @@ dependencies = [
 include = ["alaric*"]
 
 [tool.setuptools]
-script-files = ["util/alaric-count-poses"]
+script-files = ["util/alaric-count-poses", "util/alaric-copy"]
 
 [project.scripts]
 alaric-sigil = "alaric.middle.sigil:main"
