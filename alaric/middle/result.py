@@ -48,11 +48,14 @@ def check(action_dir: str | Path = ".") -> None:
     project = Project.discover(action_dir)
     action = project.get_action_dir(action_dir)
     sigil = _sigil(action.path)
-    if (action.path / "result.txt").exists():
-        raise ResultError(f"{action.name}: result.txt already exists")
+    result_txt = action.path / "result.txt"
     local_checksum = _checksum(project, sigil)
     if local_checksum.is_file():
-        shutil.copyfile(local_checksum, action.path / "result.txt")
+        if result_txt.exists():
+            if result_txt.read_text().strip() != local_checksum.read_text().strip():
+                raise ResultError(f"{action.name}: result.txt does not match the cached checksum")
+        else:
+            shutil.copyfile(local_checksum, result_txt)
         return
     host = os.environ.get("ALARIC_REMOTE_HOST")
     if not host:
@@ -67,9 +70,13 @@ def check(action_dir: str | Path = ".") -> None:
     checksum = proc.stdout.strip()
     if not checksum:
         raise ResultError(f"remote result checksum not found for {sigil}")
+    if result_txt.exists():
+        if result_txt.read_text().strip() != checksum:
+            raise ResultError(f"{action.name}: result.txt does not match the remote checksum")
+    else:
+        result_txt.write_text(checksum + "\n")
     project.ensure_cache()
     local_checksum.write_text(checksum + "\n")
-    (action.path / "result.txt").write_text(checksum + "\n")
 
 
 def download(action_dir: str | Path = ".") -> None:
