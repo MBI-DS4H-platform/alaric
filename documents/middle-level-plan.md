@@ -218,31 +218,67 @@ NFS/Lustre filesystem is catastrophic (metadata storms, partition exhaustion, sl
 I/O); and any node-local scratch sized for the data must account for the **~4× decompression
 expansion**.
 
-**Critical constraint — the unorganized pool lives on the SHARED FS, not node-local
-scratch.** Each `chunkN.sh` is an independent job (e.g. one `sbatch` per chunk), so the
-sibling chunks and the organize job run on **different nodes**. Node-local
-`ALARIC_REMOTE_SCRATCH_DIR` is therefore **not visible** across them — it cannot hold the
-shared unorganized pool. The pool is written to the shared
-`ALARIC_REMOTE_RESULT_DIR/<SIGIL>.partial/`, and atomically renamed to `<SIGIL>/` once
-organized. `ALARIC_REMOTE_SCRATCH_DIR` (e.g. `/scratch` / `/ramscratch`) is used **only by
-the organize step** for `--local-tempdir` / `--local-stagedir` staging (organize honors
-`$TMPDIR`).
+**Critical constraint — a pool SHARED BETWEEN JOBS must live on the shared FS.** Each
+`chunkN.sh` is an independent job (e.g. one `sbatch` per chunk), so the sibling chunks and
+the organize job run on **different nodes**. Node-local `ALARIC_REMOTE_SCRATCH_DIR` is
+therefore **not visible** across them — it cannot hold a pool they all have to reach. Such a
+pool is written to the shared `ALARIC_REMOTE_RESULT_DIR/<SIGIL>.partial/` and atomically
+renamed to `<SIGIL>/` once organized.
+
+**A script that owns the whole pool itself does NOT put it on the shared FS.** Whenever one
+script produces every shard and organizes them, the unorganized pool never has to be visible
+to another node, so it goes to node-local scratch and only the organized result crosses onto
+the shared filesystem. That covers two cases:
+
+* the `remote` deployer's `run.sh` (one process, one node), and
+* the `remote-chunk` deployer's `run.sh`, which runs `chunk1..N` then `organize.sh` serially
+  in one job — chunking there is for bounding wall time, not for parallelism.
+
+The redirection is expressed as an env var (`ALARIC_UNORGANIZED_DIR` for pose producers,
+`ALARIC_SCORE_CHUNKS_DIR` for `score`'s per-chunk `score.npy` dirs), *not* baked into the
+chunk scripts, because `chunkN.sh` and `organize.sh` are the same files in both modes: they
+bind `POSE_POOL="${ALARIC_UNORGANIZED_DIR:-<SIGIL>.partial}"`, so an independently submitted
+chunk still defaults to the shared FS. `run.sh` sets the variable to a **`mktemp -d`**
+directory under `ALARIC_REMOTE_SCRATCH_DIR` and removes it on an EXIT trap.
+
+`mktemp` rather than a deterministic path is a correctness requirement, not tidiness. Shard
+publication is atomic (`poses.py:write_arc_file` writes a `.tmp` and renames it into place,
+and the `.tmp` droppings do not match `discover_unorganized`'s globs), so a crashed run
+leaves behind *valid* shards. Neither `run.sh` nor `chunkN.sh` has resume logic, so a re-run
+would write a second copy into a fresh `unorganized-PID/` and organize would fold both in — a
+silently doubled result that still checksums self-consistently. A name that can never be
+reused removes that, and also stops two concurrent submissions of the same sigil from sharing
+a pool. Adding resume later means per-chunk done-markers, which is safe *because* publication
+is atomic. Cleanup is best-effort: SIGKILL cannot be trapped, so a hard-killed job leaks its
+pool — harmless, since the name is unique.
+
+`grow`/`grow-test` are **excluded** from this redirection for now: they emit provenance
+sidecars next to each shard, written non-atomically, so their crash semantics need their own
+analysis. They keep the shared-FS pool in every mode.
 
 Remote strategy (anchor/grow producers):
-1. **Each `chunkN.sh` writes unorganized shards to the shared
-   `$ALARIC_REMOTE_RESULT_DIR/<SIGIL>.partial/`** (`--output`). Different chunks run as
+1. **Each `chunkN.sh` writes unorganized shards to `$POSE_POOL`**, which defaults to the
+   shared `$ALARIC_REMOTE_RESULT_DIR/<SIGIL>.partial/` (`--output`). Different chunks run as
    different processes/nodes; `--unorganized-subdirs` gives each a `unorganized-PID/` subdir
    so there are no collisions and no single directory with millions of entries (NFS metadata
    killer). `--unorganized-subdirs` is active by default.
 2. NFS-friendliness is tuned via **commented, non-load-bearing knobs** in the template
    (`--cache-size` ↑ → fewer/larger shards; `--nprocs`; `--poselock`).
-3. **`organize.sh`** organizes `<SIGIL>.partial/` in place, then the result is atomically
-   renamed to `<SIGIL>/` (+ `.INDEX`/`.CHECKSUM` sidecars). To minimize NFS I/O, the
-   template ships **commented** `--local-tempdir` (copy+decompress shards into node-local
+3. **`organize.sh`** organizes `$POSE_POOL` in place, writes the sidecars there, and — if the
+   pool was redirected — moves it into `<SIGIL>.partial/`; the result is then atomically
+   renamed to `<SIGIL>/` (+ `.INDEX`/`.CHECKSUM` sidecars). Computing the sidecar in the pool
+   means hashing the organized poses reads local disk instead of pulling the whole result
+   back over the shared FS.
+4. **The organize staging knobs depend on where the pool is**, so `organize.sh` picks them at
+   runtime. Pool on the shared FS: `--local-tempdir` (copy+decompress shards into node-local
    scratch, read-once) and `--local-stagedir` (write organized output to scratch, then move
-   in — non-atomic; crash loses both), with a commented `export TMPDIR="$ALARIC_REMOTE_SCRATCH_DIR"`
-   to point that staging at node-local scratch. Size scratch for the decompressed footprint
-   (~6 B/pose, ~4× on-disk).
+   in — non-atomic; crash loses both) are **active**, with `export
+   TMPDIR="$ALARIC_REMOTE_SCRATCH_DIR"` pointing that staging at node-local scratch. Size
+   scratch for the decompressed footprint (~6 B/pose, ~4× on-disk). Pool already node-local:
+   both are **skipped** — they would only add a local→local copy and that same ~4× expansion.
+5. `alaric-deploy remote-chunk` prints a warning that running the chunks in parallel may
+   degrade shared-filesystem performance, since that is the mode which forces the pool onto
+   the shared FS.
 
 **Worker counts honor the SLURM CPU allocation, not the node.** Actions that default their
 worker count (`anchor --nprocs`, `rmsd --nprocs`, `organize --nprocs`, and the pose-index

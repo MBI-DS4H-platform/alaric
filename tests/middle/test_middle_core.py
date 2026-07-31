@@ -15,7 +15,7 @@ from alaric.mask import main as mask_main
 import alaric.middle.deploy as deploy_module
 from alaric.middle.checksum import byte_checksum, write_array_sidecar
 from alaric.middle.deploy import deploy, generate_check_sh, generate_chunk_files, generate_run_sh
-from alaric.middle.errors import SchemaError
+from alaric.middle.errors import MiddleError, SchemaError
 from alaric.middle.graph import ActionGraph
 from alaric.middle.project import Project
 from alaric.middle.schema import normalize_action
@@ -420,9 +420,12 @@ def test_remote_score_deploy_defaults_to_compiled_kernel(tmp_path: Path) -> None
     assert "\n  compiled \\\n" in chunk
     assert "\n  jax \\\n" not in chunk
     chunk_root = f"${{ALARIC_REMOTE_RESULT_DIR:?}}/{sigils['frag4-score']}-CHUNKS"
-    assert f"CHUNK_DIR={chunk_root}/chunk-${{IDX}}" in chunk
+    # The per-chunk dir is bound through SCORE_CHUNKS, defaulting to the shared FS so an
+    # independently submitted chunk still writes where the organize job can see it.
+    assert f'SCORE_CHUNKS="${{ALARIC_SCORE_CHUNKS_DIR:-{chunk_root}}}"' in chunk
+    assert "CHUNK_DIR=${SCORE_CHUNKS}/chunk-${IDX}" in chunk
     assert '"$CHUNK_DIR/score.npy"' in chunk
-    assert f"score_concat.py {chunk_root} " in files["organize.sh"]
+    assert "score_concat.py ${SCORE_CHUNKS} " in files["organize.sh"]
     assert "--nchunks 2" in files["organize.sh"]
 
 
@@ -450,6 +453,130 @@ def test_remote_deploy_uses_sigil_dir_and_project_alias(tmp_path: Path, monkeypa
     assert ["ssh", "cluster", "ln", "-sfn", f"../SIGIL/{sigil}", "/remote/deploy/PROJECT/frag4-filter"] in calls
     assert ["ssh", "cluster", "ln", "-sfn", f"/remote/results/{sigil}", f"/remote/deploy/SIGIL/{sigil}/results"] in calls
     assert any(call[0] == "scp" and call[-1] == f"cluster:/remote/deploy/SIGIL/{sigil}/" for call in calls)
+
+
+def test_remote_anchor_keeps_unorganized_pool_off_the_shared_fs(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    project = Project.discover(tmp_path)
+    sigils = compute_project_sigils(project)
+    action = ActionGraph(project).build()["frag4-anchor"]
+    sigil = sigils["frag4-anchor"]
+    partial = f"${{ALARIC_REMOTE_RESULT_DIR:?}}/{sigil}.partial"
+
+    body = generate_run_sh(project, action, "remote")
+
+    # One process owns the whole pool, so the shards go to node-local scratch and only the
+    # organized result crosses onto the shared filesystem.
+    assert 'POSE_POOL="$(mktemp -d -p "${ALARIC_REMOTE_SCRATCH_DIR:-${TMPDIR:-/tmp}}"' in body
+    assert "trap 'rm -rf" in body and "' EXIT" in body
+    assert "--output ${POSE_POOL}" in body
+    assert "organize.py ${POSE_POOL}" in body
+    # The sidecar is computed on the pool, so hashing reads local disk, not the shared FS.
+    assert "result_sidecar.py pose ${POSE_POOL}" in body
+    assert f"mv ${{POSE_POOL}} {partial}" in body
+    # This script always makes its own pool; there is no override to honour.
+    assert "ALARIC_UNORGANIZED_DIR" not in body
+    # .partial must not be pre-created: the move across creates it, and mv into an
+    # existing directory would nest the pool inside it instead.
+    assert f"mkdir -p {partial}" not in body
+    # Staging the shards through scratch is pointless when they are already there.
+    assert "\n  --local-tempdir" not in body
+    assert "\n  --local-stagedir" not in body
+
+
+def test_remote_chunk_anchor_pool_defaults_to_shared_fs_and_run_sh_overrides(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    project = Project.discover(tmp_path)
+    sigils = compute_project_sigils(project)
+    action = ActionGraph(project).build()["frag4-anchor"]
+    sigil = sigils["frag4-anchor"]
+    partial = f"${{ALARIC_REMOTE_RESULT_DIR:?}}/{sigil}.partial"
+
+    files = generate_chunk_files(project, action, "remote-chunk", nchunks=2)
+
+    # Chunks are submitted independently and organize.sh runs on another node, so their
+    # shared pool must default to the shared filesystem.
+    for name in ("chunk1.sh", "chunk2.sh", "organize.sh"):
+        assert f'POSE_POOL="${{ALARIC_UNORGANIZED_DIR:-{partial}}}"' in files[name]
+    assert "--output ${POSE_POOL}" in files["chunk1.sh"]
+    assert "mktemp" not in files["chunk1.sh"]
+
+    # organize.sh serves both cases, so it decides at runtime.
+    organize = files["organize.sh"]
+    assert "organize.py ${POSE_POOL}" in organize
+    assert 'if [ -z "${ALARIC_UNORGANIZED_DIR:-}" ]; then' in organize
+    assert "organize_opts+=(--local-tempdir --local-stagedir)" in organize
+    assert 'if [ -n "${ALARIC_UNORGANIZED_DIR:-}" ]; then' in organize
+    assert f"  mv ${{POSE_POOL}} {partial}" in organize
+
+    # run.sh executes every chunk itself, so it can keep the pool node-local.
+    run_sh = files["run.sh"]
+    assert 'ALARIC_UNORGANIZED_DIR="$(mktemp -d -p ' in run_sh
+    assert "export ALARIC_UNORGANIZED_DIR" in run_sh
+    assert "' EXIT" in run_sh
+    assert f"mkdir -p {partial}" not in run_sh
+
+
+def test_remote_chunk_score_run_sh_redirects_chunk_dir(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    project = Project.discover(tmp_path)
+    compute_project_sigils(project)
+    action = ActionGraph(project).build()["frag4-score"]
+
+    files = generate_chunk_files(project, action, "remote-chunk", nchunks=2)
+
+    run_sh = files["run.sh"]
+    assert 'ALARIC_SCORE_CHUNKS_DIR="$(mktemp -d -p ' in run_sh
+    assert "export ALARIC_SCORE_CHUNKS_DIR" in run_sh
+    # score has no unorganized pool, so there are no pose sidecars to clean up.
+    assert 'trap \'rm -rf "${ALARIC_SCORE_CHUNKS_DIR}"\' EXIT' in run_sh
+    assert ".INDEX" not in run_sh
+
+
+def test_remote_grow_still_pools_on_the_shared_fs(tmp_path: Path) -> None:
+    """grow emits provenance sidecars, so its pool redirection is deferred."""
+    _write_project(tmp_path)
+    (tmp_path / "frag5-fwd" / "alaric.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "action": "grow",
+                "input": "frag4-filter",
+                "fragment": "auto",
+                "sequence": "auto",
+                "exclude": "auto",
+                "direction": "auto",
+                "crmsd": "auto",
+                "ovrmsd": "auto",
+            },
+            sort_keys=False,
+        )
+    )
+    project = Project.discover(tmp_path)
+    sigils = compute_project_sigils(project)
+    action = ActionGraph(project).build()["frag5-fwd"]
+    partial = f"${{ALARIC_REMOTE_RESULT_DIR:?}}/{sigils['frag5-fwd']}.partial"
+
+    body = generate_run_sh(project, action, "remote")
+    assert f"--output {partial}" in body
+    assert "mktemp" not in body
+    assert "ALARIC_UNORGANIZED_DIR" not in body
+
+
+def test_remote_chunk_deploy_warns_about_shared_fs(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _write_project(tmp_path)
+    project = Project.discover(tmp_path)
+    compute_project_sigils(project)
+
+    deploy("local-chunk", tmp_path / "frag4-score", nchunks=2)
+    assert capsys.readouterr().err == ""
+
+    with pytest.raises(MiddleError):
+        # Missing remote environment; the warning is emitted before that is checked.
+        deploy("remote-chunk", tmp_path / "frag4-anchor", nchunks=2)
+    assert (
+        "Warning: parallel execution of chunks may degrade network file system performance"
+        in capsys.readouterr().err
+    )
 
 
 def test_remote_chunk_python_paths_are_expandvars_compatible(tmp_path: Path) -> None:

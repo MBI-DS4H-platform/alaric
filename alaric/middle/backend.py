@@ -9,6 +9,16 @@ from .resolve import ResolvedAction, final_sequence
 from .schema import OUTPUT_KIND
 
 
+# Node-local scratch, with the same fallback chain the organize staging already uses.
+SCRATCH_EXPR = "${ALARIC_REMOTE_SCRATCH_DIR:-${TMPDIR:-/tmp}}"
+# Set by a wholesale run.sh to redirect an action's intermediate output onto node-local
+# scratch. Unset (the default) keeps that output on the shared result FS, which is what
+# independently submitted chunkN.sh jobs require: they run on different nodes than the
+# organize job, so a node-local pool would be invisible to it.
+POOL_ENV_VAR = "ALARIC_UNORGANIZED_DIR"
+SCORE_CHUNKS_ENV_VAR = "ALARIC_SCORE_CHUNKS_DIR"
+
+
 def q(value: str | Path | int | float) -> str:
     return shlex.quote(str(value))
 
@@ -72,26 +82,38 @@ def python_bin() -> str:
     return '"${PYTHON:-python}"'
 
 
-def organize_command(alaric_dir: str, output_dir: str, location: str) -> str:
-    # --compress and --max-poses-per-file are kept active (compression always on; max-poses
-    # is the pinned, non-load-bearing layout knob). The remaining non-load-bearing knobs are
-    # present but commented; uncommenting them never changes the canonical result.
-    #
-    # On remote (the pool lives on a network FS), --local-tempdir and --local-stagedir are
-    # **active by default**: organize reads the unorganized shards from node-local scratch
-    # (--local-tempdir) and writes the organized output to node-local scratch (--local-stagedir),
-    # then bulk-moves it onto the FS — so NFS is touched only for the initial shard read and
-    # the final move, not random I/O during bucketing. TMPDIR points that staging at
-    # node-local scratch (size it for the decompressed input ~6 B/pose plus the organized
-    # output). NB: --local-stagedir is non-atomic (a crash between deleting the unorganized
-    # shards and committing the staged output loses both — fine for a regenerable chunk pool).
+def organize_command(alaric_dir: str, output_dir: str, location: str, *, pool: str = "shared") -> str:
+    """Render the organize invocation for a pose-producing action.
+
+    --compress and --max-poses-per-file are kept active (compression always on; max-poses
+    is the pinned, non-load-bearing layout knob). The remaining non-load-bearing knobs are
+    present but commented; uncommenting them never changes the canonical result.
+
+    ``pool`` says where the unorganized shards live, which decides the staging knobs:
+
+    * ``shared`` — on the network FS, because sibling chunks and organize.sh run as
+      independent jobs on different nodes. --local-tempdir and --local-stagedir are then
+      **active by default**: organize reads the shards through node-local scratch and
+      writes the organized output there too, bulk-moving it onto the FS at the end — so
+      the FS sees one bulk read and one bulk write instead of random I/O during bucketing.
+      NB: --local-stagedir is non-atomic (a crash between deleting the unorganized shards
+      and committing the staged output loses both — fine for a regenerable chunk pool).
+    * ``local`` — already on node-local scratch, because a single script produced the whole
+      pool itself. Both knobs are then dead weight: --local-tempdir would copy and
+      decompress local→local (~4× scratch, ~6 B/pose) and --local-stagedir would stage a
+      local→local move. They stay commented.
+    * ``auto`` — one script serves both cases (the chunk deployer's organize.sh), so the
+      choice is deferred to runtime and keyed on POOL_ENV_VAR.
+
+    TMPDIR points any staging that does happen at node-local scratch.
+    """
     remote = location == "remote"
     lines: list[str] = []
     if remote:
-        lines.append('export TMPDIR="${ALARIC_REMOTE_SCRATCH_DIR:-${TMPDIR:-/tmp}}"')
+        lines.append(f'export TMPDIR="{SCRATCH_EXPR}"')
     lines.append("# Non-load-bearing organize knobs (uncomment to tune; never change the result):")
     lines.append("organize_opts=(")
-    if remote:
+    if remote and pool == "shared":
         lines.append("  --local-tempdir         # read shards from node-local scratch (avoids random NFS reads)")
         lines.append("  --local-stagedir        # write organized output to node-local scratch, then bulk-move to the FS")
     else:
@@ -101,6 +123,16 @@ def organize_command(alaric_dir: str, output_dir: str, location: str) -> str:
     lines.append("#  --capacity 500000000")
     lines.append("#  --chunk-poses 1000000")
     lines.append(")")
+    if remote and pool == "auto":
+        lines.extend(
+            [
+                f'if [ -z "${{{POOL_ENV_VAR}:-}}" ]; then',
+                "  # Shards are on the shared FS: stage the reads and the organized writes",
+                "  # through node-local scratch so the FS sees bulk instead of random I/O.",
+                "  organize_opts+=(--local-tempdir --local-stagedir)",
+                "fi",
+            ]
+        )
     lines.append(
         f"{python_bin()} {alaric_dir}/organize.py {shell_path(output_dir)} "
         '--compress --max-poses-per-file 100000000 ${organize_opts[@]+"${organize_opts[@]}"}'
@@ -114,7 +146,7 @@ def score_concat_command(alaric_dir: str, output_dir: str, chunks_dir: str, loca
     # the output file is built locally and then copied to the final (network FS) destination.
     lines: list[str] = []
     if location == "remote":
-        lines.append('export TMPDIR="${ALARIC_REMOTE_SCRATCH_DIR:-${TMPDIR:-/tmp}}"')
+        lines.append(f'export TMPDIR="{SCRATCH_EXPR}"')
     lines.append(
         f"{python_bin()} {alaric_dir}/score_concat.py {shell_path(chunks_dir)} "
         f"{shell_path(f'{output_dir}/score.npy')} --nchunks " + "{{ nchunks }}"

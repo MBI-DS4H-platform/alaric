@@ -6,9 +6,18 @@ import posixpath
 import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
-from .backend import render_template, template_context
+from .backend import (
+    POOL_ENV_VAR,
+    SCORE_CHUNKS_ENV_VAR,
+    SCRATCH_EXPR,
+    organize_command,
+    render_template,
+    score_concat_command,
+    template_context,
+)
 from .checksum import byte_checksum
 from .errors import MiddleError
 from .graph import ActionGraph
@@ -23,6 +32,12 @@ from .sigil import compute_project_sigils
 #   grow / grow-test    -> source poses (--pose-range)
 #   score                -> source poses (POSE_START/POSE_END)
 CHUNKABLE = {"anchor", "anchor-test", "anchor-refe", "grow", "grow-test", "score"}
+# Actions whose producer writes an unorganized shard pool that the organize step then
+# consumes, and whose pool may therefore be redirected to node-local scratch whenever a
+# single script owns the whole pool (see _mktemp_pool_lines). grow/grow-test are excluded
+# for now: they emit provenance sidecars alongside each shard, written non-atomically, so
+# their crash semantics need their own analysis.
+POOL_ACTIONS = {"anchor", "anchor-test", "anchor-refe"}
 # Separates the per-chunk body from the organize/finalize body in chunk templates.
 ORGANIZE_DELIM = "### ORGANIZE ###"
 # Remote env vars that are defined in the *local* deployer environment and must be
@@ -155,15 +170,20 @@ def _prologue(local: bool, sigil: str) -> list[str]:
     return lines
 
 
-def _compute_dirs(action: ResolvedAction, sigil: str, local: bool) -> tuple[str, str, list[str]]:
+def _compute_dirs(
+    action: ResolvedAction, sigil: str, local: bool, *, create_output: bool = True
+) -> tuple[str, str, list[str]]:
     """Return (output_dir, final_dir, setup_lines).
 
-    Remote: the (unorganized) output pool lives on the **shared** result filesystem at
-    ``$ALARIC_REMOTE_RESULT_DIR/<sigil>.partial`` — NOT on ``$ALARIC_REMOTE_SCRATCH_DIR``,
-    which is node-local and therefore not visible to the other SLURM nodes that run the
-    sibling chunk jobs and the organize job. The organize step stages *its own* reads/writes
-    to node-local scratch via ``--local-tempdir`` / ``--local-stagedir`` (commented knobs).
-    The completed pool is atomically renamed ``.partial`` -> final.
+    Remote: the result is built under ``$ALARIC_REMOTE_RESULT_DIR/<sigil>.partial`` and
+    atomically renamed to ``<sigil>`` once complete.
+
+    When the *unorganized* pool is shared between separately submitted jobs it has to live
+    on that same shared filesystem — NOT on ``$ALARIC_REMOTE_SCRATCH_DIR``, which is
+    node-local and therefore invisible to the other SLURM nodes running the sibling chunk
+    jobs and the organize job. A script that owns the whole pool itself redirects it to
+    node-local scratch instead; ``create_output`` is then False, because ``.partial`` is
+    created by moving the pool across and ``mv`` into an existing directory would nest it.
     """
     if local:
         output_dir = f"../CACHE/results/{sigil}"
@@ -171,8 +191,53 @@ def _compute_dirs(action: ResolvedAction, sigil: str, local: bool) -> tuple[str,
         return output_dir, output_dir, setup
     final_dir = f"${{ALARIC_REMOTE_RESULT_DIR:?}}/{sigil}"
     output_dir = f"{final_dir}.partial"
-    setup = [f"rm -rf {output_dir} {final_dir}", f"mkdir -p {output_dir} ${{ALARIC_REMOTE_RESULT_DIR:?}}"]
+    setup = [f"rm -rf {output_dir} {final_dir}"]
+    if create_output:
+        setup.append(f"mkdir -p {output_dir} ${{ALARIC_REMOTE_RESULT_DIR:?}}")
+    else:
+        setup.append("mkdir -p ${ALARIC_REMOTE_RESULT_DIR:?}")
     return output_dir, final_dir, setup
+
+
+def _mktemp_pool_lines(sigil: str, var: str, *, export: bool, sidecars: bool) -> list[str]:
+    """Create a unique node-local pool dir and register best-effort cleanup for it.
+
+    ``mktemp`` rather than a deterministic path, because a surviving pool is a correctness
+    hazard rather than a head start. Shard publication is atomic (``poses.py`` writes to a
+    temp name and renames into place), so a crashed run leaves behind *valid* shards; since
+    neither run.sh nor chunkN.sh has any resume logic, a re-run would write a second copy
+    into a fresh ``unorganized-<pid>/`` subdir and organize would fold both in — a silently
+    doubled result that still checksums self-consistently. A name that can never be reused
+    removes that failure mode outright, and also keeps concurrent submissions of the same
+    sigil from sharing a pool.
+
+    Cleanup is best-effort. An EXIT trap covers a normal exit, a ``set -e`` failure, and
+    termination by SIGTERM/SIGINT/SIGHUP alike (bash runs EXIT traps when a fatal signal
+    kills it, so naming those signals as well would only run the handler twice). SIGKILL
+    cannot be trapped at all, so a hard-killed job — the OOM killer, ``scancel -9``, or
+    anything past SLURM's KillWait — leaks its pool. That is harmless precisely because the
+    name is unique and can never be adopted by a later run; size scratch accordingly and
+    rely on its age-reaping.
+    """
+    ref = "${" + var + "}"
+    targets = [f'"{ref}"']
+    if sidecars:
+        targets.extend([f'"{ref}.INDEX"', f'"{ref}.CHECKSUM"'])
+    lines = [f'{var}="$(mktemp -d -p "{SCRATCH_EXPR}" alaric-{sigil}-XXXXXXXX)"']
+    if export:
+        lines.append(f"export {var}")
+    lines.append("trap 'rm -rf " + " ".join(targets) + "' EXIT")
+    return lines
+
+
+def _pool_default_lines(var: str, name: str, default: str, what: str) -> list[str]:
+    """Bind a chunk script's intermediate dir, honouring a wholesale run.sh's override."""
+    return [
+        f"# {what}. Defaults to the shared result filesystem because sibling chunks and",
+        "# organize.sh may run as separate jobs on separate nodes; the run.sh that executes",
+        "# every chunk itself overrides this to node-local scratch.",
+        f'{name}="${{{var}:-{default}}}"',
+    ]
 
 
 def _sidecar_command(kind: str, result_dir: str, sigil: str, *, local: bool, alaric_dir: str) -> str:
@@ -197,10 +262,38 @@ def _finalize_lines(
     result_kind: str,
     local: bool,
     alaric_dir: str,
+    *,
+    payload_dir: str | None = None,
+    payload_guard: str | None = None,
 ) -> list[str]:
-    lines = [_sidecar_command(result_kind, output_dir, sigil, local=local, alaric_dir=alaric_dir)]
+    """Write the result sidecar, then promote the partial result to its final name.
+
+    ``payload_dir``: the finished payload sits in a node-local pool rather than in
+    ``output_dir``. The sidecar is computed there — so hashing the organized poses reads
+    local disk instead of pulling the whole result back over the shared filesystem — and the
+    pool is moved into ``output_dir`` afterwards. The cross-filesystem move lands on the
+    ``.partial`` name, so the final name still only ever appears via an atomic rename.
+
+    ``payload_guard``: a shell test to wrap that move in. The chunk deployer's organize.sh
+    serves both the redirected and the non-redirected case, and in the latter the pool *is*
+    ``output_dir``, where moving it onto itself would fail.
+    """
+    payload = payload_dir or output_dir
+    lines = [_sidecar_command(result_kind, payload, sigil, local=local, alaric_dir=alaric_dir)]
     if local:
         return lines
+    if payload_dir is not None:
+        move = [
+            f"mv {payload}.INDEX {output_dir}.INDEX",
+            f"mv {payload}.CHECKSUM {output_dir}.CHECKSUM",
+            f"mv {payload} {output_dir}",
+        ]
+        if payload_guard is None:
+            lines.extend(move)
+        else:
+            lines.append(f"if {payload_guard}; then")
+            lines.extend(f"  {line}" for line in move)
+            lines.append("fi")
     # output_dir is "<final>.partial"; atomically promote it (and its pose sidecars) to final.
     if result_kind == "pose":
         lines.extend(
@@ -273,20 +366,41 @@ def generate_run_sh(project: Project, action: ResolvedAction, deployer: str, nch
     local = deployer.startswith("local")
     location = "local" if local else "remote"
     alaric_dir = _alaric_dir_expr(local)
-    output_dir, final_dir, setup = _compute_dirs(action, sigil, local)
+    # One process owns the whole pool here, so the unorganized shards never need to be
+    # visible to another node: keep them on node-local scratch and let only the organized
+    # result cross onto the shared filesystem.
+    # A plain variable, not POOL_ENV_VAR: this script always creates its own pool, so there
+    # is nothing for an inherited override to mean here.
+    use_pool = not local and action.action in POOL_ACTIONS
+    output_dir, final_dir, setup = _compute_dirs(action, sigil, local, create_output=not use_pool)
+    pool = "${POSE_POOL}" if use_pool else None
     lines = _prologue(local, sigil)
     lines.append("./check.sh")
     lines.append("")
     lines.append(_pythonpath_line(alaric_dir))
     lines.append("")
     lines.extend(setup)
+    extra_context: dict[str, object] | None = None
+    if pool is not None:
+        lines.extend(_mktemp_pool_lines(sigil, "POSE_POOL", export=False, sidecars=True))
+        extra_context = {"organize_command": organize_command(alaric_dir, pool, location, pool="local")}
     lines.extend(
         render_action_template(
-            project, action, deployer=deployer, alaric_dir=alaric_dir, output_dir=output_dir, location=location
+            project,
+            action,
+            deployer=deployer,
+            alaric_dir=alaric_dir,
+            output_dir=pool or output_dir,
+            location=location,
+            extra_context=extra_context,
         )
     )
     result_kind = _result_output_kind(action)
-    lines.extend(_finalize_lines(action, output_dir, final_dir, sigil, result_kind, local, alaric_dir))
+    lines.extend(
+        _finalize_lines(
+            action, output_dir, final_dir, sigil, result_kind, local, alaric_dir, payload_dir=pool
+        )
+    )
     if local:
         lines.extend(_local_success_lines(sigil))
     lines.append("")
@@ -308,7 +422,12 @@ def generate_chunk_files(
     local = deployer.startswith("local")
     location = "local" if local else "remote"
     alaric_dir = _alaric_dir_expr(local)
-    output_dir, final_dir, setup = _compute_dirs(action, sigil, local)
+    # chunkN.sh may be submitted on its own, so its intermediate output has to default to
+    # the shared filesystem. Only run.sh — which executes every chunk plus organize itself,
+    # in one job on one node — redirects that output to node-local scratch.
+    use_pool = not local and action.action in POOL_ACTIONS
+    use_score_pool = not local and action.action == "score"
+    output_dir, final_dir, setup = _compute_dirs(action, sigil, local, create_output=not use_pool)
     n = max(1, int(nchunks or 1))
     if action.action == "anchor-test" and "conformer" in action.params:
         n = 1
@@ -319,7 +438,28 @@ def generate_chunk_files(
     else:
         chunk_tpl, organize_tpl = template_text, ""
 
-    base_ctx = template_context(action, alaric_dir=alaric_dir, output_dir=output_dir, location=location)
+    pool_lines: list[str] = []
+    pool = None
+    if use_pool:
+        pool = "${POSE_POOL}"
+        pool_lines = _pool_default_lines(POOL_ENV_VAR, "POSE_POOL", output_dir, "Unorganized shard pool")
+    elif use_score_pool:
+        pool_lines = _pool_default_lines(
+            SCORE_CHUNKS_ENV_VAR, "SCORE_CHUNKS", f"{final_dir}-CHUNKS", "Per-chunk score output"
+        )
+
+    base_ctx = template_context(
+        action, alaric_dir=alaric_dir, output_dir=pool or output_dir, location=location
+    )
+    if use_pool:
+        # organize.sh is the same file whether or not run.sh redirected the pool, so the
+        # staging knobs have to be resolved at runtime rather than baked in here.
+        base_ctx["organize_command"] = organize_command(alaric_dir, pool, location, pool="auto")
+    elif use_score_pool:
+        base_ctx["score_chunks_path"] = "${SCORE_CHUNKS}"
+        base_ctx["score_concat_command"] = score_concat_command(
+            alaric_dir, output_dir, "${SCORE_CHUNKS}", location
+        )
     pp = _pythonpath_line(alaric_dir)
     result_kind = _result_output_kind(action)
 
@@ -337,7 +477,10 @@ def generate_chunk_files(
         lines.append("")
         lines.append(pp)
         lines.append("")
-        lines.append(f"mkdir -p {output_dir}")
+        if pool_lines:
+            lines.extend(pool_lines)
+            lines.append("")
+        lines.append(f"mkdir -p {pool or output_dir}")
         lines.append("")
         lines.append(body)
         lines.append("")
@@ -354,9 +497,24 @@ def generate_chunk_files(
     org_lines.append("")
     if local:
         org_lines.append("mkdir -p ../CACHE/checksum")
+    if pool_lines:
+        org_lines.extend(pool_lines)
+        org_lines.append("")
     if org_body:
         org_lines.append(org_body)
-    org_lines.extend(_finalize_lines(action, output_dir, final_dir, sigil, result_kind, local, alaric_dir))
+    org_lines.extend(
+        _finalize_lines(
+            action,
+            output_dir,
+            final_dir,
+            sigil,
+            result_kind,
+            local,
+            alaric_dir,
+            payload_dir=pool,
+            payload_guard=f'[ -n "${{{POOL_ENV_VAR}:-}}" ]' if pool else None,
+        )
+    )
     if local:
         org_lines.extend(_local_success_lines(sigil))
     org_lines.append("")
@@ -368,7 +526,11 @@ def generate_chunk_files(
     run_lines.append(pp)
     run_lines.append("")
     run_lines.extend(setup)
-    if action.action == "score":
+    if use_pool:
+        run_lines.extend(_mktemp_pool_lines(sigil, POOL_ENV_VAR, export=True, sidecars=True))
+    elif use_score_pool:
+        run_lines.extend(_mktemp_pool_lines(sigil, SCORE_CHUNKS_ENV_VAR, export=True, sidecars=False))
+    elif action.action == "score":
         run_lines.append(f"rm -rf {base_ctx['score_chunks_path']}")
     run_lines.append("")
     for idx in range(1, n + 1):
@@ -425,6 +587,14 @@ def _remote_push(*, host: str, action, sigil: str, files: dict[str, str], file_f
 def deploy(deployer: str, action_dir: str | Path = ".", nchunks: int | None = None) -> None:
     if deployer not in {"local", "local-chunk", "remote", "remote-chunk"}:
         raise MiddleError(f"unsupported deployer: {deployer}")
+    if deployer == "remote-chunk":
+        # Submitting the chunks separately is the whole point of this deployer, but it also
+        # forces their unorganized output onto the shared filesystem (only the generated
+        # run.sh, which runs them serially in one job, can keep it on node-local scratch).
+        print(
+            "Warning: parallel execution of chunks may degrade network file system performance",
+            file=sys.stderr,
+        )
     project = Project.discover(action_dir)
     action = project.get_action_dir(action_dir)
     if not (action.path / "sigil.txt").is_file():
