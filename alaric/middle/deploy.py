@@ -170,6 +170,32 @@ def _prologue(local: bool, sigil: str) -> list[str]:
     return lines
 
 
+def _stale_guard_lines(sigil: str) -> list[str]:
+    """Guard a local, directly-runnable script against an alaric.yaml edited after deploy.
+
+    Bakes the deploy-time sigil into ``$SIGIL`` and refuses to run if either this action was
+    already completed (``result.txt`` present -- rerunning would silently redo work that a
+    fresh ``alaric-deploy`` should instead account for) or ``alaric.yaml`` has since changed
+    underneath it. The latter is detected by recomputing sigil.txt for just this action and
+    its upstream dependencies (``alaric-sigil --pool .``) and comparing against ``$SIGIL``:
+    that recomputation itself errors out whenever any sigil in the closure has drifted and
+    isn't safely re-computable (e.g. a stale sigil with a result.txt already on disk), which
+    is exactly the same failure this guard needs to catch.
+    """
+    return [
+        f'SIGIL="{sigil}"',
+        "",
+        "if [ -f result.txt ]; then",
+        '  echo "result.txt already exists; refusing to run" >&2',
+        "  exit 1",
+        "fi",
+        "if ! alaric-sigil --pool . >/dev/null || [ \"$(cat sigil.txt)\" != \"$SIGIL\" ]; then",
+        '  echo "stale sigil, re-run alaric-deploy" >&2',
+        "  exit 1",
+        "fi",
+    ]
+
+
 def _compute_dirs(
     action: ResolvedAction, sigil: str, local: bool, *, create_output: bool = True
 ) -> tuple[str, str, list[str]]:
@@ -375,6 +401,9 @@ def generate_run_sh(project: Project, action: ResolvedAction, deployer: str, nch
     output_dir, final_dir, setup = _compute_dirs(action, sigil, local, create_output=not use_pool)
     pool = "${POSE_POOL}" if use_pool else None
     lines = _prologue(local, sigil)
+    if local:
+        lines.extend(_stale_guard_lines(sigil))
+        lines.append("")
     lines.append("./check.sh")
     lines.append("")
     lines.append(_pythonpath_line(alaric_dir))
@@ -471,6 +500,9 @@ def generate_chunk_files(
         ctx["chunk_index"] = idx
         body = render_template(chunk_tpl, ctx).strip()
         lines = _prologue(local, sigil)
+        if local:
+            lines.extend(_stale_guard_lines(sigil))
+            lines.append("")
         # Each chunk is an independent entry point (e.g. submitted to SLURM on its own),
         # so it must verify input materialization itself.
         lines.append("./check.sh")
@@ -597,8 +629,7 @@ def deploy(deployer: str, action_dir: str | Path = ".", nchunks: int | None = No
         )
     project = Project.discover(action_dir)
     action = project.get_action_dir(action_dir)
-    if not (action.path / "sigil.txt").is_file():
-        compute_project_sigils(project, targets=[action.name])
+    compute_project_sigils(project, targets=[action.name], force=True)
     graph = ActionGraph(project)
     resolved = graph.build([action.name])
     resolved_action = resolved[action.name]

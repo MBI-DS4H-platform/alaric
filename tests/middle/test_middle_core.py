@@ -135,6 +135,86 @@ def test_deploy_auto_sigils_only_target_dependency_closure(tmp_path: Path) -> No
     assert (tmp_path / "frag4-filter" / "run.sh").is_file()
 
 
+def test_run_sh_guards_against_stale_sigil_and_existing_result(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    project = Project.discover(tmp_path)
+    sigils = compute_project_sigils(project)
+    action = ActionGraph(project).build()["frag4-score"]
+    sigil = sigils["frag4-score"]
+
+    body = generate_run_sh(project, action, "local")
+    assert f'SIGIL="{sigil}"' in body
+    assert "if [ -f result.txt ]; then" in body
+    assert 'echo "result.txt already exists; refusing to run" >&2' in body
+    assert "alaric-sigil --pool ." in body
+    assert 'echo "stale sigil, re-run alaric-deploy" >&2' in body
+    # The result.txt guard and the sigil guard must both run before check.sh / setup.
+    assert body.index("if [ -f result.txt ]") < body.index("./check.sh")
+    assert body.index("alaric-sigil --pool .") < body.index("./check.sh")
+    assert body.index("if [ -f result.txt ]") < body.index("alaric-sigil --pool .")
+
+    # Remote scripts have no local alaric.yaml/sigil.txt to compare against.
+    remote_body = generate_run_sh(project, action, "remote")
+    assert "alaric-sigil" not in remote_body
+    assert "result.txt already exists" not in remote_body
+
+
+def test_chunk_scripts_guard_but_organize_and_wrapper_run_sh_dont(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    project = Project.discover(tmp_path)
+    sigils = compute_project_sigils(project)
+    action = ActionGraph(project).build()["frag4-score"]
+    sigil = sigils["frag4-score"]
+
+    files = generate_chunk_files(project, action, "local-chunk", nchunks=2)
+    for name in ("chunk1.sh", "chunk2.sh"):
+        body = files[name]
+        assert f'SIGIL="{sigil}"' in body
+        assert "alaric-sigil --pool ." in body
+        assert body.index("alaric-sigil --pool .") < body.index("./check.sh")
+    # organize.sh and the convenience run.sh wrapper are reached only through chunkN.sh,
+    # which already guards; they don't need their own copy of the check.
+    assert "alaric-sigil --pool ." not in files["organize.sh"]
+    assert "alaric-sigil --pool ." not in files["run.sh"]
+
+
+def test_sigil_pool_limits_to_action_and_upstream_dependencies(tmp_path: Path) -> None:
+    from alaric.middle.sigil import main as sigil_main
+
+    _write_project(tmp_path)
+    action_dir = tmp_path / "frag4-filter"
+
+    assert sigil_main(["--pool", str(action_dir)]) == 0
+
+    assert (tmp_path / "frag4-anchor" / "sigil.txt").is_file()
+    assert (tmp_path / "frag4-score" / "sigil.txt").is_file()
+    assert (tmp_path / "frag4-filter" / "sigil.txt").is_file()
+    assert not (tmp_path / "frag5-fwd" / "sigil.txt").exists()
+
+
+def test_deploy_recomputes_stale_sigil_on_redeploy(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    project = Project.discover(tmp_path)
+    compute_project_sigils(project)
+    action_dir = tmp_path / "frag4-filter"
+
+    deploy("local", action_dir)
+    old_sigil = (action_dir / "sigil.txt").read_text().strip()
+
+    anchor_dir = tmp_path / "frag4-anchor"
+    spec = yaml.safe_load((anchor_dir / "alaric.yaml").read_text())
+    spec["resid"] = 2
+    anchor_dir.joinpath("alaric.yaml").write_text(yaml.safe_dump(spec, sort_keys=False))
+
+    # Before the fix, deploy() only recomputed sigils when sigil.txt was entirely missing,
+    # so this second deploy would silently keep baking the stale sigil into run.sh.
+    deploy("local", action_dir)
+    new_sigil = (action_dir / "sigil.txt").read_text().strip()
+
+    assert new_sigil != old_sigil
+    assert new_sigil in (action_dir / "run.sh").read_text()
+
+
 def test_check_sh_reports_status_message(tmp_path: Path) -> None:
     _write_project(tmp_path)
     project = Project.discover(tmp_path)

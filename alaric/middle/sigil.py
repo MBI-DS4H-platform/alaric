@@ -109,10 +109,21 @@ def main(argv: list[str] | None = None) -> int:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--force", action="store_true")
     group.add_argument("--delete", action="store_true")
+    parser.add_argument(
+        "--pool",
+        metavar="DIR",
+        help="limit sigil generation to the action at DIR and its upstream dependencies",
+    )
     parser.add_argument("project_root", nargs="?", default=".")
     args = parser.parse_args(argv)
-    project = Project.discover(args.project_root)
-    sigils = compute_project_sigils(project, force=args.force, delete=args.delete)
+    if args.pool is not None:
+        project = Project.discover(args.pool)
+        action = project.get_action_dir(args.pool)
+        targets: list[str] | None = [action.name]
+    else:
+        project = Project.discover(args.project_root)
+        targets = None
+    sigils = compute_project_sigils(project, force=args.force, delete=args.delete, targets=targets)
     for name in sorted(sigils):
         print(f"{name}\t{sigils[name]}")
     return 0
