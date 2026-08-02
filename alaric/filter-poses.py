@@ -2,10 +2,11 @@
 """Filter poses by energy threshold.
 
 Usage:
-  python filter-poses.py [--force] POSE_DIR ENERGY_FILE THRESHOLD OUT_DIR
+  python filter-poses.py [--force] [--compress] POSE_DIR ENERGY_FILE THRESHOLD OUT_DIR
 
 ENERGY_FILE must contain one float per pose, in pose order.
-Writes filtered poses and provenance.npy (uint64, 0-based indices into POSE_DIR).
+Writes filtered poses and provenance.npy (uint64, 0-based indices into POSE_DIR),
+zstd-compressed with --compress.
 """
 
 import sys
@@ -18,6 +19,7 @@ _CODE_DIR = Path(__file__).resolve().parent
 if str(_CODE_DIR) not in sys.path:
     sys.path.insert(0, str(_CODE_DIR))
 
+from npy_io import save_npy
 from organize import main as organize_main
 from poses import PoseReader, PoseWriter
 
@@ -34,6 +36,14 @@ def parse_args():
         "--force",
         action="store_true",
         help="Remove OUT_DIR first if it already exists and is non-empty.",
+    )
+    p.add_argument(
+        "--compress",
+        action="store_true",
+        help=(
+            "Write zstd-compressed output: organized poses-*.arc.zst instead of "
+            "poses-*.arc, and provenance.npy.zst instead of provenance.npy."
+        ),
     )
     return p.parse_args()
 
@@ -97,12 +107,20 @@ def main():
     print(f"Wrote {len(written)} arc shard(s)", flush=True)
 
     # Organize the unorganized shards produced by PoseWriter.
-    organize_rc = organize_main([str(out_dir)])
+    organize_argv = [str(out_dir)]
+    if args.compress:
+        organize_argv.append("--compress")
+    organize_rc = organize_main(organize_argv)
     if organize_rc:
         raise RuntimeError(f"organize failed with exit code {organize_rc}")
 
-    np.save(out_dir / "provenance.npy", provenance)
-    print(f"Wrote provenance.npy: shape={provenance.shape}, dtype={provenance.dtype}", flush=True)
+    provenance_path = save_npy(
+        out_dir / "provenance.npy", provenance, compress=bool(args.compress)
+    )
+    print(
+        f"Wrote {provenance_path.name}: shape={provenance.shape}, dtype={provenance.dtype}",
+        flush=True,
+    )
     print(f"Done → {out_dir}", flush=True)
 
 

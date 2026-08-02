@@ -176,7 +176,14 @@ The check.sh is written as well.
 Chunk deployers generate N=1..nchunks chunkN.sh scripts. For grow.py, they generate an organize.sh script.
 For local deployment, they generate a run.sh that calls all chunkN.sh and then the organize.sh in tandem.
 In the templates, non-load-bearing parameters are present in commented-out form.
-In general, pose compression is always enabled (grow/anchor/organize).
+In general, compression is always enabled: poses (grow/anchor/organize/filter/identity),
+the per-pose index arrays that travel with them (provenance.npy.zst, map-*.npy.zst,
+order-array.npy.zst), and mask.npy.zst. Compression is transparent for checksums and for
+readers, which resolve either form, so it changes neither a result checksum nor a sigil;
+a consumer (and the sidecar step) is always given the logical, uncompressed name.
+
+score.npy is the deliberate exception: it is consumed by memory-mapped streaming
+(filter-poses, score_concat) at gigapose scale, and float energies compress poorly.
 
 # alaric-result-clean
 

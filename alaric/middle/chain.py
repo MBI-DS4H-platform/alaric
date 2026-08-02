@@ -43,6 +43,7 @@ _ALARIC_DIR = Path(__file__).resolve().parents[1]
 if str(_ALARIC_DIR) not in sys.path:
     sys.path.insert(0, str(_ALARIC_DIR))
 
+from npy_io import find_npy, load_npy  # noqa: E402
 from poses import (  # noqa: E402
     DEFAULT_BUCKET_SIZE,
     PoseReader,
@@ -164,14 +165,22 @@ class ChainGraph:
         path = self._pool_dir(pool)
         if not path.is_dir():
             return False
-        return any((path / name).is_file() for name in self._filter_provenance_arrays(pool))
+        return any(
+            find_npy(path / name) is not None
+            for name in self._filter_provenance_arrays(pool)
+        )
 
     def _load_step_array(self, step: dict) -> np.ndarray:
+        # The pool graph records the *logical* array name; on disk it may be the
+        # zstd-compressed form, which is what the pose-producing actions now write.
         pool = step["pool"]
         name = step["array"]
         path = self._pool_dir(pool) / name
-        if path.is_file():
-            return np.load(path, mmap_mode="r")
+        found = find_npy(path)
+        if found is not None:
+            # Compressed arrays cannot be mapped; they are read whole, which costs no
+            # more than the int64 copy _compose makes of them either way.
+            return load_npy(found, mmap=True)
         # The array is unavailable. Follow the user's rule: a pool is walkable as
         # long as it is materialized or still carries filter provenance; if it is
         # neither, the chain provenance cannot be composed -> give up.
@@ -182,7 +191,8 @@ class ChainGraph:
                 f"provenance; cannot compose chain provenance"
             )
         raise ChainError(
-            f"pool {pool!r} (frag{frag}): missing provenance array {name!r} at {path}"
+            f"pool {pool!r} (frag{frag}): missing provenance array {name!r} "
+            f"(nor its .zst form) at {path}"
         )
 
     def nposes(self, pool: str) -> int:

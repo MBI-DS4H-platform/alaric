@@ -19,6 +19,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, str(Path(".alaric")))
+from npy_io import find_npy, load_npy
 from poses import discover_organized, read_arc_file
 
 
@@ -72,7 +73,7 @@ def expected_mapping(rows):
 
 for name, rows in (("map-1.npy", rows1), ("map-2.npy", rows2)):
     expected = expected_mapping(rows)
-    actual_map = np.load(Path("frag4-identity") / name)
+    actual_map = load_npy(find_npy(Path("frag4-identity") / name))
     if actual_map.shape != expected.shape or not np.array_equal(actual_map, expected):
         raise AssertionError(
             f"{name} mismatch: expected shape {expected.shape}, got {actual_map.shape}"

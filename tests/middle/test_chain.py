@@ -16,6 +16,7 @@ from poses import pack_pool, write_arc_file  # noqa: E402
 
 import sys as _sys
 _sys.path.insert(0, str(ROOT / "alaric"))
+from npy_io import save_npy  # noqa: E402
 from poses import PoseReader, select_pose_indices  # noqa: E402
 
 from alaric.middle.chain import (  # noqa: E402
@@ -53,6 +54,19 @@ def _prov(path: Path, values: list[int]) -> None:
 
 def _map(path: Path, name: str, pairs: list[tuple[int, int]]) -> None:
     np.save(path / name, np.array(pairs, dtype=np.uint64).reshape(-1, 2))
+
+
+def _compress_arrays(root: Path) -> list[Path]:
+    """Rewrite every provenance/map array in a fixture as .npy.zst.
+
+    Mirrors what the pose-producing actions now write; the graph JSON keeps naming the
+    uncompressed form, so this exercises the reader's name resolution.
+    """
+    written = []
+    for path in sorted(root.rglob("*.npy")):
+        written.append(save_npy(path, np.load(path)))
+        path.unlink()
+    return written
 
 
 def _dense_step(pool: str, to: str) -> dict:
@@ -316,11 +330,71 @@ def test_unmaterialized_representative_errors(tmp_path):
         count_chains(g, resolve_selection(g, None, None))
 
 
+# -- compressed provenance / map arrays -----------------------------------
+
+
+def test_compressed_provenance_composes_identically(tmp_path):
+    _filter_step_project(tmp_path)
+    plain = count_chains(_graph(tmp_path), resolve_selection(_graph(tmp_path), None, None))
+
+    assert [p.name for p in _compress_arrays(tmp_path)] == [
+        "provenance.npy.zst",
+        "provenance.npy.zst",
+    ]
+    g = _graph(tmp_path)
+    res = count_chains(g, resolve_selection(g, None, None))
+    assert (res.kept, res.total_chains) == (plain.kept, plain.total_chains)
+
+
+def test_compressed_provenance_survives_obsoleted_intermediate(tmp_path):
+    # The intermediate keeps only its (compressed) provenance -- no poses at all.
+    _filter_step_project(tmp_path)
+    _compress_arrays(tmp_path)
+    (tmp_path / "g2" / "poses-1.arc").unlink()
+    g = _graph(tmp_path)
+    assert not g.is_materialized("g2")
+    res = count_chains(g, resolve_selection(g, None, None))
+    assert res.total_chains == 2
+
+
+def test_has_filter_provenance_accepts_compressed_array(tmp_path):
+    (tmp_path / "p").mkdir()
+    save_npy(tmp_path / "p" / "provenance.npy", np.array([0, 1], dtype=np.uint32))
+    graph = ChainGraph(
+        {
+            "pools": {
+                "p": {
+                    "fragment": 1,
+                    "result_dir": "p",
+                    "parents": [
+                        {"pool": "q", "array": "provenance.npy", "cross_fragment": False}
+                    ],
+                }
+            },
+            "representatives": {"1": "p"},
+            "links": [],
+        },
+        tmp_path,
+    )
+    assert graph.has_filter_provenance("p")
+
+
+def test_compressed_build_matches_uncompressed(tmp_path):
+    _basic_project(tmp_path)
+    g = _graph(tmp_path)
+    sel = resolve_selection(g, None, None)
+    _layers, expected = build_chains(g, sel, tmp_path / "out-plain")
+
+    _compress_arrays(tmp_path)
+    g = _graph(tmp_path)
+    _layers, table = build_chains(g, sel, tmp_path / "out-zst")
+    assert table.tolist() == expected.tolist()
+
+
 # -- merge (map array) routing through input1 -----------------------------
 
 
-def test_merge_step_composition(tmp_path):
-    root = tmp_path
+def _merge_project(root: Path) -> None:
     _write_pose_dir(root / "rs", [(0, 0, (0, 0, 0)), (0, 0, (1, 0, 0)), (0, 0, (2, 0, 0))])
     _write_pose_dir(root / "gfwd", [(0, 0, (0, 1, 0)), (0, 0, (1, 1, 0)), (0, 0, (2, 1, 0))])
     _write_pose_dir(root / "rt", [(0, 0, (1, 1, 0)), (0, 0, (2, 1, 0))])  # merged poses M0,M1
@@ -338,9 +412,26 @@ def test_merge_step_composition(tmp_path):
                              _dense_step("gfwd", "rs")],
           "source_to_join": []}],
     )
-    g = _graph(root)
+
+
+def test_merge_step_composition(tmp_path):
+    _merge_project(tmp_path)
+    g = _graph(tmp_path)
     res = count_chains(g, resolve_selection(g, None, None))
     # M0->gfwd1->S1 ; M1->gfwd2->S2 ; S0 has no child
+    assert res.kept == [2, 2]
+    assert res.total_chains == 2
+
+
+def test_merge_step_composition_with_compressed_maps(tmp_path):
+    _merge_project(tmp_path)
+    assert sorted(p.name for p in _compress_arrays(tmp_path)) == [
+        "map-1.npy.zst",
+        "map-2.npy.zst",
+        "provenance.npy.zst",
+    ]
+    g = _graph(tmp_path)
+    res = count_chains(g, resolve_selection(g, None, None))
     assert res.kept == [2, 2]
     assert res.total_chains == 2
 

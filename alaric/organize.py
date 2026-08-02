@@ -27,6 +27,13 @@ from typing import Sequence
 import numpy as np
 from tqdm import tqdm
 
+from npy_io import (
+    NpyWriter,
+    compressed_path,
+    find_npy,
+    open_npy_mmap,
+    read_npy_header,
+)
 from nprocs import default_nprocs
 from poses import (
     ARC_SUFFIX,
@@ -35,6 +42,7 @@ from poses import (
     MAGIC,
     MAX_NO,
     MAX_NP,
+    PROVENANCE_SUFFIX,
     discover_organized,
     discover_unorganized,
     iter_arc_pose_chunks,
@@ -44,7 +52,6 @@ from poses import (
 
 DONE_MARKER = ".ORGANIZED-DONE"
 PROVENANCE_NAME = "provenance.npy"
-PROVENANCE_SUFFIX = ".provenance.npy"
 
 
 @dataclass(frozen=True)
@@ -81,7 +88,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--compress",
         action="store_true",
-        help="Write organized poses-*.arc.zst files by streaming completed temp .arc files through zstd.",
+        help=(
+            "Write zstd-compressed output: organized poses-*.arc.zst files (streamed "
+            "through zstd as they are written) and, when the shards carry provenance "
+            "sidecars, provenance.npy.zst."
+        ),
     )
     parser.add_argument(
         "--local-tempdir",
@@ -495,31 +506,35 @@ def _arc_checksum_path(pose_dir: Path, file_index: int) -> Path:
 
 
 def _provenance_sidecar_path(path: Path) -> Path:
+    """The sidecar's logical (uncompressed) name; the file on disk may be ``.zst``."""
     return path.with_name(path.name + PROVENANCE_SUFFIX)
 
 
 def _source_provenance_paths(sources: list[SourceMeta]) -> list[Path] | None:
-    paths = [_provenance_sidecar_path(source.path) for source in sources]
-    exists = [path.is_file() for path in paths]
-    if not any(exists):
+    found = [find_npy(_provenance_sidecar_path(source.path)) for source in sources]
+    if not any(path is not None for path in found):
         return None
-    if not all(exists):
-        missing = [str(path) for path, present in zip(paths, exists) if not present]
+    if not all(path is not None for path in found):
+        missing = [
+            str(_provenance_sidecar_path(source.path))
+            for source, path in zip(sources, found)
+            if path is None
+        ]
         raise FileNotFoundError(
             "missing provenance sidecar(s): " + ", ".join(missing[:5])
         )
+    paths = [path for path in found if path is not None]
     for source, path in zip(sources, paths):
-        arr = np.load(path, mmap_mode="r")
-        try:
-            if arr.dtype != np.dtype(np.uint32):
-                raise ValueError(f"provenance sidecar must be uint32: {path}")
-            if arr.ndim != 1 or len(arr) != source.nP:
-                raise ValueError(
-                    f"provenance sidecar length mismatch for {source.path}: "
-                    f"expected {source.nP}, got shape {arr.shape}"
-                )
-        finally:
-            del arr
+        # Header only: a compressed sidecar would otherwise be decompressed in full
+        # just to check its dtype and length.
+        shape, dtype = read_npy_header(path)
+        if dtype != np.dtype(np.uint32):
+            raise ValueError(f"provenance sidecar must be uint32: {path}")
+        if len(shape) != 1 or shape[0] != source.nP:
+            raise ValueError(
+                f"provenance sidecar length mismatch for {source.path}: "
+                f"expected {source.nP}, got shape {shape}"
+            )
     return paths
 
 
@@ -530,7 +545,14 @@ def _write_organized_provenance(
     output_path: Path,
     *,
     chunk_poses: int,
+    compress: bool,
 ) -> None:
+    """Fold the per-shard sidecars into one array in organized pose order.
+
+    The gather is random-access (``order`` is a permutation), so the *sources* are
+    concatenated into a temp memmap; the *output* is produced strictly in order, which
+    is what lets it be streamed straight into a compressor.
+    """
     total_poses = int(sum(source.nP for source in sources))
     with tempfile.NamedTemporaryFile(
         prefix=f"{output_path.name}.source.",
@@ -548,13 +570,10 @@ def _write_organized_provenance(
         )
         cursor = 0
         for source, path in zip(sources, provenance_paths):
-            arr = np.load(path, mmap_mode="r")
-            try:
+            with open_npy_mmap(path) as arr:
                 stop = cursor + int(source.nP)
                 source_provenance[cursor:stop] = arr
                 cursor = stop
-            finally:
-                del arr
         source_provenance.flush()
 
         order = np.load(order_array_path, mmap_mode="r")
@@ -563,20 +582,17 @@ def _write_organized_provenance(
                 f"order array length mismatch for provenance: "
                 f"expected {total_poses}, got shape {order.shape}"
             )
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        out = np.lib.format.open_memmap(
-            output_path,
-            mode="w+",
-            dtype=np.uint32,
-            shape=(total_poses,),
-        )
         try:
-            for start in range(0, total_poses, chunk_poses):
-                stop = min(start + chunk_poses, total_poses)
-                out[start:stop] = source_provenance[order[start:stop]]
-            out.flush()
+            with NpyWriter(
+                output_path,
+                dtype=np.uint32,
+                shape=(total_poses,),
+                compress=compress,
+            ) as out:
+                for start in range(0, total_poses, chunk_poses):
+                    stop = min(start + chunk_poses, total_poses)
+                    out.write(source_provenance[order[start:stop]])
         finally:
-            del out
             del order
             del source_provenance
     finally:
@@ -881,99 +897,102 @@ def _process_layout_group(
         )
     with read_cm as read_pbar:
         for source in group_sources:
-            source_provenance = None
             provenance_path = provenance_by_source.get(source.path)
-            if provenance_path is not None:
-                source_provenance = np.load(provenance_path, mmap_mode="r")
-            local_to_group = np.full(len(source.O), -1, dtype=np.int32)
-            for local_index, offset_row in enumerate(source.O):
-                key = (source.M, tuple(int(x) for x in offset_row))
-                group_index = key_to_index.get(key)
-                if group_index is not None:
-                    local_to_group[local_index] = group_index
-            if not np.any(local_to_group >= 0):
-                continue
-            saw_chunk = False
-            checked_meta = False
-            source_cursor = 0
-            for M_arr, O, C, P, _bs in iter_arc_pose_chunks(
-                source.path,
-                rows_per_chunk=chunk_poses,
-            ):
-                saw_chunk = True
-                if not checked_meta:
-                    M = tuple(int(x) for x in M_arr)
-                    if M != source.M:
-                        raise ValueError(f"M changed while reading {source.path}")
-                    if len(O) != len(source.O) or not np.array_equal(O, source.O):
-                        raise ValueError(f"O changed while reading {source.path}")
-                    if len(C) != len(source.C) or not np.array_equal(C, source.C):
-                        raise ValueError(f"C changed while reading {source.path}")
-                    checked_meta = True
-                if len(P) == 0:
-                    continue
-                group_ids = local_to_group[P[:, 2]]
-                keep = group_ids >= 0
-                n_kept = int(np.count_nonzero(keep))
-                read_pbar.update(n_kept)
-                if n_kept == 0:
-                    source_cursor += len(P)
-                    continue
-                kept_group_ids = group_ids[keep]
-                kept_rows = P[keep, 0:2]
-                kept_provenance = None
-                if source_provenance is not None:
-                    kept_provenance = source_provenance[
-                        source_cursor : source_cursor + len(P)
-                    ][keep]
-                packed = (
-                    (kept_rows[:, 0].astype(np.uint32, copy=False) << 16)
-                    | kept_rows[:, 1].astype(np.uint32, copy=False)
+            with contextlib.ExitStack() as stack:
+                source_provenance = (
+                    None
+                    if provenance_path is None
+                    # Slices only, so keep it mapped rather than loaded: a shard's
+                    # sidecar is 4 bytes per pose and every worker holds one.
+                    else stack.enter_context(open_npy_mmap(provenance_path))
                 )
-                kept_origins = None
-                if order_buffers is not None:
-                    origin_start = np.array(
-                        source.pose_start + source_cursor,
-                        dtype=order_array_dtype,
+                local_to_group = np.full(len(source.O), -1, dtype=np.int32)
+                for local_index, offset_row in enumerate(source.O):
+                    key = (source.M, tuple(int(x) for x in offset_row))
+                    group_index = key_to_index.get(key)
+                    if group_index is not None:
+                        local_to_group[local_index] = group_index
+                if not np.any(local_to_group >= 0):
+                    continue
+                saw_chunk = False
+                checked_meta = False
+                source_cursor = 0
+                for M_arr, O, C, P, _bs in iter_arc_pose_chunks(
+                    source.path,
+                    rows_per_chunk=chunk_poses,
+                ):
+                    saw_chunk = True
+                    if not checked_meta:
+                        M = tuple(int(x) for x in M_arr)
+                        if M != source.M:
+                            raise ValueError(f"M changed while reading {source.path}")
+                        if len(O) != len(source.O) or not np.array_equal(O, source.O):
+                            raise ValueError(f"O changed while reading {source.path}")
+                        if len(C) != len(source.C) or not np.array_equal(C, source.C):
+                            raise ValueError(f"C changed while reading {source.path}")
+                        checked_meta = True
+                    if len(P) == 0:
+                        continue
+                    group_ids = local_to_group[P[:, 2]]
+                    keep = group_ids >= 0
+                    n_kept = int(np.count_nonzero(keep))
+                    read_pbar.update(n_kept)
+                    if n_kept == 0:
+                        source_cursor += len(P)
+                        continue
+                    kept_group_ids = group_ids[keep]
+                    kept_rows = P[keep, 0:2]
+                    kept_provenance = None
+                    if source_provenance is not None:
+                        kept_provenance = source_provenance[
+                            source_cursor : source_cursor + len(P)
+                        ][keep]
+                    packed = (
+                        (kept_rows[:, 0].astype(np.uint32, copy=False) << 16)
+                        | kept_rows[:, 1].astype(np.uint32, copy=False)
                     )
-                    kept_origins = (
-                        np.flatnonzero(keep).astype(order_array_dtype, copy=False)
-                        + origin_start
-                    )
-                order = np.argsort(kept_group_ids, kind="stable")
-                sorted_group_ids = kept_group_ids[order]
-                sorted_packed = packed[order]
-                sorted_origins = None if kept_origins is None else kept_origins[order]
-                sorted_provenance = (
-                    None if kept_provenance is None else kept_provenance[order]
-                )
-                run_starts = np.r_[
-                    0,
-                    np.flatnonzero(sorted_group_ids[1:] != sorted_group_ids[:-1]) + 1,
-                ]
-                run_stops = np.r_[run_starts[1:], len(sorted_group_ids)]
-                for run_start, run_stop in zip(run_starts, run_stops):
-                    group_index = int(sorted_group_ids[run_start])
-                    key = group_keys[group_index]
-                    n = int(run_stop - run_start)
-                    cursor = int(cursors[group_index])
-                    buffers[key][cursor : cursor + n] = sorted_packed[run_start:run_stop]
+                    kept_origins = None
                     if order_buffers is not None:
-                        assert sorted_origins is not None
-                        order_buffers[key][cursor : cursor + n] = sorted_origins[
-                            run_start:run_stop
-                        ]
-                    if provenance_key_buffers is not None:
-                        assert sorted_provenance is not None
-                        provenance_key_buffers[key][cursor : cursor + n] = (
-                            sorted_provenance[run_start:run_stop]
+                        origin_start = np.array(
+                            source.pose_start + source_cursor,
+                            dtype=order_array_dtype,
                         )
-                    cursors[group_index] += n
-                source_cursor += len(P)
-            if not saw_chunk and source.nP != 0:
-                raise ValueError(f"no pose chunks read from {source.path}")
-            if source_provenance is not None:
-                del source_provenance
+                        kept_origins = (
+                            np.flatnonzero(keep).astype(order_array_dtype, copy=False)
+                            + origin_start
+                        )
+                    order = np.argsort(kept_group_ids, kind="stable")
+                    sorted_group_ids = kept_group_ids[order]
+                    sorted_packed = packed[order]
+                    sorted_origins = None if kept_origins is None else kept_origins[order]
+                    sorted_provenance = (
+                        None if kept_provenance is None else kept_provenance[order]
+                    )
+                    run_starts = np.r_[
+                        0,
+                        np.flatnonzero(sorted_group_ids[1:] != sorted_group_ids[:-1]) + 1,
+                    ]
+                    run_stops = np.r_[run_starts[1:], len(sorted_group_ids)]
+                    for run_start, run_stop in zip(run_starts, run_stops):
+                        group_index = int(sorted_group_ids[run_start])
+                        key = group_keys[group_index]
+                        n = int(run_stop - run_start)
+                        cursor = int(cursors[group_index])
+                        buffers[key][cursor : cursor + n] = sorted_packed[run_start:run_stop]
+                        if order_buffers is not None:
+                            assert sorted_origins is not None
+                            order_buffers[key][cursor : cursor + n] = sorted_origins[
+                                run_start:run_stop
+                            ]
+                        if provenance_key_buffers is not None:
+                            assert sorted_provenance is not None
+                            provenance_key_buffers[key][cursor : cursor + n] = (
+                                sorted_provenance[run_start:run_stop]
+                            )
+                        cursors[group_index] += n
+                    source_cursor += len(P)
+                if not saw_chunk and source.nP != 0:
+                    raise ValueError(f"no pose chunks read from {source.path}")
 
     for index, key in enumerate(group_keys):
         expected = len(buffers[key])
@@ -1192,7 +1211,9 @@ def _staged_unorganized_arc_name(src: Path) -> str:
 def _unlink_unorganized(paths: Sequence[Path], root: Path) -> None:
     parents: set[Path] = set()
     for path in paths:
-        _provenance_sidecar_path(path).unlink(missing_ok=True)
+        sidecar = _provenance_sidecar_path(path)
+        sidecar.unlink(missing_ok=True)
+        compressed_path(sidecar).unlink(missing_ok=True)
         try:
             path.unlink()
         except FileNotFoundError:
@@ -1240,9 +1261,14 @@ def _stage_unorganized_uncompressed(unorganized: list[Path], tempdir: Path) -> N
             shutil.copy2(src, dst)
         else:
             raise ValueError(f"unexpected unorganized file: {src}")
-        provenance = _provenance_sidecar_path(src)
-        if provenance.is_file():
-            shutil.copy2(provenance, _provenance_sidecar_path(dst))
+        provenance = find_npy(_provenance_sidecar_path(src))
+        if provenance is not None:
+            # Copied as-is (still compressed): the sidecars are small next to the poses
+            # and the staged copy is resolved through find_npy just like the original.
+            staged = _provenance_sidecar_path(dst)
+            if provenance.name.endswith(".zst"):
+                staged = compressed_path(staged)
+            shutil.copy2(provenance, staged)
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         list(
@@ -1370,6 +1396,7 @@ def organize_pose_dir(
                 effective_order_array_output,
                 pose_dir / PROVENANCE_NAME,
                 chunk_poses=int(chunk_poses),
+                compress=bool(compress),
             )
 
         marker.touch()

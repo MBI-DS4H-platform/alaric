@@ -21,6 +21,7 @@ from pathlib import Path
 from tqdm import tqdm
 import numpy as np
 
+from npy_io import save_npy
 from poses import (
     ARC_ZSTD_SUFFIX,
     HEADER_SIZE,
@@ -736,8 +737,10 @@ def run_identity_filter(
     print("Building mapping array 2...", file=sys.stderr)
     map2 = build_mapping(kept2, global_lookup, readahead=readahead)
     print(f"Number of mapping rows for pose directory 2: {len(map2)}", file=sys.stderr)
-    np.save(output_dir / "map-1.npy", map1)
-    np.save(output_dir / "map-2.npy", map2)
+    # (source_id, dest_id) pairs, largely ascending: zstd shrinks them by an order of
+    # magnitude, and at 16 bytes per row they otherwise dwarf the pose dir they map.
+    save_npy(output_dir / "map-1.npy", map1, compress=compress)
+    save_npy(output_dir / "map-2.npy", map2, compress=compress)
 
     manifest = {
         "pose_dir_1": str(pose_dir1),
@@ -789,7 +792,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--compress",
         action="store_true",
-        help="Write output organized poses-*.arc.zst files instead of poses-*.arc.",
+        help=(
+            "Write zstd-compressed output: poses-*.arc.zst instead of poses-*.arc, and "
+            "map-*.npy.zst instead of map-*.npy."
+        ),
     )
     return parser.parse_args()
 

@@ -13,6 +13,10 @@ provenance arrays that connect it to its parent pool(s):
 - ``identity`` (merge/dedup) -> ``map-1.npy`` / ``map-2.npy``
                                 (rows are ``(parent_id, this_id)`` pairs; same fragment)
 
+These are the arrays' *logical* names. They are stored zstd-compressed (``.npy.zst``),
+and compression is transparent: the graph records the logical name and the chain builder
+resolves whichever form is on disk (:func:`alaric.npy_io.find_npy`).
+
 For chain building it then picks, per fragment, the **representative** pool: the
 unique last descendant (most-filtered sink) whose lineage is wired into a
 cross-fragment grow. Fragments with no such lineage are skipped; fragments with

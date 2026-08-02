@@ -3,12 +3,14 @@ if [[ {{ filter_mode }} == mask ]]; then
     {{ input_result_path }} \
     {{ mask_input_path }} \
     {{ output_path }} \
-    --force
+    --force \
+    --compress
 else
   {{ python }} {{ alaric_dir }}/filter-poses.py \
     {{ input_result_path }} \
     {{ score_input_path }} \
     {{ threshold }} \
     {{ output_path }} \
-    --force
+    --force \
+    --compress
 fi

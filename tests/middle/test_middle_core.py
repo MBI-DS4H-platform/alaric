@@ -13,13 +13,15 @@ sys.path.insert(0, str(ROOT))
 
 from alaric.mask import main as mask_main
 import alaric.middle.deploy as deploy_module
-from alaric.middle.checksum import byte_checksum, write_array_sidecar
+from alaric.middle.checksum import byte_checksum, write_array_sidecar, write_pose_sidecars
 from alaric.middle.deploy import deploy, generate_check_sh, generate_chunk_files, generate_run_sh
 from alaric.middle.errors import MiddleError, SchemaError
 from alaric.middle.graph import ActionGraph
 from alaric.middle.project import Project
+from alaric.middle.result_sidecar import main as result_sidecar_main
 from alaric.middle.schema import normalize_action
 from alaric.middle.sigil import compute_project_sigils
+from alaric.npy_io import load_npy, save_npy
 from alaric.score_add import main as score_add_main
 from alaric.score_concat import main as score_concat_main
 
@@ -456,6 +458,21 @@ def test_grow_test_deploy_renders_single_conformer(tmp_path: Path) -> None:
     assert (tmp_path / "CACHE" / "parameters" / sigil).is_file()
 
 
+def test_filter_deploy_compresses_both_routes(tmp_path: Path) -> None:
+    """Every pose-producing action writes compressed poses; filter is no exception."""
+    _write_project(tmp_path)
+    project = Project.discover(tmp_path)
+    compute_project_sigils(project)
+    action = ActionGraph(project).build()["frag4-filter"]
+
+    for deployer in ("local", "remote"):
+        body = generate_run_sh(project, action, deployer)
+        # both routes are rendered into the script: select-poses.py for a mask input,
+        # filter-poses.py for a score threshold, and each one asks for compression
+        assert "select-poses.py" in body and "filter-poses.py" in body, deployer
+        assert body.count("--compress") == 2, deployer
+
+
 def test_grow_deploy_propagates_auto_pdb_exclude(tmp_path: Path) -> None:
     _write_project(tmp_path)
     project = Project.discover(tmp_path)
@@ -691,6 +708,50 @@ def test_score_add_and_mask_validate_shapes(tmp_path: Path) -> None:
         score_add_main([str(a), str(b), str(out)])
 
 
+def test_mask_action_compresses_but_keeps_the_logical_result_name(tmp_path: Path) -> None:
+    scores = tmp_path / "score.npy"
+    np.save(scores, np.array([-3.0, 1.0, -2.0, 4.0], dtype=np.float32))
+    plain = tmp_path / "plain.npy"
+    logical = tmp_path / "mask.npy"
+
+    assert mask_main([str(scores), "0.0", str(plain)]) == 0
+    assert mask_main([str(scores), "0.0", str(logical), "--compress"]) == 0
+
+    assert not logical.exists()
+    np.testing.assert_array_equal(load_npy(tmp_path / "mask.npy.zst"), np.load(plain))
+    # ... and the compressed mask is the same result: same checksum, same sidecar name,
+    # written by a sidecar step that was handed the logical (uncompressed) name.
+    assert byte_checksum(tmp_path / "mask.npy.zst") == byte_checksum(plain)
+    assert result_sidecar_main(["array", str(logical)]) == 0
+    assert (tmp_path / "mask.npy.CHECKSUM").read_text().strip() == byte_checksum(plain)
+
+
+def test_mask_deploy_asks_for_compression(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    (tmp_path / "frag4-mask").mkdir()
+    (tmp_path / "frag4-mask" / "alaric.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "action": "mask",
+                "input": "frag4-anchor",
+                "score_input": "frag4-score",
+                "threshold": -1.0,
+            },
+            sort_keys=False,
+        )
+    )
+    project = Project.discover(tmp_path)
+    compute_project_sigils(project)
+    action = ActionGraph(project).build()["frag4-mask"]
+
+    for deployer in ("local", "remote"):
+        body = generate_run_sh(project, action, deployer)
+        assert "mask.py" in body and "--compress" in body, deployer
+        # the sidecar step is still handed the logical name
+        assert "result_sidecar.py array" in body
+        assert "mask.npy.zst" not in body
+
+
 def test_score_concat_requires_all_expected_chunks(tmp_path: Path) -> None:
     chunks = tmp_path / "chunks"
     (chunks / "chunk-1").mkdir(parents=True)
@@ -709,3 +770,25 @@ def test_checksum_is_zstd_transparent(tmp_path: Path) -> None:
     assert byte_checksum(raw) == byte_checksum(compressed)
     checksum = write_array_sidecar(compressed)
     assert (tmp_path / "score.npy.CHECKSUM").read_text().strip() == checksum
+
+
+def test_compressing_a_pose_dir_index_array_keeps_the_result_checksum(tmp_path: Path) -> None:
+    """Why provenance/map arrays can be compressed at all: results stay addressable.
+
+    The deepfolder index is keyed on the logical name and hashes the *uncompressed*
+    bytes, so a cached result produced before compression still matches one produced
+    after it.
+    """
+    provenance = np.arange(1000, dtype=np.uint32)
+    checksums = []
+    for name, compress in (("plain", False), ("compressed", True)):
+        pose_dir = tmp_path / name
+        pose_dir.mkdir()
+        (pose_dir / "poses-1.arc").write_bytes(b"arc payload")
+        save_npy(pose_dir / "provenance.npy", provenance, compress=compress)
+        checksums.append(write_pose_sidecars(pose_dir))
+
+    assert (tmp_path / "compressed" / "provenance.npy.zst").is_file()
+    assert not (tmp_path / "compressed" / "provenance.npy").exists()
+    assert checksums[0] == checksums[1]
+    assert (tmp_path / "plain.INDEX").read_bytes() == (tmp_path / "compressed.INDEX").read_bytes()

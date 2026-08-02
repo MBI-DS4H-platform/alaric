@@ -26,6 +26,7 @@ from rmsd import (
     _dinucleotide_sequence,
     _existing_dir,
     _existing_file,
+    _existing_npy,
     _load_order_array,
     _load_library,
     _pdb_code,
@@ -80,7 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--order-array",
-        type=_existing_file,
+        type=_existing_npy,
         help=(
             "NumPy array mapping organized pose indices to output pose indices. "
             "Used to restore pairwise results after organize reordered selected poses."

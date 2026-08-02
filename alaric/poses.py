@@ -11,6 +11,8 @@ from typing import Iterable, Iterator
 
 import numpy as np
 
+from npy_io import save_npy
+
 
 MAGIC = b"alaric1"
 HEADER_SIZE = 21
@@ -20,6 +22,10 @@ MAX_BUCKET_SIZE = 2**16 - 1
 DEFAULT_BUCKET_SIZE = 16
 ARC_SUFFIX = ".arc"
 ARC_ZSTD_SUFFIX = ".arc.zst"
+# Per-shard provenance sidecar, written next to an unorganized shard and consumed by
+# organize.py (which folds the sidecars into the pose dir's single provenance array).
+# Stored zstd-compressed; readers resolve either form through npy_io.find_npy.
+PROVENANCE_SUFFIX = ".provenance.npy"
 ARC_ZSTD_FRAME_BYTES = 4 * 1024 * 1024
 DEFAULT_POSE_CHUNK_SIZE = 10_000
 
@@ -866,7 +872,9 @@ class PoseWriter:
         path = self._next_unorganized_path()
         write_arc_file(path, M, O, C, P, bucket_size=self.bucket_size, zstd=True)
         if provenance is not None:
-            np.save(path.with_name(path.name + ".provenance.npy"), provenance)
+            # Compressed like the shard itself: at 4 bytes/pose an uncompressed
+            # sidecar would outweigh the .arc.zst it belongs to.
+            save_npy(path.with_name(path.name + PROVENANCE_SUFFIX), provenance)
         self._written.append(path)
 
     def finish(self) -> list[Path]:

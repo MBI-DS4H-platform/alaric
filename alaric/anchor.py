@@ -16,6 +16,7 @@ from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 
 from library import config
+from npy_io import find_npy, load_npy
 from nprocs import default_nprocs
 from offsets import get_discrete_offsets
 from parse_pdb import parse_pdb
@@ -340,56 +341,13 @@ and the values in between are eliminated.""",
     return parser
 
 
-def _read_compressed_npy(path: Path) -> np.ndarray:
-    try:
-        import zstandard as zstd
-    except ImportError as exc:
-        raise ImportError(f"zstandard is required to read {path}") from exc
-
-    with path.open("rb") as compressed:
-        with zstd.ZstdDecompressor().stream_reader(compressed) as reader:
-            version = np.lib.format.read_magic(reader)
-            if version == (1, 0):
-                shape, fortran_order, dtype = np.lib.format.read_array_header_1_0(
-                    reader
-                )
-            elif version in {(2, 0), (3, 0)}:
-                shape, fortran_order, dtype = np.lib.format.read_array_header_2_0(
-                    reader
-                )
-            else:
-                raise ValueError(f"unsupported .npy version {version} in {path}")
-            if dtype.hasobject:
-                raise ValueError(f"object arrays are not supported in {path}")
-            order = "F" if fortran_order else "C"
-            result = np.empty(shape, dtype=dtype, order=order)
-            flat = result.ravel(order=order)
-            target = memoryview(flat).cast("B")
-            position = 0
-            while position < len(target):
-                count = reader.readinto(target[position:])
-                if not count:
-                    raise ValueError(f"truncated compressed .npy array: {path}")
-                position += count
-            if reader.read(1):
-                raise ValueError(f"trailing data after compressed .npy array: {path}")
-            return result
-
-
-def _load_npy(path: Path) -> np.ndarray:
-    if path.name.endswith(".npy.zst"):
-        return _read_compressed_npy(path)
-    return np.load(path, allow_pickle=False)
-
-
 def _find_precalculated_array(directory: Path, name: str) -> Path:
-    for suffix in (".npy", ".npy.zst"):
-        candidate = directory / f"{name}{suffix}"
-        if candidate.is_file():
-            return candidate
-    raise ValueError(
-        f"missing {name}.npy or {name}.npy.zst in precalculation directory {directory}"
-    )
+    path = find_npy(directory / f"{name}.npy")
+    if path is None:
+        raise ValueError(
+            f"missing {name}.npy or {name}.npy.zst in precalculation directory {directory}"
+        )
+    return path
 
 
 def _resolve_precalculated_directory(
@@ -420,7 +378,7 @@ def _resolve_precalculated_directory(
 
 def _load_reference_coordinates(path: str | Path) -> np.ndarray:
     path = Path(path)
-    coordinates = _load_npy(path)
+    coordinates = load_npy(path)
     if coordinates.dtype.names is not None:
         required = {"x", "y", "z"}
         if not required.issubset(coordinates.dtype.names):
@@ -686,7 +644,7 @@ def _load_precalculated_anchor(
         directory, threshold_name
     )
     arrays = {
-        name: _load_npy(_find_precalculated_array(directory, name))
+        name: load_npy(_find_precalculated_array(directory, name))
         for name in (
             "rotations",
             "translations",

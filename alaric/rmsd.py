@@ -17,6 +17,7 @@ _ALARIC_DIR = Path(__file__).resolve().parent
 if str(_ALARIC_DIR) not in sys.path:
     sys.path.insert(0, str(_ALARIC_DIR))
 
+from npy_io import find_npy, load_npy
 from nprocs import default_nprocs
 from poses import DEFAULT_POSE_CHUNK_SIZE, PoseChunk, PoseReader
 
@@ -40,8 +41,17 @@ def _existing_dir(path: str) -> Path:
     return result
 
 
+def _existing_npy(path: str) -> Path:
+    """Like _existing_file, but resolves a logical .npy name to a .npy.zst on disk."""
+    resolved = find_npy(Path(path))
+    if resolved is None:
+        raise argparse.ArgumentTypeError(f"file does not exist: {path} (nor its .zst form)")
+    return resolved
+
+
 def _load_order_array(path: Path, total_poses: int) -> np.ndarray:
-    order = np.load(path, mmap_mode="r")
+    # select-poses.py writes the order array compressed; accept either form.
+    order = load_npy(find_npy(path) or path, mmap=True)
     if order.ndim != 1:
         raise ValueError("--order-array must be a 1D NumPy array")
     if len(order) != total_poses:
@@ -135,7 +145,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--order-array",
-        type=_existing_file,
+        type=_existing_npy,
         help=(
             "NumPy array mapping organized pose indices to output pose indices. "
             "Used to restore results after organize reordered selected poses."

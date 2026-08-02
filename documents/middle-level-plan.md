@@ -190,6 +190,11 @@ Result data is always accompanied by Seamless-style checksum sidecars. The legac
   - `score.npy.zst` has sidecar `score.npy.CHECKSUM`
   - The checksum content is identical for compressed and uncompressed forms: checksum
     the uncompressed NumPy bytes, not the compressed byte stream.
+  - `mask` writes `mask.npy.zst` (a mask is one byte per pose, or an index array).
+    `score` does not compress: it is consumed by memory-mapped streaming.
+  - The generated scripts always reference the logical name (`mask.npy`); the reader
+    (`select-poses.py`) and the sidecar step (`result_sidecar.py array`) resolve the
+    compressed form, so `backend.result_file()` stays compression-agnostic.
 - Pose result dirs:
   - A pose dir `posedir/` has sidecars `posedir.INDEX` and `posedir.CHECKSUM`
   - `posedir.INDEX` is Seamless JSON containing each organized `poses-*.arc` member
@@ -197,6 +202,12 @@ Result data is always accompanied by Seamless-style checksum sidecars. The legac
   - `posedir.CHECKSUM` is the checksum of `posedir.INDEX`.
   - Compression is transparent: `poses-X.arc` and `poses-X.arc.zst` contribute the
     same member checksum when their uncompressed arc content is the same.
+  - The same holds for the per-pose index arrays inside a pose dir (`provenance.npy`,
+    `map-1.npy`/`map-2.npy`, `order-array.npy`): they are written `.npy.zst`, the INDEX
+    entry keeps the logical `.npy` name, and the member checksum is over the
+    uncompressed NumPy bytes. Compressing them therefore leaves the result checksum
+    (and every cached result) unchanged. Readers resolve either form
+    (`alaric/npy_io.py:find_npy`).
 - Local deployment:
   - After producing the result and sidecar(s), the local run script copies the final
     sidecar checksum (`score.npy.CHECKSUM` or `posedir.CHECKSUM`) into

@@ -409,6 +409,10 @@ Organized poses are guaranteed to have each mini-bucket in only one file. Tools 
 ### Pose connection and provenance
 The pose list has either an origin list (fragN-1 pose it was grown from)
  or a connection list (many-to-many pose-pose connection edge list)
+These lists are stored next to the poses as .npy.zst (origin list: provenance.npy.zst,
+one row per pose; connection list: map-1/map-2.npy.zst, one row per edge). At 4-16 bytes
+per row they would otherwise outweigh the compressed poses themselves. Readers accept the
+uncompressed form as well.
 Dedup is that identical poses are collapsed onto one, this also changes any origin list
 into a connection list.
 
