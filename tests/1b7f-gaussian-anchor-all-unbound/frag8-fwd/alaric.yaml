@@ -1,9 +1,8 @@
-action: grow-test
+action: grow
 input: frag7-fwd-filter
 fragment: auto
 sequence: auto
 exclude: auto
 direction: auto
-conformer: 3036
 crmsd: 0.23
 ovrmsd: 0.84

@@ -1,0 +1,4 @@
+action: filter
+input: frag5-anchor-bwd
+score_input: frag5-anchor-bwd-score
+threshold: -11.47

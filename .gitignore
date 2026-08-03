@@ -26,11 +26,17 @@ tests/1b7f-gaussian-anchor/*/*
 !tests/1b7f-gaussian-anchor/frag*
 !tests/1b7f-gaussian-anchor/frag*/alaric.yaml
 tests/1b7f-gaussian-anchor-unbound/*/*
+!tests/1b7f-gaussian-anchor-unbound/DATA
 !tests/1b7f-gaussian-anchor-unbound/frag*
 !tests/1b7f-gaussian-anchor-unbound/frag*/alaric.yaml
 tests/1b7f-gaussian-anchor-all-unbound/*/*
+!tests/1b7f-gaussian-anchor-all-unbound/DATA
 !tests/1b7f-gaussian-anchor-all-unbound/frag*
 !tests/1b7f-gaussian-anchor-all-unbound/frag*/alaric.yaml
+tests/1b7f-gaussian-anchor-nori-unbound/*/*
+!tests/1b7f-gaussian-anchor-nori-unbound/DATA
+!tests/1b7f-gaussian-anchor-nori-unbound/frag*
+!tests/1b7f-gaussian-anchor-nori-unbound/frag*/alaric.yaml
 poses-*.arc
 poses-*.arc.zst
 unorganized-*.arc

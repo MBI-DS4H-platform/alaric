@@ -1,0 +1,9 @@
+action: grow
+input: frag4-merged-filter
+restrict_input: frag5-anchor-fwd-filter
+fragment: auto
+sequence: auto
+exclude: auto
+direction: fwd
+crmsd: 0.29
+ovrmsd: 0.65

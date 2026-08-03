@@ -1,0 +1,4 @@
+action: filter
+input: frag5-anchor-fwd
+score_input: frag5-anchor-fwd-score
+threshold: -9.61

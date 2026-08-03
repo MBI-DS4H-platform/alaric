@@ -1,4 +1,0 @@
-action: filter
-input: frag6-fwd-uniq
-score_input: frag6-fwd-score
-threshold: 9.26

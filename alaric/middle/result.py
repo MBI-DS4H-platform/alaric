@@ -53,7 +53,9 @@ def check(action_dir: str | Path = ".") -> None:
     if local_checksum.is_file():
         if result_txt.exists():
             if result_txt.read_text().strip() != local_checksum.read_text().strip():
-                raise ResultError(f"{action.name}: result.txt does not match the cached checksum")
+                raise ResultError(
+                    f"{action.name}: result.txt does not match the cached checksum"
+                )
         else:
             shutil.copyfile(local_checksum, result_txt)
         return
@@ -62,7 +64,11 @@ def check(action_dir: str | Path = ".") -> None:
         raise ResultError("no local checksum and ALARIC_REMOTE_HOST is unset")
     remote = _remote_base(sigil)
     proc = subprocess.run(
-        ["ssh", host, f"cat {remote}.CHECKSUM 2>/dev/null || cat {remote}/score.npy.CHECKSUM 2>/dev/null || cat {remote}/mask.npy.CHECKSUM"],
+        [
+            "ssh",
+            host,
+            f"cat {remote}.CHECKSUM 2>/dev/null || cat {remote}/score.npy.CHECKSUM 2>/dev/null || cat {remote}/mask.npy.CHECKSUM",
+        ],
         check=True,
         text=True,
         capture_output=True,
@@ -72,7 +78,9 @@ def check(action_dir: str | Path = ".") -> None:
         raise ResultError(f"remote result checksum not found for {sigil}")
     if result_txt.exists():
         if result_txt.read_text().strip() != checksum:
-            raise ResultError(f"{action.name}: result.txt does not match the remote checksum")
+            raise ResultError(
+                f"{action.name}: result.txt does not match the remote checksum"
+            )
     else:
         result_txt.write_text(checksum + "\n")
     project.ensure_cache()
@@ -93,7 +101,10 @@ def download(action_dir: str | Path = ".") -> None:
     if tmp.exists():
         shutil.rmtree(tmp)
     project.ensure_cache()
-    subprocess.run(["rsync", "-a", "--partial", f"{host}:{_remote_base(sigil)}/", str(tmp) + "/"], check=True)
+    subprocess.run(
+        ["rsync", "-a", "--partial", f"{host}:{_remote_base(sigil)}/", str(tmp) + "/"],
+        check=True,
+    )
     tmp.rename(result)
     check(action_dir)
     link = action.path / "results"
@@ -107,17 +118,33 @@ def upload(action_dir: str | Path = ".") -> None:
     sigil = _sigil(action.path)
     result = _local_result(project, sigil)
     checksum = _checksum(project, sigil)
-    if not (action.path / "result.txt").is_file() or not checksum.is_file() or not result.exists():
-        raise ResultError("result.txt, CACHE/checksum/<SIGIL>, and CACHE/results/<SIGIL> are required")
+    if (
+        not (action.path / "result.txt").is_file()
+        or not checksum.is_file()
+        or not result.exists()
+    ):
+        raise ResultError(
+            "result.txt, CACHE/checksum/<SIGIL>, and CACHE/results/<SIGIL> are required"
+        )
     host = os.environ.get("ALARIC_REMOTE_HOST")
     if not host:
         raise ResultError("ALARIC_REMOTE_HOST is required")
     remote = _remote_base(sigil)
     partial = remote + ".partial"
     subprocess.run(["ssh", host, f"rm -rf {partial} && mkdir -p {partial}"], check=True)
-    subprocess.run(["rsync", "-a", "--partial", str(result) + "/", f"{host}:{partial}/"], check=True)
+    subprocess.run(
+        ["rsync", "-a", "--partial", str(result) + "/", f"{host}:{partial}/"],
+        check=True,
+    )
     subprocess.run(["scp", str(checksum), f"{host}:{partial}.CHECKSUM"], check=True)
-    subprocess.run(["ssh", host, f"rm -rf {remote} && mv {partial} {remote} && mv {partial}.CHECKSUM {remote}.CHECKSUM"], check=True)
+    subprocess.run(
+        [
+            "ssh",
+            host,
+            f"rm -rf {remote} && mv {partial} {remote} && mv {partial}.CHECKSUM {remote}.CHECKSUM",
+        ],
+        check=True,
+    )
 
 
 def clean_main(argv: list[str] | None = None) -> int:

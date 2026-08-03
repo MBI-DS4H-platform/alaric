@@ -1,5 +1,5 @@
 action: grow
-input: frag6-fwd-filter
+input: frag6-merged-filter
 fragment: auto
 sequence: auto
 exclude: auto
