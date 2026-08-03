@@ -1,0 +1,3 @@
+action: mask-common-conformer
+input1: frag5-fwd-restrict-1anchor
+input2: frag5-anchor-bwd-filter

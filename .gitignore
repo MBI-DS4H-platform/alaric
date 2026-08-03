@@ -24,6 +24,7 @@ tests/1b7f/frag4-det-*/
 tests/*/CACHE
 tests/1b7f-gaussian-anchor/*/*
 !tests/1b7f-gaussian-anchor/frag*
+!tests/1b7f-gaussian-anchor/DATA
 !tests/1b7f-gaussian-anchor/frag*/alaric.yaml
 tests/1b7f-gaussian-anchor-unbound/*/*
 !tests/1b7f-gaussian-anchor-unbound/DATA
