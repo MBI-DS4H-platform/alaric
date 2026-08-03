@@ -68,6 +68,12 @@ other routes.
   sparse pair relation for a representative's cross-fragment grow route before
   falling back to intermediate arrays, selecting the file by the link's source
   fragment so a reconnected representative serves each of its links correctly.
+- A file left under an unkeyed name is a pure rename to the keyed one when its
+  representative has a single route, since that is the route it holds; on a
+  multi-route pool it records only one arm without saying which, so it has to be
+  recomputed. Falling back past such a file usually fails on an obsoleted
+  intermediate — the reason the file was made — so `alaric-chain` names it in
+  that error rather than reporting the missing intermediate alone.
 
 ## Verification
 

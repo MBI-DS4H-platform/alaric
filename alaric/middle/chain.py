@@ -221,6 +221,7 @@ class ChainGraph:
         ``join_ids[i]``.
         """
         n = self.nposes(rep)
+        source_fragment = None
         # propagate-provenance composes exactly the representative -> grow-source
         # route.  It is not applicable to a source representative's local-only
         # route, so require that this path ends by crossing fragments.
@@ -270,7 +271,16 @@ class ChainGraph:
         rep_ids = np.arange(n, dtype=np.int64)
         cur = rep_ids.copy()
         for step in path:
-            arr = self._load_step_array(step)
+            try:
+                arr = self._load_step_array(step)
+            except ChainError as exc:
+                # An intermediate array is gone, which is the normal reason to have
+                # propagated provenance in the first place -- so if a file under the
+                # superseded unkeyed name is lying there, that is the actual problem.
+                hint = self._superseded_prop_hint(rep, source_fragment)
+                if hint is None:
+                    raise
+                raise ChainError(f"{exc}\n{hint}") from exc
             if step["orientation"].startswith("row="):
                 # dense: arr[this] = parent
                 prov = np.asarray(arr, dtype=np.int64)
@@ -281,6 +291,34 @@ class ChainGraph:
                 parents, reps = _join(pairs[:, 1], pairs[:, 0], cur, rep_ids)
                 cur, rep_ids = parents, reps
         return rep_ids, cur
+
+    def _superseded_prop_hint(self, rep: str, source_fragment: int | None) -> str | None:
+        """Name the rename that turns an unkeyed propagated file into this link's."""
+        if source_fragment is None:
+            return None
+        for legacy, keyed in (
+            ("prop-pair.npy", prop_map_name(source_fragment)),
+            ("prop-provenance.npy", prop_provenance_name(source_fragment)),
+        ):
+            found = find_npy(self._pool_dir(rep) / legacy)
+            if found is None:
+                continue
+            links = sum(
+                1 for link in self.links if rep in (link["target_rep"], link["source_rep"])
+            )
+            if links > 1:
+                return (
+                    f"representative {rep!r} has {found.name}, which predates keying "
+                    f"propagated provenance by source fragment. It holds only one of "
+                    f"this pool's {links} routes and does not record which, so re-run "
+                    f"alaric-propagate-provenance for it."
+                )
+            return (
+                f"representative {rep!r} has {found.name}, which predates keying "
+                f"propagated provenance by source fragment: rename it to "
+                f"{keyed}{found.name[len(legacy):]}"
+            )
+        return None
 
     def edges_for_link(self, link: dict) -> Edges:
         join = link["join_pool"]

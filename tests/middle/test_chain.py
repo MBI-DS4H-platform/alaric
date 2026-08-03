@@ -380,6 +380,28 @@ def test_propagated_pair_replaces_intermediate_route(tmp_path):
     assert count_chains(g, resolve_selection(g, None, None)).total_chains == 2
 
 
+def test_superseded_unkeyed_propagated_file_is_named_in_the_error(tmp_path):
+    _filter_step_project(tmp_path)
+    # Exactly the situation the rename creates: the intermediate was obsoleted
+    # because a propagated file existed, and that file is under the old name.
+    save_npy(tmp_path / "r2" / "prop-pair.npy.zst", np.array([[0, 0], [2, 1]], dtype=np.uint32))
+    (tmp_path / "g2" / "provenance.npy").unlink()
+    (tmp_path / "g2" / "poses-1.arc").unlink()
+    g = _graph(tmp_path)
+    with pytest.raises(ChainError, match=r"rename it to prop-frag1-map\.npy\.zst"):
+        count_chains(g, resolve_selection(g, None, None))
+
+
+def test_superseded_file_on_a_multi_route_pool_says_to_recompute(tmp_path):
+    _reconnect_project(tmp_path)
+    save_npy(tmp_path / "r2" / "prop-pair.npy", np.array([[0, 0]], dtype=np.uint32))
+    for pool in ("gfwd", "gbwd"):
+        (tmp_path / pool / "provenance.npy").unlink()
+    g = _graph(tmp_path)
+    with pytest.raises(ChainError, match="only one of this pool's 2 routes"):
+        count_chains(g, resolve_selection(g, None, None))
+
+
 def test_propagated_provenance_for_another_fragment_is_not_used(tmp_path):
     _filter_step_project(tmp_path)
     # Deliberately wrong values under a different fragment's name: the frag1 link
