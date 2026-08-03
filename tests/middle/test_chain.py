@@ -357,6 +357,16 @@ def test_compressed_provenance_survives_obsoleted_intermediate(tmp_path):
     assert res.total_chains == 2
 
 
+def test_propagated_provenance_replaces_intermediate_route(tmp_path):
+    _filter_step_project(tmp_path)
+    # r2's propagated values are r2 -> g2 -> r1.  Once present, chain building
+    # need not load g2's grow provenance at all.
+    save_npy(tmp_path / "r2" / "prop-provenance.npy", np.array([0, 2], dtype=np.uint32))
+    (tmp_path / "g2" / "provenance.npy").unlink()
+    g = _graph(tmp_path)
+    assert count_chains(g, resolve_selection(g, None, None)).total_chains == 2
+
+
 def test_has_filter_provenance_accepts_compressed_array(tmp_path):
     (tmp_path / "p").mkdir()
     save_npy(tmp_path / "p" / "provenance.npy", np.array([0, 1], dtype=np.uint32))

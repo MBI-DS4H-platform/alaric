@@ -88,6 +88,10 @@ def check(action_dir: str | Path = ".") -> None:
 
 
 def download(action_dir: str | Path = ".") -> None:
+    _download(action_dir)
+
+
+def _download(action_dir: str | Path, *, provenance_only: bool = False) -> None:
     project = Project.discover(action_dir)
     action = project.get_action_dir(action_dir)
     sigil = _sigil(action.path)
@@ -101,10 +105,25 @@ def download(action_dir: str | Path = ".") -> None:
     if tmp.exists():
         shutil.rmtree(tmp)
     project.ensure_cache()
-    subprocess.run(
-        ["rsync", "-a", "--partial", f"{host}:{_remote_base(sigil)}/", str(tmp) + "/"],
-        check=True,
-    )
+    command = ["rsync", "-a", "--partial"]
+    if provenance_only:
+        # Directories are retained so this remains correct if a future result layout
+        # puts an index array below a subdirectory. Everything else, notably poses,
+        # is excluded.
+        command.extend(
+            [
+                "--include=*/",
+                "--include=provenance.npy",
+                "--include=provenance.npy.zst",
+                "--include=prop-provenance.npy",
+                "--include=prop-provenance.npy.zst",
+                "--include=map-*.npy",
+                "--include=map-*.npy.zst",
+                "--exclude=*",
+            ]
+        )
+    command.extend([f"{host}:{_remote_base(sigil)}/", str(tmp) + "/"])
+    subprocess.run(command, check=True)
     tmp.rename(result)
     check(action_dir)
     link = action.path / "results"
@@ -169,6 +188,14 @@ def download_main(argv: list[str] | None = None) -> int:
     parser.add_argument("action_dir", nargs="?", default=".")
     args = parser.parse_args(argv)
     download(args.action_dir)
+    return 0
+
+
+def provenance_download_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="alaric-provenance-download")
+    parser.add_argument("action_dir", nargs="?", default=".")
+    args = parser.parse_args(argv)
+    _download(args.action_dir, provenance_only=True)
     return 0
 
 

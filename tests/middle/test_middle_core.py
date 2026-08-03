@@ -917,3 +917,16 @@ def test_compressing_a_pose_dir_index_array_keeps_the_result_checksum(tmp_path: 
     assert not (tmp_path / "compressed" / "provenance.npy").exists()
     assert checksums[0] == checksums[1]
     assert (tmp_path / "plain.INDEX").read_bytes() == (tmp_path / "compressed.INDEX").read_bytes()
+
+
+def test_propagated_provenance_is_excluded_from_pose_result_checksum(tmp_path: Path) -> None:
+    pose_dir = tmp_path / "pool"
+    pose_dir.mkdir()
+    (pose_dir / "poses-1.arc").write_bytes(b"arc payload")
+    np.save(pose_dir / "provenance.npy", np.array([0], dtype=np.uint32))
+    before = write_pose_sidecars(pose_dir)
+    save_npy(pose_dir / "prop-provenance.npy", np.array([99], dtype=np.uint32))
+    after = write_pose_sidecars(pose_dir)
+
+    assert before == after
+    assert b"prop-provenance.npy" not in (tmp_path / "pool.INDEX").read_bytes()

@@ -220,6 +220,28 @@ class ChainGraph:
         ``join_ids[i]``.
         """
         n = self.nposes(rep)
+        # propagate-provenance composes exactly the representative -> grow-source
+        # route.  It is not applicable to a source representative's local-only
+        # route, so require that this path ends by crossing fragments.
+        if path:
+            terminal = path[-1]
+            terminal_pool = terminal.get("pool")
+            terminal_to = terminal.get("to")
+            if (
+                terminal_pool in self.pools
+                and terminal_to in self.pools
+                and self.pools[terminal_pool].get("fragment")
+                != self.pools[terminal_to].get("fragment")
+            ):
+                propagated = find_npy(self._pool_dir(rep) / "prop-provenance.npy")
+                if propagated is not None:
+                    values = np.asarray(load_npy(propagated, mmap=True), dtype=np.int64)
+                    if values.ndim != 1 or len(values) != n:
+                        raise ChainError(
+                            f"representative {rep!r}: prop-provenance.npy must contain "
+                            f"exactly {n} rows"
+                        )
+                    return np.arange(n, dtype=np.int64), values
         rep_ids = np.arange(n, dtype=np.int64)
         cur = rep_ids.copy()
         for step in path:

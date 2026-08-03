@@ -3,13 +3,12 @@ from __future__ import annotations
 import gzip
 import hashlib
 import os
-import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from seamless import Buffer
-from seamless.compression_utils import strip_compression_suffix
+from seamless import Buffer, Checksum
+from seamless.compression_utils import decompress_bytes, strip_compression_suffix
 from seamless.checksum.calculate_checksum import calculate_checksum
 from seamless.checksum.serialize import serialize_sync as serialize
 
@@ -108,8 +107,25 @@ def pose_index(pose_dir: Path) -> dict[str, str]:
 
 def write_pose_sidecars(pose_dir: Path) -> str:
     checksum_path = pose_dir.with_name(pose_dir.name + ".CHECKSUM")
-    subprocess.run(["seamless-checksum-index", str(pose_dir)], check=True)
-    checksum = read_sidecar(checksum_path)
+    # ``prop-provenance`` is a derived convenience cache: it must neither make a
+    # result non-reproducible nor change a completed action's checksum. Keep the
+    # index byte-compatible with seamless-checksum-index for every other member.
+    deepfolder: dict[str, str] = {}
+    for path in pose_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(pose_dir).as_posix()
+        logical, suffix = strip_compression_suffix(rel)
+        if logical == "prop-provenance.npy":
+            continue
+        payload = path.read_bytes()
+        if suffix is not None:
+            payload = decompress_bytes(payload, suffix)
+        deepfolder[logical] = str(calculate_checksum(payload))
+    index = serialize(deepfolder, "plain")
+    checksum = Checksum(calculate_checksum(index)).hex()
+    pose_dir.with_name(pose_dir.name + ".INDEX").write_bytes(index)
+    checksum_path.write_text(checksum + "\n")
     return checksum
 
 
