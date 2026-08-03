@@ -504,17 +504,29 @@ def _pose_index_from_arc_name(name: str) -> int | None:
 
 
 def discover_organized(directory: str | Path) -> list[Path]:
+    """Ordered pose files of an organized directory, one per index.
+
+    A pool can hold both forms of the same file -- a decompressed copy beside the
+    ``.arc.zst`` it came from. That is one pose file, not two: listing both would
+    double every pose and, once a pool spans several files, silently shift every
+    global pose id onto a different pose. The uncompressed form wins, as
+    ``find_npy`` prefers it for arrays.
+    """
     directory = Path(directory)
     if not directory.exists():
         return []
-    indexed = []
+    by_index: dict[int, Path] = {}
     for path in list(directory.glob("poses-*.arc")) + list(
         directory.glob("poses-*.arc.zst")
     ):
         index = _pose_index_from_arc_name(path.name)
-        if index is not None:
-            indexed.append((index, path))
-    return [path for _, path in sorted(indexed)]
+        if index is None:
+            continue
+        current = by_index.get(index)
+        compressed = path.name.endswith(ARC_ZSTD_SUFFIX)
+        if current is None or (current.name.endswith(ARC_ZSTD_SUFFIX) and not compressed):
+            by_index[index] = path
+    return [by_index[index] for index in sorted(by_index)]
 
 
 @dataclass(frozen=True)

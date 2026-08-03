@@ -15,7 +15,15 @@ sys.path.insert(0, str(HERE / ".alaric"))
 
 from npy_io import load_npy, save_npy  # noqa: E402
 from organize import organize_pose_dir  # noqa: E402
-from poses import HEADER_SIZE, discover_organized, pack_pool, read_arc_file, write_arc_file  # noqa: E402
+from poses import (  # noqa: E402
+    HEADER_SIZE,
+    PoseReader,
+    discover_organized,
+    pack_pool,
+    read_arc_file,
+    select_pose_indices,
+    write_arc_file,
+)
 from identity_filter import run_identity_filter, write_identity_pose_dir  # noqa: E402
 
 
@@ -227,3 +235,59 @@ def test_compressed_provenance_matches_uncompressed_bytes(tmp_path: Path) -> Non
     assert zstd.ZstdDecompressor().stream_reader(io.BytesIO(payload)).read() == (
         plain_dir / "provenance.npy"
     ).read_bytes()
+
+
+def _write_one_pose_per_file(pose_dir: Path, nposes: int) -> None:
+    """Organized pool of ``nposes`` poses, each in its own bucket hence its own file."""
+    pose_dir.mkdir(parents=True, exist_ok=True)
+    packed = pack_pool(
+        np.arange(1, nposes + 1, dtype=np.uint16),
+        np.zeros(nposes, dtype=np.uint16),
+        np.array([[64 * i, 0, 0] for i in range(nposes)], dtype=np.int32),
+        bucket_size=16,
+        sort_offsets=False,
+    )
+    assert len(packed) == nposes
+    for index, (M, O, C, P) in enumerate(packed, start=1):
+        write_arc_file(pose_dir / f"poses-{index}.arc", M, O, C, P, bucket_size=16)
+
+
+def test_a_decompressed_copy_beside_its_zst_is_one_pose_file(tmp_path: Path) -> None:
+    """Both forms of one file must not be listed twice.
+
+    A result dir can end up holding a decompressed copy next to the .arc.zst it
+    came from.  Counting both doubles every pose and, across several files,
+    shifts every global pose id onto a different pose -- so a provenance array
+    resolves to real but wrong poses, silently.
+    """
+    pose_dir = tmp_path / "poses"
+    _write_one_pose_per_file(pose_dir, 4)
+    before = discover_organized(pose_dir)
+    assert PoseReader.get_nposes(pose_dir) == 4
+    identities = select_pose_indices(pose_dir, np.arange(4)).conformers.tolist()
+
+    for path in list(pose_dir.glob("poses-*.arc")):
+        path.with_name(path.name + ".zst").write_bytes(
+            zstd.ZstdCompressor().compress(path.read_bytes())
+        )
+
+    assert discover_organized(pose_dir) == before
+    assert PoseReader.get_nposes(pose_dir) == 4
+    assert select_pose_indices(pose_dir, np.arange(4)).conformers.tolist() == identities
+
+
+def test_the_compressed_form_is_used_when_it_is_the_only_one(tmp_path: Path) -> None:
+    pose_dir = tmp_path / "poses"
+    _write_one_pose_per_file(pose_dir, 3)
+    for path in list(pose_dir.glob("poses-*.arc")):
+        path.with_name(path.name + ".zst").write_bytes(
+            zstd.ZstdCompressor().compress(path.read_bytes())
+        )
+        path.unlink()
+
+    assert [path.name for path in discover_organized(pose_dir)] == [
+        "poses-1.arc.zst",
+        "poses-2.arc.zst",
+        "poses-3.arc.zst",
+    ]
+    assert PoseReader.get_nposes(pose_dir) == 3
