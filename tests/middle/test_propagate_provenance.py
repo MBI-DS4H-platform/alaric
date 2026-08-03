@@ -53,16 +53,19 @@ def test_merge_map_is_selected_by_next_directory_sigil(tmp_path: Path) -> None:
             }
         )
     )
-    np.save(tmp_path / "merge" / "map-1.npy", np.array([[0, 0]], dtype=np.uint64))
+    # A merge is relational even where a particular map happens to be one-to-one.
+    np.save(tmp_path / "merge" / "map-1.npy", np.array([[0, 0], [1, 0]], dtype=np.uint64))
     np.save(tmp_path / "merge" / "map-2.npy", np.array([[9, 0]], dtype=np.uint64))
-    np.save(tmp_path / "parent-sigil" / "provenance.npy", np.array([0], dtype=np.uint32))
-    save_npy(tmp_path / "grow" / "provenance.npy", np.array([42], dtype=np.uint32))
+    np.save(tmp_path / "parent-sigil" / "provenance.npy", np.array([0, 1], dtype=np.uint32))
+    save_npy(tmp_path / "grow" / "provenance.npy", np.array([42, 99], dtype=np.uint32))
 
     output = propagate(
         [tmp_path / "representative", tmp_path / "merge", tmp_path / "parent-sigil", tmp_path / "grow"]
     )
 
-    assert load_npy(output).tolist() == [42]
+    assert output.name == "prop-pair.npy.zst"
+    assert load_npy(output).tolist() == [[42, 0], [99, 0]]
+    assert not (tmp_path / "representative" / "prop-provenance.npy.zst").exists()
 
 
 def test_graph_lineage_requires_a_merge_branch() -> None:

@@ -18,13 +18,13 @@ the grow pool last.  Every non-final directory must provide a filter
 ``provenance.npy`` (or ``.zst``) or an identity map.  The final directory must
 provide grow ``provenance.npy``.  For an identity result, the next directory's
 sigil identifies input 1 or input 2 in ``identity-filter.json``, hence chooses
-``map-1.npy`` or ``map-2.npy`` without needing logical pool names.  The composed
-grow provenance is written as ``prop-provenance.npy.zst`` in the first pose dir.
+``map-1.npy`` or ``map-2.npy`` without needing logical pool names. A filter-only
+lineage writes dense ``prop-provenance.npy.zst``; any lineage containing a map
+writes relational ``prop-pair.npy.zst`` in the first pose dir.
 
 The output is a derived convenience array, deliberately excluded from result
-sidecar checksums.  It is valid only when every selected representative pose has
-one unambiguous origin in the chosen grow provenance; malformed, incomplete, or
-one-to-many merge mappings fail rather than silently losing chain provenance.
+sidecar checksums. ``prop-pair`` uses ``(grow_source, representative_pose)``
+columns, preserving a merge's one-to-many provenance rather than discarding it.
 """
 
 from __future__ import annotations
@@ -45,6 +45,7 @@ from .errors import MiddleError
 
 PROVENANCE = "provenance.npy"
 PROP_PROVENANCE = "prop-provenance.npy"
+PROP_PAIR = "prop-pair.npy"
 
 
 class PropagationError(MiddleError):
@@ -89,7 +90,10 @@ def _map_name(pool_dir: Path, next_dir: Path) -> str:
     )
 
 
-def _map_indices(pool_dir: Path, next_dir: Path, ids: np.ndarray) -> np.ndarray:
+def _map_relation(
+    pool_dir: Path, next_dir: Path, representative_ids: np.ndarray, ids: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Apply a map's this->parent relation, expanding representative rows."""
     name = _map_name(pool_dir, next_dir)
     found = find_npy(pool_dir / name)
     if found is None:
@@ -109,17 +113,21 @@ def _map_indices(pool_dir: Path, next_dir: Path, ids: np.ndarray) -> np.ndarray:
     if not np.all(valid):
         missing = int(ids[np.flatnonzero(~valid)[0]])
         raise PropagationError(f"{pool_dir}: {name} has no parent mapping for pose {missing}")
-    # A propagated provenance array is dense (one value per output pose).  Do not
-    # collapse an identity relation with multiple selected parents invisibly.
     starts = np.searchsorted(sorted_children, ids, side="left")
     stops = np.searchsorted(sorted_children, ids, side="right")
-    if np.any(stops - starts != 1):
-        duplicate = int(ids[np.flatnonzero(stops - starts != 1)[0]])
-        raise PropagationError(
-            f"{pool_dir}: {name} maps pose {duplicate} to multiple parents; "
-            "cannot write dense propagated provenance"
-        )
-    return parents[order[starts]]
+    counts = stops - starts
+    total = int(counts.sum())
+    offsets = np.repeat(starts, counts)
+    within = np.arange(total, dtype=np.int64) - np.repeat(
+        np.cumsum(counts) - counts, counts
+    )
+    rows = order[offsets + within]
+    return np.repeat(representative_ids, counts), parents[rows]
+
+
+def _remove_alternates(path: Path) -> None:
+    path.unlink(missing_ok=True)
+    path.with_name(path.name + ".zst").unlink(missing_ok=True)
 
 
 def propagate(pool_dirs: list[str | Path]) -> Path:
@@ -135,7 +143,9 @@ def propagate(pool_dirs: list[str | Path]) -> Path:
         nposes = PoseReader.get_nposes(dirs[0])
     except Exception as exc:
         raise PropagationError(f"{dirs[0]}: cannot determine representative pose count") from exc
-    ids = np.arange(nposes, dtype=np.int64)
+    representative_ids = np.arange(nposes, dtype=np.int64)
+    ids = representative_ids.copy()
+    has_map = False
     for index, pool_dir in enumerate(dirs[:-1]):
         dense = find_npy(pool_dir / PROVENANCE)
         maps = [find_npy(pool_dir / f"map-{n}.npy") for n in (1, 2)]
@@ -151,7 +161,10 @@ def propagate(pool_dirs: list[str | Path]) -> Path:
                 raise PropagationError(f"{pool_dir}: filter provenance has no row for pose {bad}")
             ids = selector[ids]
         elif maps:
-            ids = _map_indices(pool_dir, dirs[index + 1], ids)
+            has_map = True
+            representative_ids, ids = _map_relation(
+                pool_dir, dirs[index + 1], representative_ids, ids
+            )
         else:
             raise PropagationError(
                 f"{pool_dir}: expected filter provenance.npy or merge map-*.npy"
@@ -164,9 +177,20 @@ def propagate(pool_dirs: list[str | Path]) -> Path:
         bad = int(ids[np.flatnonzero((ids < 0) | (ids >= len(grow)))[0]])
         raise PropagationError(f"{dirs[-1]}: grow provenance has no row for pose {bad}")
     output = grow[ids]
-    logical_output = dirs[0] / PROP_PROVENANCE
-    written = save_npy(logical_output, output.astype(np.uint32, copy=False), compress=True)
-    logical_output.unlink(missing_ok=True)
+    if has_map:
+        # The map orientation is (parent, this), so preserve it after replacing
+        # the terminal grow-pool pose with its grow-source provenance.
+        pair = np.column_stack((output, representative_ids)).astype(np.uint64, copy=False)
+        pair = np.unique(pair, axis=0)  # multiple routes can reach one identical edge
+        logical_output = dirs[0] / PROP_PAIR
+        written = save_npy(logical_output, pair, compress=True)
+        _remove_alternates(dirs[0] / PROP_PROVENANCE)
+        logical_output.unlink(missing_ok=True)
+    else:
+        logical_output = dirs[0] / PROP_PROVENANCE
+        written = save_npy(logical_output, output.astype(np.uint32, copy=False), compress=True)
+        _remove_alternates(dirs[0] / PROP_PAIR)
+        logical_output.unlink(missing_ok=True)
     return written
 
 

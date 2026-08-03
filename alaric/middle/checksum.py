@@ -116,7 +116,7 @@ def write_pose_sidecars(pose_dir: Path) -> str:
             continue
         rel = path.relative_to(pose_dir).as_posix()
         logical, suffix = strip_compression_suffix(rel)
-        if logical == "prop-provenance.npy":
+        if logical in {"prop-provenance.npy", "prop-pair.npy"}:
             continue
         payload = path.read_bytes()
         if suffix is not None:

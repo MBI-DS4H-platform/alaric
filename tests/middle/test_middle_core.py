@@ -926,7 +926,9 @@ def test_propagated_provenance_is_excluded_from_pose_result_checksum(tmp_path: P
     np.save(pose_dir / "provenance.npy", np.array([0], dtype=np.uint32))
     before = write_pose_sidecars(pose_dir)
     save_npy(pose_dir / "prop-provenance.npy", np.array([99], dtype=np.uint32))
+    save_npy(pose_dir / "prop-pair.npy", np.array([[99, 0]], dtype=np.uint32))
     after = write_pose_sidecars(pose_dir)
 
     assert before == after
     assert b"prop-provenance.npy" not in (tmp_path / "pool.INDEX").read_bytes()
+    assert b"prop-pair.npy" not in (tmp_path / "pool.INDEX").read_bytes()

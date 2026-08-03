@@ -4,8 +4,10 @@
 
 Add `alaric-propagate-provenance` to carry a grow action's provenance through
 same-fragment filter and identity/merge results, writing the resulting
-`prop-provenance.npy.zst` beside the representative's poses. The derived file
-is intentionally not part of the result checksum.
+derived provenance beside the representative's poses. A filter-only lineage
+writes dense `prop-provenance.npy.zst`; a lineage containing any identity/merge
+map writes relational `prop-pair.npy.zst`. Derived files are intentionally not
+part of the result checksum.
 
 ## Command behaviour
 
@@ -23,18 +25,27 @@ directories supply filter provenance or merge maps. For a merge, the next
 directory's sigil is matched to `pose_dir_1` / `pose_dir_2` in
 `identity-filter.json`, selecting `map-1.npy` / `map-2.npy` without requiring
 logical pool names at this stage. The result is compressed atomically into the
-first directory.
+first directory. If no `map-X.npy` is encountered, it is
+`prop-provenance.npy.zst`, a dense vector indexed by representative pose. If
+any map is encountered, it is `prop-pair.npy.zst`, an `N x 2` relation with
+columns `(grow_source_pose_id, representative_pose_id)`, using the same
+parent/child orientation as `map-*.npy`. The forms are mutually exclusive, so
+writing one removes stale copies of either form of the other.
 
 ## Supporting changes
 
-- Exclude `prop-provenance.npy[.zst]` from pose result checksum indices.
+- Exclude `prop-provenance.npy[.zst]` and `prop-pair.npy[.zst]` from pose
+  result checksum indices.
 - Add `alaric-provenance-download`, a selective variant of result download that
-  transfers only grow/filter/map provenance arrays and their compressed forms.
-- Let `alaric-chain` consume propagated provenance for a representative's
-  cross-fragment grow route before falling back to intermediate arrays.
+  transfers only grow/filter/map provenance arrays, both propagated forms, and
+  their compressed forms.
+- Let `alaric-chain` consume dense propagated provenance or the propagated
+  sparse pair relation for a representative's cross-fragment grow route before
+  falling back to intermediate arrays.
 
 ## Verification
 
 Unit tests cover local and remote graph mode, representative and branch errors,
-filter and merge composition, raw/zstd handling, selective download filters,
-checksum exclusion, and the chain fast path/fallback.
+filter and merge composition, dense-versus-pair output selection, raw/zstd
+handling, selective download filters, checksum exclusion, and the chain fast
+path/fallback for both representations.

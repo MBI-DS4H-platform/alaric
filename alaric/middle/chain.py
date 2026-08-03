@@ -234,6 +234,12 @@ class ChainGraph:
                 != self.pools[terminal_to].get("fragment")
             ):
                 propagated = find_npy(self._pool_dir(rep) / "prop-provenance.npy")
+                prop_pair = find_npy(self._pool_dir(rep) / "prop-pair.npy")
+                if propagated is not None and prop_pair is not None:
+                    raise ChainError(
+                        f"representative {rep!r}: both prop-provenance.npy and "
+                        "prop-pair.npy are present"
+                    )
                 if propagated is not None:
                     values = np.asarray(load_npy(propagated, mmap=True), dtype=np.int64)
                     if values.ndim != 1 or len(values) != n:
@@ -242,6 +248,18 @@ class ChainGraph:
                             f"exactly {n} rows"
                         )
                     return np.arange(n, dtype=np.int64), values
+                if prop_pair is not None:
+                    pairs = np.asarray(load_npy(prop_pair, mmap=True), dtype=np.int64)
+                    if pairs.ndim != 2 or pairs.shape[1] != 2:
+                        raise ChainError(
+                            f"representative {rep!r}: prop-pair.npy must have shape (N, 2)"
+                        )
+                    sources, reps = pairs[:, 0], pairs[:, 1]
+                    if np.any(reps < 0) or np.any(reps >= n):
+                        raise ChainError(
+                            f"representative {rep!r}: prop-pair.npy has out-of-range pose ids"
+                        )
+                    return reps, sources
         rep_ids = np.arange(n, dtype=np.int64)
         cur = rep_ids.copy()
         for step in path:

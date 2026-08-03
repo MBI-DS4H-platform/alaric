@@ -367,6 +367,18 @@ def test_propagated_provenance_replaces_intermediate_route(tmp_path):
     assert count_chains(g, resolve_selection(g, None, None)).total_chains == 2
 
 
+def test_propagated_pair_replaces_intermediate_route(tmp_path):
+    _filter_step_project(tmp_path)
+    # Pair orientation is (grow-source pose, representative pose), matching map-*.npy.
+    save_npy(
+        tmp_path / "r2" / "prop-pair.npy",
+        np.array([[0, 0], [2, 1]], dtype=np.uint32),
+    )
+    (tmp_path / "g2" / "provenance.npy").unlink()
+    g = _graph(tmp_path)
+    assert count_chains(g, resolve_selection(g, None, None)).total_chains == 2
+
+
 def test_has_filter_provenance_accepts_compressed_array(tmp_path):
     (tmp_path / "p").mkdir()
     save_npy(tmp_path / "p" / "provenance.npy", np.array([0, 1], dtype=np.uint32))
