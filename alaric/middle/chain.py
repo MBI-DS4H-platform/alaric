@@ -55,6 +55,7 @@ from poses import (  # noqa: E402
 
 from .errors import MiddleError  # noqa: E402
 from .project import Project  # noqa: E402
+from .propagate_provenance import prop_map_name, prop_provenance_name  # noqa: E402
 from .resolve import resolve_exclude, resolve_sequence  # noqa: E402
 
 
@@ -233,18 +234,24 @@ class ChainGraph:
                 and self.pools[terminal_pool].get("fragment")
                 != self.pools[terminal_to].get("fragment")
             ):
-                propagated = find_npy(self._pool_dir(rep) / "prop-provenance.npy")
-                prop_pair = find_npy(self._pool_dir(rep) / "prop-pair.npy")
+                # Keyed by the fragment this route reads from: a representative that
+                # reconnects two routes (a forward and a backward one, say) holds one
+                # propagated file per link, and only this link's file applies here.
+                source_fragment = self.pools[terminal_to]["fragment"]
+                dense_name = prop_provenance_name(source_fragment)
+                pair_name = prop_map_name(source_fragment)
+                propagated = find_npy(self._pool_dir(rep) / dense_name)
+                prop_pair = find_npy(self._pool_dir(rep) / pair_name)
                 if propagated is not None and prop_pair is not None:
                     raise ChainError(
-                        f"representative {rep!r}: both prop-provenance.npy and "
-                        "prop-pair.npy are present"
+                        f"representative {rep!r}: both {dense_name} and "
+                        f"{pair_name} are present"
                     )
                 if propagated is not None:
                     values = np.asarray(load_npy(propagated, mmap=True), dtype=np.int64)
                     if values.ndim != 1 or len(values) != n:
                         raise ChainError(
-                            f"representative {rep!r}: prop-provenance.npy must contain "
+                            f"representative {rep!r}: {dense_name} must contain "
                             f"exactly {n} rows"
                         )
                     return np.arange(n, dtype=np.int64), values
@@ -252,12 +259,12 @@ class ChainGraph:
                     pairs = np.asarray(load_npy(prop_pair, mmap=True), dtype=np.int64)
                     if pairs.ndim != 2 or pairs.shape[1] != 2:
                         raise ChainError(
-                            f"representative {rep!r}: prop-pair.npy must have shape (N, 2)"
+                            f"representative {rep!r}: {pair_name} must have shape (N, 2)"
                         )
                     sources, reps = pairs[:, 0], pairs[:, 1]
                     if np.any(reps < 0) or np.any(reps >= n):
                         raise ChainError(
-                            f"representative {rep!r}: prop-pair.npy has out-of-range pose ids"
+                            f"representative {rep!r}: {pair_name} has out-of-range pose ids"
                         )
                     return reps, sources
         rep_ids = np.arange(n, dtype=np.int64)

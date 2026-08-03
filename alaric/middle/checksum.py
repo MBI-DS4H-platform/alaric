@@ -4,6 +4,7 @@ import gzip
 import hashlib
 import os
 from concurrent.futures import ThreadPoolExecutor
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
@@ -107,16 +108,26 @@ def pose_index(pose_dir: Path) -> dict[str, str]:
 
 def write_pose_sidecars(pose_dir: Path) -> str:
     checksum_path = pose_dir.with_name(pose_dir.name + ".CHECKSUM")
-    # ``prop-provenance`` is a derived convenience cache: it must neither make a
+    # Propagated provenance is a derived convenience cache: it must neither make a
     # result non-reproducible nor change a completed action's checksum. Keep the
     # index byte-compatible with seamless-checksum-index for every other member.
+    # Written by alaric-propagate-provenance, which names them per source fragment
+    # (the last two patterns predate that and may still lie around).
     deepfolder: dict[str, str] = {}
     for path in pose_dir.rglob("*"):
         if not path.is_file():
             continue
         rel = path.relative_to(pose_dir).as_posix()
         logical, suffix = strip_compression_suffix(rel)
-        if logical in {"prop-provenance.npy", "prop-pair.npy"}:
+        if any(
+            fnmatch(logical, pattern)
+            for pattern in (
+                "prop-frag*-provenance.npy",
+                "prop-frag*-map.npy",
+                "prop-provenance.npy",
+                "prop-pair.npy",
+            )
+        ):
             continue
         payload = path.read_bytes()
         if suffix is not None:

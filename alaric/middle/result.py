@@ -116,10 +116,13 @@ def _download(action_dir: str | Path, *, provenance_only: bool = False) -> None:
                 "--include=*/",
                 "--include=provenance.npy",
                 "--include=provenance.npy.zst",
-                "--include=prop-provenance.npy",
-                "--include=prop-provenance.npy.zst",
-                "--include=prop-pair.npy",
-                "--include=prop-pair.npy.zst",
+                # Propagated provenance is keyed by source fragment, and a
+                # representative that reconnects several grow routes has one file per
+                # route: match the whole family rather than a single name.
+                "--include=prop-frag*-provenance.npy",
+                "--include=prop-frag*-provenance.npy.zst",
+                "--include=prop-frag*-map.npy",
+                "--include=prop-frag*-map.npy.zst",
                 "--include=map-*.npy",
                 "--include=map-*.npy.zst",
                 "--exclude=*",

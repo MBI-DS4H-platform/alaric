@@ -6,24 +6,33 @@ Graph mode takes a JSON file produced by :mod:`alaric.middle.pool_graph`, a
 representative pool name, and ``local`` or ``remote``.  It validates the
 representative (printing the available representatives when it is absent), then
 walks that pool upstream through filter and identity/merge provenance until it
-reaches a grow pool.  A merge is inherently ambiguous, so ``--branch PARENT``
-selects its graph parent.  Local result dirs are ``../CACHE/results/<sigil>``;
-remote dirs are ``$ALARIC_REMOTE_RESULT_DIR/<sigil>``.  Local graph mode runs
-the second mode immediately.  Remote graph mode writes
-``propagate-provenance-<representative>.sh`` and uploads it beside the remote
-project deployment scripts.
+reaches a grow pool.  A merge forks the walk and *every* arm is followed: a
+representative that reconnects two grow routes -- ``frag9-reconnect`` joins a
+forward route carrying fragment 8 provenance with a backward one carrying
+fragment 10 -- yields one propagated file per route.  ``--branch PARENT``
+optionally restricts the walk to particular merge arms.  Local result dirs are
+``../CACHE/results/<sigil>``; remote dirs are ``$ALARIC_REMOTE_RESULT_DIR/<sigil>``.
+Local graph mode runs the second mode immediately.  Remote graph mode writes
+``propagate-provenance-<representative>.sh``, one command per arm, and uploads
+it beside the remote project deployment scripts.
 
-Mode 2 accepts an ordered ``--pool-dirs`` lineage: the representative first and
-the grow pool last.  Every non-final directory must provide a filter
+Mode 2 accepts an ordered ``--pool-dirs`` lineage -- the representative first and
+the grow pool last -- plus the ``--source-fragment`` that lineage grows from.
+The fragment has to be passed in because result dirs are named by sigil and
+record no fragment of their own.  Every non-final directory must provide a filter
 ``provenance.npy`` (or ``.zst``) or an identity map.  The final directory must
 provide grow ``provenance.npy``.  For an identity result, the next directory's
 sigil identifies input 1 or input 2 in ``identity-filter.json``, hence chooses
-``map-1.npy`` or ``map-2.npy`` without needing logical pool names. A filter-only
-lineage writes dense ``prop-provenance.npy.zst``; any lineage containing a map
-writes relational ``prop-pair.npy.zst`` in the first pose dir.
+``map-1.npy`` or ``map-2.npy`` without needing logical pool names.
+
+Output lands in the representative's dir, keyed by source fragment: a
+filter-only lineage writes dense ``prop-frag<X>-provenance.npy.zst``, a lineage
+containing any map writes relational ``prop-frag<X>-map.npy.zst``.  The key is
+what makes a reconnected representative usable: ``alaric-chain`` composes one
+route per link, and such a representative has one link per source fragment.
 
 The output is a derived convenience array, deliberately excluded from result
-sidecar checksums. ``prop-pair`` uses ``(grow_source, representative_pose)``
+sidecar checksums. ``prop-frag<X>-map`` uses ``(grow_source, representative_pose)``
 columns, preserving a merge's one-to-many provenance rather than discarding it.
 """
 
@@ -44,8 +53,19 @@ from .errors import MiddleError
 
 
 PROVENANCE = "provenance.npy"
-PROP_PROVENANCE = "prop-provenance.npy"
-PROP_PAIR = "prop-pair.npy"
+# Superseded by the fragment-keyed names below; removed on rewrite so a stale
+# copy cannot be mistaken for one of the routes a reconnected pool now carries.
+LEGACY_PROP_NAMES = ("prop-provenance.npy", "prop-pair.npy")
+
+
+def prop_provenance_name(source_fragment: int) -> str:
+    """Dense propagated provenance: row = representative pose, value = grow source."""
+    return f"prop-frag{int(source_fragment)}-provenance.npy"
+
+
+def prop_map_name(source_fragment: int) -> str:
+    """Relational propagated provenance: columns ``(grow_source, representative_pose)``."""
+    return f"prop-frag{int(source_fragment)}-map.npy"
 
 
 class PropagationError(MiddleError):
@@ -130,7 +150,7 @@ def _remove_alternates(path: Path) -> None:
     path.with_name(path.name + ".zst").unlink(missing_ok=True)
 
 
-def propagate(pool_dirs: list[str | Path]) -> Path:
+def propagate(pool_dirs: list[str | Path], source_fragment: int) -> Path:
     """Compose a resolved lineage and write its first pool's propagated provenance."""
     dirs = [Path(path) for path in pool_dirs]
     if not dirs:
@@ -177,20 +197,23 @@ def propagate(pool_dirs: list[str | Path]) -> Path:
         bad = int(ids[np.flatnonzero((ids < 0) | (ids >= len(grow)))[0]])
         raise PropagationError(f"{dirs[-1]}: grow provenance has no row for pose {bad}")
     output = grow[ids]
+    # Only this fragment's two forms are alternates of each other: another
+    # fragment's file describes another route through the same pool and must survive.
     if has_map:
         # The map orientation is (parent, this), so preserve it after replacing
         # the terminal grow-pool pose with its grow-source provenance.
         pair = np.column_stack((output, representative_ids)).astype(np.uint64, copy=False)
         pair = np.unique(pair, axis=0)  # multiple routes can reach one identical edge
-        logical_output = dirs[0] / PROP_PAIR
+        logical_output = dirs[0] / prop_map_name(source_fragment)
         written = save_npy(logical_output, pair, compress=True)
-        _remove_alternates(dirs[0] / PROP_PROVENANCE)
-        logical_output.unlink(missing_ok=True)
+        _remove_alternates(dirs[0] / prop_provenance_name(source_fragment))
     else:
-        logical_output = dirs[0] / PROP_PROVENANCE
+        logical_output = dirs[0] / prop_provenance_name(source_fragment)
         written = save_npy(logical_output, output.astype(np.uint32, copy=False), compress=True)
-        _remove_alternates(dirs[0] / PROP_PAIR)
-        logical_output.unlink(missing_ok=True)
+        _remove_alternates(dirs[0] / prop_map_name(source_fragment))
+    logical_output.unlink(missing_ok=True)
+    for name in LEGACY_PROP_NAMES:
+        _remove_alternates(dirs[0] / name)
     return written
 
 
@@ -198,51 +221,79 @@ def _representatives(data: dict) -> list[str]:
     return [str(value) for _fragment, value in sorted(data.get("representatives", {}).items(), key=lambda x: int(x[0]))]
 
 
-def _lineage(data: dict, representative: str, branches: list[str]) -> list[str]:
+def _lineages(data: dict, representative: str, branches: list[str]) -> list[tuple[list[str], int]]:
+    """Enumerate every representative-to-grow lineage, keyed by source fragment.
+
+    A merge does not have to be resolved to a single arm: both are walked, and each
+    one that reaches a grow pool contributes its own propagated file.  That is what a
+    reconnect pool needs -- one arm reaches back to the forward route's fragment, the
+    other to the backward route's.  An arm that ends in a source pool (an anchor has
+    no provenance of its own) carries no grow provenance and is simply dropped, so a
+    representative merging a grown pool with an anchored one still resolves.
+    """
     pools = data.get("pools", {})
-    current = representative
-    result = [current]
+    lineages: list[tuple[list[str], int]] = []
     used: set[str] = set()
-    while True:
+    queue: list[list[str]] = [[representative]]
+    while queue:
+        path = queue.pop(0)
+        current = path[-1]
         node = pools.get(current)
         if not isinstance(node, dict):
             raise PropagationError(f"graph has no pool entry for {current!r}")
         parents = [p for p in node.get("parents", []) if p.get("array")]
-        if node.get("kind") == "grow":
-            if any(p.get("edge") == "grow" for p in parents):
-                unused = set(branches) - used
-                if unused:
-                    raise PropagationError(
-                        "--branch does not select a merge upstream: " + ", ".join(sorted(unused))
-                    )
-                return result
-            raise PropagationError(f"{current}: grow pool has no grow provenance edge")
-        if node.get("kind") in {"merge", "dedup"}:
-            options = [str(p["pool"]) for p in parents if p.get("edge") in {"merge", "dedup"}]
-            unique_options = list(dict.fromkeys(options))
-            if node.get("kind") == "dedup" and len(unique_options) == 1:
-                current = unique_options[0]
-                used.add(current)
-            else:
-                selected = [name for name in branches if name in unique_options]
-                if len(selected) != 1:
-                    raise PropagationError(
-                        f"{current}: select one upstream with --branch; upstreams are: "
-                        + ", ".join(unique_options)
-                    )
-                current = selected[0]
-                used.add(current)
+        kind = node.get("kind")
+        if kind == "grow":
+            grow = [p for p in parents if p.get("edge") == "grow"]
+            if not grow:
+                raise PropagationError(f"{current}: grow pool has no grow provenance edge")
+            source = str(grow[0]["pool"])
+            fragment = pools.get(source, {}).get("fragment")
+            if fragment is None:
+                raise PropagationError(
+                    f"{current}: graph records no fragment for grow source {source!r}"
+                )
+            lineages.append((path, int(fragment)))
+            continue
+        if kind in {"merge", "dedup"}:
+            # A dedup lists the same input twice; its two maps are redundant.
+            options = list(
+                dict.fromkeys(
+                    str(p["pool"]) for p in parents if p.get("edge") in {"merge", "dedup"}
+                )
+            )
+            selected = [name for name in options if name in branches]
+            if selected:
+                used.update(selected)
+                options = selected
         else:
-            options = [str(p["pool"]) for p in parents if not p.get("cross_fragment")]
-            if len(options) != 1:
+            options = list(
+                dict.fromkeys(str(p["pool"]) for p in parents if not p.get("cross_fragment"))
+            )
+            if len(options) > 1:
                 raise PropagationError(
                     f"{current}: expected exactly one same-fragment provenance parent, got: "
-                    + ", ".join(options or ["none"])
+                    + ", ".join(options)
                 )
-            current = options[0]
-        if current in result:
-            raise PropagationError(f"provenance lineage contains a cycle at {current!r}")
-        result.append(current)
+        for name in options:
+            if name in path:
+                raise PropagationError(f"provenance lineage contains a cycle at {name!r}")
+            queue.append(path + [name])
+    unused = set(branches) - used
+    if unused:
+        raise PropagationError(
+            "--branch does not select a merge upstream: " + ", ".join(sorted(unused))
+        )
+    lineages.sort(key=lambda item: item[1])
+    for fragment in {f for _path, f in lineages}:
+        clashing = [path for path, f in lineages if f == fragment]
+        if len(clashing) > 1:
+            raise PropagationError(
+                f"{representative}: {len(clashing)} lineages carry fragment {fragment} "
+                "provenance and would write the same file; separate them with --branch: "
+                + "; ".join(" <- ".join(path) for path in clashing)
+            )
+    return lineages
 
 
 def _result_dirs(data: dict, lineage: list[str], deployer: str) -> list[Path]:
@@ -263,7 +314,7 @@ def _result_dirs(data: dict, lineage: list[str], deployer: str) -> list[Path]:
     return result
 
 
-def _write_remote_script(representative: str, dirs: list[Path]) -> Path:
+def _write_remote_script(representative: str, plans: list[tuple[list[Path], int]]) -> Path:
     host = os.environ.get("ALARIC_REMOTE_HOST")
     deploy_root = os.environ.get("ALARIC_REMOTE_DEPLOYMENT_DIR")
     if not host or not deploy_root:
@@ -272,10 +323,16 @@ def _write_remote_script(representative: str, dirs: list[Path]) -> Path:
         )
     project = os.environ.get("ALARIC_PROJECT", "PROJECT").strip("/") or "PROJECT"
     script = Path.cwd() / f"propagate-provenance-{representative}.sh"
-    command = "alaric-propagate-provenance --pool-dirs " + " ".join(
-        shlex.quote(str(path)) for path in dirs
-    )
-    script.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + command + "\n")
+    # One command per lineage: a reconnected representative propagates each of its
+    # grow routes into its own file, and both are needed to chain through it.
+    commands = [
+        "alaric-propagate-provenance --source-fragment "
+        + str(fragment)
+        + " --pool-dirs "
+        + " ".join(shlex.quote(str(path)) for path in dirs)
+        for dirs, fragment in plans
+    ]
+    script.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + "\n".join(commands) + "\n")
     os.chmod(script, 0o755)
     destination = f"{deploy_root.rstrip('/')}/{project}"
     subprocess.run(["ssh", host, "mkdir", "-p", destination], check=True)
@@ -283,7 +340,7 @@ def _write_remote_script(representative: str, dirs: list[Path]) -> Path:
     return script
 
 
-def graph_mode(graph_path: str | Path, representative: str | None, deployer: str | None, branches: list[str]) -> Path | None:
+def graph_mode(graph_path: str | Path, representative: str | None, deployer: str | None, branches: list[str]) -> list[Path] | None:
     data = json.loads(Path(graph_path).read_text())
     representatives = _representatives(data)
     if representative not in representatives:
@@ -293,11 +350,19 @@ def graph_mode(graph_path: str | Path, representative: str | None, deployer: str
         return None
     if deployer not in {"local", "remote"}:
         raise PropagationError("deployer must be local or remote")
-    lineage = _lineage(data, representative, branches)
-    dirs = _result_dirs(data, lineage, deployer)
+    lineages = _lineages(data, representative, branches)
+    if not lineages:
+        # A representative that only ever *sources* grow actions (the first
+        # fragment of a route, or a purely anchored pool) has nothing upstream to
+        # propagate.  alaric-chain never asks it for a propagated route either.
+        print(f"{representative}: no grow lineage upstream; nothing to propagate")
+        return []
+    plans = [
+        (_result_dirs(data, lineage, deployer), fragment) for lineage, fragment in lineages
+    ]
     if deployer == "local":
-        return propagate(dirs)
-    return _write_remote_script(representative, dirs)
+        return [propagate(dirs, fragment) for dirs, fragment in plans]
+    return [_write_remote_script(representative, plans)]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -306,19 +371,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("representative", nargs="?", help="Representative pool in the graph")
     parser.add_argument("deployer", nargs="?", choices=("local", "remote"))
     parser.add_argument("--pool-dirs", nargs="+", metavar="DIR", help="Resolved representative-to-grow lineage")
-    parser.add_argument("--branch", action="append", default=[], metavar="PARENT_POOL", help="Graph mode: choose this merge parent (repeatable)")
+    parser.add_argument("--source-fragment", type=int, metavar="N", help="With --pool-dirs: fragment the grow pool grows from")
+    parser.add_argument("--branch", action="append", default=[], metavar="PARENT_POOL", help="Graph mode: restrict the walk to this merge parent (repeatable)")
     args = parser.parse_args(argv)
     try:
         if args.pool_dirs:
             if args.pool_graph or args.representative or args.deployer or args.branch:
                 parser.error("--pool-dirs cannot be combined with graph-mode arguments or --branch")
-            print(propagate(args.pool_dirs))
+            if args.source_fragment is None:
+                parser.error("--pool-dirs requires --source-fragment: a result dir is named by "
+                             "sigil and records no fragment of its own")
+            print(propagate(args.pool_dirs, args.source_fragment))
         else:
             if not args.pool_graph:
                 parser.error("provide a pool graph or --pool-dirs")
-            result = graph_mode(args.pool_graph, args.representative, args.deployer, args.branch)
-            if result is not None:
-                print(result)
+            if args.source_fragment is not None:
+                parser.error("--source-fragment applies to --pool-dirs; graph mode reads it from the graph")
+            for path in graph_mode(args.pool_graph, args.representative, args.deployer, args.branch) or []:
+                print(path)
     except PropagationError as exc:
         parser.exit(2, f"error: {exc}\n")
     return 0

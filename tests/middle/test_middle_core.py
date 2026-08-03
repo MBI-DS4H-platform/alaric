@@ -926,13 +926,15 @@ def test_propagated_provenance_is_excluded_from_pose_result_checksum(tmp_path: P
     (pose_dir / "poses-1.arc").write_bytes(b"arc payload")
     np.save(pose_dir / "provenance.npy", np.array([0], dtype=np.uint32))
     before = write_pose_sidecars(pose_dir)
+    # A reconnected pool carries one file per source fragment, in either form.
+    save_npy(pose_dir / "prop-frag8-provenance.npy", np.array([99], dtype=np.uint32))
+    save_npy(pose_dir / "prop-frag10-map.npy", np.array([[99, 0]], dtype=np.uint32))
     save_npy(pose_dir / "prop-provenance.npy", np.array([99], dtype=np.uint32))
     save_npy(pose_dir / "prop-pair.npy", np.array([[99, 0]], dtype=np.uint32))
     after = write_pose_sidecars(pose_dir)
 
     assert before == after
-    assert b"prop-provenance.npy" not in (tmp_path / "pool.INDEX").read_bytes()
-    assert b"prop-pair.npy" not in (tmp_path / "pool.INDEX").read_bytes()
+    assert b"prop-" not in (tmp_path / "pool.INDEX").read_bytes()
 
 
 def test_provenance_download_merges_into_an_existing_result(tmp_path: Path, monkeypatch) -> None:

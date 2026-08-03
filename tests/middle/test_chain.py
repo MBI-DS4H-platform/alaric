@@ -360,8 +360,9 @@ def test_compressed_provenance_survives_obsoleted_intermediate(tmp_path):
 def test_propagated_provenance_replaces_intermediate_route(tmp_path):
     _filter_step_project(tmp_path)
     # r2's propagated values are r2 -> g2 -> r1.  Once present, chain building
-    # need not load g2's grow provenance at all.
-    save_npy(tmp_path / "r2" / "prop-provenance.npy", np.array([0, 2], dtype=np.uint32))
+    # need not load g2's grow provenance at all.  The name carries the fragment the
+    # route reads from (r1's), which is how a link picks its own file.
+    save_npy(tmp_path / "r2" / "prop-frag1-provenance.npy", np.array([0, 2], dtype=np.uint32))
     (tmp_path / "g2" / "provenance.npy").unlink()
     g = _graph(tmp_path)
     assert count_chains(g, resolve_selection(g, None, None)).total_chains == 2
@@ -371,12 +372,78 @@ def test_propagated_pair_replaces_intermediate_route(tmp_path):
     _filter_step_project(tmp_path)
     # Pair orientation is (grow-source pose, representative pose), matching map-*.npy.
     save_npy(
-        tmp_path / "r2" / "prop-pair.npy",
+        tmp_path / "r2" / "prop-frag1-map.npy",
         np.array([[0, 0], [2, 1]], dtype=np.uint32),
     )
     (tmp_path / "g2" / "provenance.npy").unlink()
     g = _graph(tmp_path)
     assert count_chains(g, resolve_selection(g, None, None)).total_chains == 2
+
+
+def test_propagated_provenance_for_another_fragment_is_not_used(tmp_path):
+    _filter_step_project(tmp_path)
+    # Deliberately wrong values under a different fragment's name: the frag1 link
+    # must ignore them and fall back to composing g2's arrays.
+    save_npy(tmp_path / "r2" / "prop-frag3-provenance.npy", np.array([1, 1], dtype=np.uint32))
+    g = _graph(tmp_path)
+    assert count_chains(g, resolve_selection(g, None, None)).total_chains == 2
+
+
+def _reconnect_project(root: Path) -> None:
+    """r2 merges a forward route grown from frag1 with a backward one from frag3.
+
+    Modelled on frag9-reconnect: one representative is the target of two links, so
+    each link must read the propagated file named for *its* source fragment.
+    """
+    _write_pose_dir(root / "r1", [(0, 0, (0, 0, 0)), (0, 0, (1, 0, 0))])
+    _write_pose_dir(root / "r3", [(0, 0, (0, 2, 0)), (0, 0, (1, 2, 0))])
+    _write_pose_dir(root / "r2", [(0, 0, (0, 1, 0)), (0, 0, (1, 1, 0)), (0, 0, (2, 1, 0))])
+    (root / "gfwd").mkdir()
+    (root / "gbwd").mkdir()
+    _prov(root / "gfwd", [0, 0, 1])  # G0,G1 <- A0 ; G2 <- A1
+    _prov(root / "gbwd", [0, 1])     # B0 <- C0 ; B1 <- C1
+    _map(root / "r2", "map-1.npy", [(0, 0), (1, 1), (2, 2)])  # r2_i <- G_i
+    _map(root / "r2", "map-2.npy", [(0, 0), (1, 2)])          # r2_0 <- B0 ; r2_2 <- B1
+    _write_json(
+        root,
+        {1: "r1", 2: "r2", 3: "r3"},
+        {"r1": 1, "gfwd": 2, "gbwd": 2, "r2": 2, "r3": 3},
+        [
+            {"source_fragment": 1, "source_rep": "r1", "target_fragment": 2, "target_rep": "r2",
+             "join_pool": "r1",
+             "target_to_join": [_map_step("r2", "map-1.npy", "gfwd"), _dense_step("gfwd", "r1")],
+             "source_to_join": []},
+            {"source_fragment": 3, "source_rep": "r3", "target_fragment": 2, "target_rep": "r2",
+             "join_pool": "r3",
+             "target_to_join": [_map_step("r2", "map-2.npy", "gbwd"), _dense_step("gbwd", "r3")],
+             "source_to_join": []},
+        ],
+    )
+
+
+def test_reconnected_representative_reads_one_file_per_route(tmp_path):
+    _reconnect_project(tmp_path)
+    plain = count_chains(_graph(tmp_path), resolve_selection(_graph(tmp_path), None, None))
+    assert plain.total_chains == 2  # A0-r2_0-C0 and A1-r2_2-C1; r2_1 reaches no frag3
+
+    # Both routes propagated at once, which is the whole point for a merge: with a
+    # single unkeyed file one of these links would be composed from the other's.
+    save_npy(
+        tmp_path / "r2" / "prop-frag1-map.npy",
+        np.array([[0, 0], [0, 1], [1, 2]], dtype=np.uint32),
+    )
+    save_npy(
+        tmp_path / "r2" / "prop-frag3-map.npy",
+        np.array([[0, 0], [1, 2]], dtype=np.uint32),
+    )
+    for pool in ("gfwd", "gbwd"):
+        (tmp_path / pool / "provenance.npy").unlink()
+    for name in ("map-1.npy", "map-2.npy"):
+        (tmp_path / "r2" / name).unlink()
+
+    g = _graph(tmp_path)
+    res = count_chains(g, resolve_selection(g, None, None))
+    assert (res.kept, res.total_chains) == (plain.kept, plain.total_chains)
 
 
 def test_has_filter_provenance_accepts_compressed_array(tmp_path):
