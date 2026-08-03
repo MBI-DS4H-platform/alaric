@@ -293,6 +293,7 @@ def _finalize_lines(
     *,
     payload_dir: str | None = None,
     payload_guard: str | None = None,
+    sidecar_already_written: bool = False,
 ) -> list[str]:
     """Write the result sidecar, then promote the partial result to its final name.
 
@@ -307,7 +308,16 @@ def _finalize_lines(
     ``output_dir``, where moving it onto itself would fail.
     """
     payload = payload_dir or output_dir
-    lines = [_sidecar_command(result_kind, payload, sigil, local=local, alaric_dir=alaric_dir)]
+    if sidecar_already_written:
+        # score_concat.py has hashed the final NPY byte stream while it copied each
+        # chunk. Re-reading the completed score file here is especially expensive when
+        # it lives on the shared filesystem. Local deployments still need the cache copy.
+        lines = []
+        if local:
+            name = "mask.npy" if result_kind == "mask" else "score.npy"
+            lines.append(f"cp {payload}/{name}.CHECKSUM ../CACHE/checksum/{sigil}")
+    else:
+        lines = [_sidecar_command(result_kind, payload, sigil, local=local, alaric_dir=alaric_dir)]
     if local:
         return lines
     if payload_dir is not None:
@@ -547,6 +557,7 @@ def generate_chunk_files(
             alaric_dir,
             payload_dir=pool,
             payload_guard=f'[ -n "${{{POOL_ENV_VAR}:-}}" ]' if pool else None,
+            sidecar_already_written=action.action == "score",
         )
     )
     if local:

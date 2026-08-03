@@ -10,6 +10,8 @@ Instead this:
   - reads every chunk via ``mmap_mode="r"`` (no full load),
   - streams them block-by-block into a memmapped output ``.npy`` written to a **local**
     staging dir (``$TMPDIR`` -> node-local scratch on the cluster), so peak RAM is one block,
+  - computes the SHA-256 of the final ``.npy`` byte stream during that copy pass and
+    writes ``score.npy.CHECKSUM``;
   - copies the finished local file to ``score.npy.partial`` and renames to ``score.npy``.
 
 The output bytes are identical to ``np.save(np.concatenate(chunks))`` for the same data, so
@@ -19,6 +21,7 @@ the result checksum is unchanged.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import shutil
 import tempfile
 from pathlib import Path
@@ -43,16 +46,20 @@ def _chunk_score_files(chunks_dir: Path, nchunks: int | None) -> list[Path]:
     return score_files
 
 
-def concatenate(chunks_dir: Path, output: Path, *, nchunks: int | None = None, block: int = 10_000_000) -> None:
+def concatenate(
+    chunks_dir: Path, output: Path, *, nchunks: int | None = None, block: int = 10_000_000
+) -> str:
+    """Concatenate chunks and return the checksum of the resulting ``.npy`` file.
+
+    The output header is hashed first, followed by each source block in chunk order.
+    This is exactly the byte sequence written by ``open_memmap`` for the 1-D score
+    arrays, so no post-copy read of the (potentially network-resident) result is needed.
+    """
     output.parent.mkdir(parents=True, exist_ok=True)
     score_files = _chunk_score_files(chunks_dir, nchunks)
 
     mmaps = [np.load(path, mmap_mode="r") for path in score_files]
-    if not mmaps:
-        np.save(output, np.empty((0,), dtype=float))
-        return
-
-    dtype = mmaps[0].dtype
+    dtype = mmaps[0].dtype if mmaps else np.dtype(float)
     total = 0
     for path, m in zip(score_files, mmaps):
         if m.ndim != 1:
@@ -66,18 +73,31 @@ def concatenate(chunks_dir: Path, output: Path, *, nchunks: int | None = None, b
     staged = stagedir / "score.npy"
     try:
         out = np.lib.format.open_memmap(staged, mode="w+", dtype=dtype, shape=(total,))
+        # ``open_memmap`` has emitted the final NPY header. Include precisely that header
+        # before streaming the payload; ``out.offset`` is the first payload byte.
+        out.flush()
+        hasher = hashlib.sha256()
+        with staged.open("rb") as handle:
+            hasher.update(handle.read(out.offset))
         pos = 0
         for m in mmaps:
             n = int(m.shape[0])
             for start in range(0, n, block):
                 stop = min(start + block, n)
-                out[pos + start : pos + stop] = m[start:stop]
+                values = m[start:stop]
+                out[pos + start : pos + stop] = values
+                # A score chunk is 1-D and its dtype was checked above, so these are the
+                # same contiguous bytes just stored in the final NPY payload.
+                hasher.update(memoryview(values).cast("B"))
             pos += n
         out.flush()
         del out
         partial = output.with_name(output.name + ".partial")
         shutil.copyfile(staged, partial)
         partial.replace(output)
+        checksum = hasher.hexdigest()
+        output.with_name(output.name + ".CHECKSUM").write_text(checksum + "\n")
+        return checksum
     finally:
         shutil.rmtree(stagedir, ignore_errors=True)
 

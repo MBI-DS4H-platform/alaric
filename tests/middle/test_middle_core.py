@@ -251,6 +251,8 @@ def test_deploy_score_chunk_emits_independent_chunk_and_organize_scripts(tmp_pat
     organize = (d / "organize.sh").read_text()
     assert "score_concat.py" in organize
     assert "np.concatenate" not in organize
+    assert "result_sidecar.py array" not in organize
+    assert "score.npy.CHECKSUM ../CACHE/checksum/" in organize
 
     # run.sh is only a convenience wrapper: chunks one-by-one, then organize.
     run_sh = (d / "run.sh").read_text()
@@ -867,6 +869,21 @@ def test_score_concat_requires_all_expected_chunks(tmp_path: Path) -> None:
 
     with pytest.raises(FileNotFoundError):
         score_concat_main([str(chunks), str(tmp_path / "score.npy"), "--nchunks", "2"])
+
+
+def test_score_concat_writes_checksum_while_copying(tmp_path: Path) -> None:
+    chunks = tmp_path / "chunks"
+    for idx, values in enumerate(
+        (np.array([1.0, 2.0], dtype=np.float32), np.array([3.0], dtype=np.float32)), start=1
+    ):
+        chunk = chunks / f"chunk-{idx}"
+        chunk.mkdir(parents=True)
+        np.save(chunk / "score.npy", values)
+
+    output = tmp_path / "score.npy"
+    assert score_concat_main([str(chunks), str(output), "--nchunks", "2", "--block", "1"]) == 0
+    np.testing.assert_array_equal(np.load(output), np.array([1.0, 2.0, 3.0], dtype=np.float32))
+    assert (tmp_path / "score.npy.CHECKSUM").read_text().strip() == byte_checksum(output)
 
 
 def test_checksum_is_zstd_transparent(tmp_path: Path) -> None:
