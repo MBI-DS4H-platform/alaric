@@ -5,5 +5,5 @@ fragment: auto
 sequence: auto
 exclude: auto
 direction: bwd
-crmsd: 0.33
-ovrmsd: 0.60
+crmsd: 0.39
+ovrmsd: 0.80

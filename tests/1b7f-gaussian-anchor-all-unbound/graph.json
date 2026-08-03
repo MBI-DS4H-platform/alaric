@@ -23,7 +23,7 @@
       ],
       "sigil": "8077d3ba13-055dff1af5",
       "result_dir": "CACHE/results/8077d3ba13-055dff1af5",
-      "materialized": false,
+      "materialized": true,
       "constraint": {
         "threshold": -14.06,
         "score_input": "frag10-anchor-score"
@@ -355,9 +355,9 @@
           "cross_fragment": false
         }
       ],
-      "sigil": "000d5aa53b-58146b3307",
-      "result_dir": "CACHE/results/000d5aa53b-58146b3307",
-      "materialized": true,
+      "sigil": "2175aaf054-58146b3307",
+      "result_dir": "CACHE/results/2175aaf054-58146b3307",
+      "materialized": false,
       "direction": "backward"
     },
     "frag9-fwd": {
@@ -439,9 +439,9 @@
           "cross_fragment": false
         }
       ],
-      "sigil": "5f096c3636-31bb0a6e97",
-      "result_dir": "CACHE/results/5f096c3636-31bb0a6e97",
-      "materialized": false
+      "sigil": "5f096c3636-e54775c562",
+      "result_dir": "CACHE/results/5f096c3636-e54775c562",
+      "materialized": true
     }
   },
   "representatives": {
