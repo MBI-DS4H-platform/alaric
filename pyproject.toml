@@ -25,6 +25,7 @@ script-files = ["util/alaric-count-poses", "util/alaric-copy"]
 alaric-sigil = "alaric.middle.sigil:main"
 alaric-pool-graph = "alaric.middle.pool_graph:main"
 alaric-chain = "alaric.middle.chain:main"
+alaric-chain-focus = "alaric.middle.chain_focus:main"
 alaric-chain-coordinates = "alaric.middle.chain_coordinates:main"
 alaric-deploy = "alaric.middle.deploy:main"
 alaric-result-clean = "alaric.middle.result:clean_main"
