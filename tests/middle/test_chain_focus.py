@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -53,6 +54,7 @@ def test_focus_links_selected_pools_and_deduplicates_rows(tmp_path):
     # Columns retain their source fragment order, and r2 is deliberately ignored.
     assert (output / "r1").is_symlink()
     assert (output / "r1").resolve() == source / "r1"
+    assert os.readlink(output / "r1") == "../chains/r1"
     assert (output / "r3").is_symlink()
     assert not (output / "r2").exists()
     assert (output / "chains.txt").read_text() == "r1\tr3\n1\t2\n1\t3\n2\t2\n"
@@ -61,6 +63,18 @@ def test_focus_links_selected_pools_and_deduplicates_rows(tmp_path):
     assert [column["pool"] for column in metadata["columns"]] == ["r1", "r3"]
     assert metadata["chain_provenance_file"] == CHAIN_PROVENANCE_FILE
     assert json.loads((output / "chains.json").read_text()) == metadata
+
+
+def test_focus_can_skip_chain_provenance(tmp_path):
+    source = tmp_path / "chains"
+    _write_chains(source)
+    output = tmp_path / "focused"
+
+    metadata = focus_chains(source, ["r1"], output, write_provenance=False)
+
+    assert not (output / CHAIN_PROVENANCE_FILE).exists()
+    assert "chain_provenance_file" not in metadata
+    assert "chain_provenance_file" not in json.loads((output / "chains.json").read_text())
 
 
 def test_focus_chunked_zstd_input_matches_existing_output(tmp_path):

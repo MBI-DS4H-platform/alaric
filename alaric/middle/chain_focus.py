@@ -9,7 +9,9 @@ that deduplicated table.
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -86,10 +88,11 @@ def focus_chains(
     output_dir: Path,
     *,
     chunk_size: int = DEFAULT_CHAIN_CHUNK_SIZE,
+    write_provenance: bool = True,
 ) -> dict:
     """Write a focused, deduplicated chain directory and return its metadata."""
     chain_dir = Path(chain_dir).resolve()
-    output_dir = Path(output_dir)
+    output_dir = Path(output_dir).resolve()
     if not chain_dir.is_dir():
         raise ChainFocusError(f"input chains dir not found: {chain_dir}")
     if output_dir.resolve() == chain_dir:
@@ -118,7 +121,14 @@ def focus_chains(
     output_dir.mkdir(parents=True, exist_ok=True)
     for column in selected_columns:
         pool = column["pool"]
-        (output_dir / pool).symlink_to(chain_dir / pool, target_is_directory=True)
+        link = output_dir / pool
+        target = chain_dir / pool
+        try:
+            target = Path(os.path.relpath(target, start=link.parent))
+        except ValueError:
+            # Different drives cannot be expressed as a relative path.
+            pass
+        link.symlink_to(target, target_is_directory=True)
 
     # Focused rows are guaranteed to be much fewer than input rows. Keep just
     # this first-seen map in memory; input rows themselves remain chunked.
@@ -126,7 +136,11 @@ def focus_chains(
     try:
         with (
             (output_dir / CHAINS_FILE).open("w") as chains_handle,
-            (output_dir / CHAIN_PROVENANCE_FILE).open("w") as provenance_handle,
+            (
+                (output_dir / CHAIN_PROVENANCE_FILE).open("w")
+                if write_provenance
+                else nullcontext()
+            ) as provenance_handle,
         ):
             chains_handle.write(
                 "\t".join(column["pool"] for column in selected_columns) + "\n"
@@ -164,21 +178,24 @@ def focus_chains(
                             fmt="%d",
                             delimiter="\t",
                         )
-                    np.savetxt(provenance_handle, numbers[inverse], fmt="%d")
+                    if provenance_handle is not None:
+                        np.savetxt(provenance_handle, numbers[inverse], fmt="%d")
             except ChainCoordinatesError as exc:
                 raise ChainFocusError(str(exc)) from None
     except OSError as exc:
         raise ChainFocusError(str(exc)) from exc
 
     focused_metadata = metadata.copy()
+    focused_metadata.pop("chain_provenance_file", None)
     focused_metadata.update(
         {
             "chains_file": CHAINS_FILE,
-            "chain_provenance_file": CHAIN_PROVENANCE_FILE,
             "nchains": len(row_numbers),
             "columns": selected_columns,
         }
     )
+    if write_provenance:
+        focused_metadata["chain_provenance_file"] = CHAIN_PROVENANCE_FILE
     (output_dir / CHAINS_METADATA_FILE).write_text(
         json.dumps(focused_metadata, indent=2) + "\n"
     )
@@ -193,14 +210,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("chain_dir", help="Build-mode output dir of alaric-chain.")
     parser.add_argument("pools", nargs="+", metavar="POOL", help="Pool columns to keep.")
     parser.add_argument("-o", "--output-dir", required=True, help="Focused output chains dir.")
+    parser.add_argument(
+        "--no-provenance",
+        action="store_true",
+        help=f"Do not write {CHAIN_PROVENANCE_FILE}.",
+    )
     args = parser.parse_args(argv)
     try:
-        metadata = focus_chains(Path(args.chain_dir), args.pools, Path(args.output_dir))
+        metadata = focus_chains(
+            Path(args.chain_dir),
+            args.pools,
+            Path(args.output_dir),
+            write_provenance=not args.no_provenance,
+        )
     except ChainFocusError as exc:
         parser.exit(2, f"error: {exc}\n")
     print(f"total chains: {metadata['nchains']}")
     print(f"wrote {Path(args.output_dir) / CHAINS_FILE}")
-    print(f"wrote {Path(args.output_dir) / CHAIN_PROVENANCE_FILE}")
+    if not args.no_provenance:
+        print(f"wrote {Path(args.output_dir) / CHAIN_PROVENANCE_FILE}")
     return 0
 
 
