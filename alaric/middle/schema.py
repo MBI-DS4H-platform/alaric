@@ -24,8 +24,9 @@ ACTION_SCHEMAS: dict[str, set[str]] = {
     "rmsd": {"action", "type", "input", "fragment", "exclude", "reference"},
     "score_add": {"action", "type", "score_input1", "score_input2"},
     "mask": {"action", "type", "input", "score_input", "threshold"},
-    "filter": {"action", "type", "input", "score_input", "threshold", "mask_input"},
+    "filter": {"action", "type", "input", "score_input", "threshold", "mask_input", "mask"},
     "identity": {"action", "type", "input1", "input2"},
+    "mask-common-conformer": {"action", "type", "input1", "input2"},
 }
 
 REQUIRED: dict[str, set[str]] = {
@@ -40,6 +41,7 @@ REQUIRED: dict[str, set[str]] = {
     "mask": {"input", "score_input", "threshold"},
     "filter": {"input"},
     "identity": {"input1", "input2"},
+    "mask-common-conformer": {"input1", "input2"},
 }
 
 DEPENDENCY_FIELDS: dict[str, dict[str, str]] = {
@@ -54,6 +56,7 @@ DEPENDENCY_FIELDS: dict[str, dict[str, str]] = {
     "mask": {"input": POSE, "score_input": SCORE},
     "filter": {"input": POSE, "score_input": SCORE, "mask_input": MASK},
     "identity": {"input1": POSE, "input2": POSE},
+    "mask-common-conformer": {"input1": POSE, "input2": POSE},
 }
 
 OUTPUT_KIND = {
@@ -68,6 +71,9 @@ OUTPUT_KIND = {
     "mask": MASK,
     "filter": POSE,
     "identity": POSE,
+    # A paired conformer mask is consumed by the filter mask route, which selects one of
+    # its two files through ``filter.mask``.
+    "mask-common-conformer": MASK,
 }
 
 AUTO_FIELDS = {
@@ -165,6 +171,15 @@ def normalize_action(name: str, path: Path, data: dict[str, Any]) -> ActionSpec:
         mask_route = "mask_input" in data
         if score_route == mask_route:
             raise SchemaError(f"{path}: filter requires either score_input+threshold or mask_input")
+        if "mask" in data:
+            if not mask_route:
+                raise SchemaError(f"{path}: filter.mask requires mask_input")
+            try:
+                data["mask"] = int(data["mask"])
+            except (TypeError, ValueError) as exc:
+                raise SchemaError(f"{path}: filter.mask must be 1 or 2") from exc
+            if data["mask"] not in {1, 2}:
+                raise SchemaError(f"{path}: filter.mask must be 1 or 2")
     for key, value in data.items():
         if value == "auto" and key not in AUTO_FIELDS.get(action, set()):
             raise SchemaError(f"{path}: {key}: auto is not supported for {action}")

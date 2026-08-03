@@ -294,7 +294,12 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
         context["input_result_path"] = shell_path(dep_result_path(p["input"], location))
         context["filter_mode"] = "mask" if "mask_input" in p else "score"
         if "mask_input" in p:
-            context["mask_input_path"] = shell_path(result_file(p["mask_input"], location))
+            mask_input = p["mask_input"]
+            if mask_input.action == "mask-common-conformer":
+                mask_path = f"{dep_result_path(mask_input, location)}/mask{p['mask']}.npy"
+                context["mask_input_path"] = shell_path(mask_path)
+            else:
+                context["mask_input_path"] = shell_path(result_file(mask_input, location))
             context["score_input_path"] = '""'
             context["threshold"] = '""'
         else:
@@ -302,6 +307,13 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
             context["threshold"] = q(p["threshold"])
             context["mask_input_path"] = '""'
     elif action.action == "identity":
+        context.update(
+            {
+                "input1_result_path": shell_path(dep_result_path(p["input1"], location)),
+                "input2_result_path": shell_path(dep_result_path(p["input2"], location)),
+            }
+        )
+    elif action.action == "mask-common-conformer":
         context.update(
             {
                 "input1_result_path": shell_path(dep_result_path(p["input1"], location)),

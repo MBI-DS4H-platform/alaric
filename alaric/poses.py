@@ -11,7 +11,10 @@ from typing import Iterable, Iterator
 
 import numpy as np
 
-from npy_io import save_npy
+try:
+    from .npy_io import save_npy
+except ImportError:  # direct script execution with ALARIC_DIR on PYTHONPATH
+    from npy_io import save_npy
 
 
 MAGIC = b"alaric1"

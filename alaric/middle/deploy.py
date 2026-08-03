@@ -101,6 +101,8 @@ def _read_sigil(action_dir: Path) -> str:
 
 
 def _result_output_kind(action: ResolvedAction) -> str:
+    if action.action == "mask-common-conformer":
+        return "mask-pair"
     return OUTPUT_KIND[action.action]
 
 
@@ -268,7 +270,7 @@ def _pool_default_lines(var: str, name: str, default: str, what: str) -> list[st
 
 def _sidecar_command(kind: str, result_dir: str, sigil: str, *, local: bool, alaric_dir: str) -> str:
     sidecar = f"{alaric_dir}/middle/result_sidecar.py"
-    if kind == "pose":
+    if kind in {"pose", "mask-pair"}:
         cmd = f'"${{PYTHON:-python}}" {sidecar} pose {result_dir}'
         if local:
             cmd += f"\ncp {result_dir}.CHECKSUM ../CACHE/checksum/{sigil}"
@@ -321,7 +323,7 @@ def _finalize_lines(
             lines.extend(f"  {line}" for line in move)
             lines.append("fi")
     # output_dir is "<final>.partial"; atomically promote it (and its pose sidecars) to final.
-    if result_kind == "pose":
+    if result_kind in {"pose", "mask-pair"}:
         lines.extend(
             [
                 f"mv {output_dir}.INDEX {final_dir}.INDEX",

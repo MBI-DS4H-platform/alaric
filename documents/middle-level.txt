@@ -115,6 +115,26 @@ This is a merging action
 input1: frag4-anchor1 . Name of action dir
 input2: frag4-anchor2. Name of action dir
 
+## mask-common-conformer
+
+Generates two compressed boolean masks, `mask1.npy.zstd` and `mask2.npy.zstd`. Each
+mask has one entry per pose in its corresponding input pool and is true when that pose's
+conformer occurs in both pools. The action streams each pool while retaining only its
+conformer array; after each mask is written, that pool's conformers and mask are released.
+
+input1: frag5-anchor-bwd . Name of the first pose action dir
+input2: frag5-anchor-fwd . Name of the second pose action dir
+
+Use either output in a mask-based `filter` by selecting it explicitly. The selected mask
+must correspond to the filter input:
+
+```
+action: filter
+input: frag5-anchor-bwd
+mask_input: frag5-common-conformer
+mask: 1
+```
+
 
 # alaric-sigil
 

@@ -12,16 +12,18 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from alaric.mask import main as mask_main
+from alaric.mask_common_conformer import main as mask_common_conformer_main
 import alaric.middle.deploy as deploy_module
 from alaric.middle.checksum import byte_checksum, write_array_sidecar, write_pose_sidecars
 from alaric.middle.deploy import deploy, generate_check_sh, generate_chunk_files, generate_run_sh
-from alaric.middle.errors import MiddleError, SchemaError
+from alaric.middle.errors import GraphError, MiddleError, SchemaError
 from alaric.middle.graph import ActionGraph
 from alaric.middle.project import Project
 from alaric.middle.result_sidecar import main as result_sidecar_main
 from alaric.middle.schema import normalize_action
 from alaric.middle.sigil import compute_project_sigils
 from alaric.npy_io import load_npy, save_npy
+from alaric.poses import write_arc_file
 from alaric.score_add import main as score_add_main
 from alaric.score_concat import main as score_concat_main
 
@@ -750,6 +752,112 @@ def test_mask_deploy_asks_for_compression(tmp_path: Path) -> None:
         # the sidecar step is still handed the logical name
         assert "result_sidecar.py array" in body
         assert "mask.npy.zst" not in body
+
+
+def _write_conformer_pool(path: Path, conformers: list[int]) -> None:
+    path.mkdir()
+    count = len(conformers)
+    write_arc_file(
+        path / "poses-1.arc",
+        np.zeros(3, dtype=np.int16),
+        np.zeros((1, 3), dtype=np.int16),
+        np.array([count], dtype=np.uint32),
+        np.column_stack(
+            (
+                np.asarray(conformers, dtype=np.uint16),
+                np.zeros(count, dtype=np.uint16),
+                np.zeros(count, dtype=np.uint16),
+            )
+        ),
+        bucket_size=16,
+    )
+
+
+def test_mask_common_conformer_writes_per_pool_compressed_masks(tmp_path: Path) -> None:
+    pool1 = tmp_path / "pool1"
+    pool2 = tmp_path / "pool2"
+    output = tmp_path / "output"
+    _write_conformer_pool(pool1, [1, 2, 1, 3])
+    _write_conformer_pool(pool2, [3, 4, 1])
+
+    assert mask_common_conformer_main([str(pool1), str(pool2), str(output)]) == 0
+    assert not (output / "mask1.npy").exists()
+    assert not (output / "mask2.npy").exists()
+    np.testing.assert_array_equal(load_npy(output / "mask1.npy.zst"), [True, False, True, True])
+    np.testing.assert_array_equal(load_npy(output / "mask2.npy.zst"), [True, False, True])
+
+
+def test_mask_common_conformer_action_renders_two_pool_backend(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    for name in ("frag5-anchor-bwd", "frag5-anchor-fwd"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "alaric.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "action": "anchor",
+                    "fragment": 5,
+                    "sequence": "UU",
+                    "exclude": "auto",
+                    "protein": "dom",
+                    "resid": 1,
+                    "nucleotide": "first",
+                },
+                sort_keys=False,
+            )
+        )
+    action_dir = tmp_path / "frag5-common"
+    action_dir.mkdir()
+    (action_dir / "alaric.yaml").write_text(
+        "action: mask-common-conformer\ninput1: frag5-anchor-bwd\ninput2: frag5-anchor-fwd\n"
+    )
+    project = Project.discover(tmp_path)
+    compute_project_sigils(project)
+    action = ActionGraph(project).build()["frag5-common"]
+
+    body = generate_run_sh(project, action, "local")
+    assert "mask_common_conformer.py" in body
+    assert "mask1.npy" not in body and "mask2.npy" not in body
+    assert "result_sidecar.py pose" in body
+
+
+def test_filter_selects_matching_mask_common_conformer_output(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    for name in ("frag5-anchor-bwd", "frag5-anchor-fwd"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "alaric.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "action": "anchor",
+                    "fragment": 5,
+                    "sequence": "UU",
+                    "exclude": "auto",
+                    "protein": "dom",
+                    "resid": 1,
+                    "nucleotide": "first",
+                },
+                sort_keys=False,
+            )
+        )
+    (tmp_path / "frag5-common-conformer").mkdir()
+    (tmp_path / "frag5-common-conformer" / "alaric.yaml").write_text(
+        "action: mask-common-conformer\ninput1: frag5-anchor-bwd\ninput2: frag5-anchor-fwd\n"
+    )
+    (tmp_path / "frag5-anchor-bwd-filtered").mkdir()
+    (tmp_path / "frag5-anchor-bwd-filtered" / "alaric.yaml").write_text(
+        "action: filter\ninput: frag5-anchor-bwd\nmask_input: frag5-common-conformer\nmask: 1\n"
+    )
+    project = Project.discover(tmp_path)
+    compute_project_sigils(project)
+    action = ActionGraph(project).build()["frag5-anchor-bwd-filtered"]
+
+    body = generate_run_sh(project, action, "local")
+    assert "/mask1.npy" in body
+
+    (tmp_path / "frag5-anchor-bwd-filtered" / "alaric.yaml").write_text(
+        "action: filter\ninput: frag5-anchor-bwd\nmask_input: frag5-common-conformer\nmask: 2\n"
+    )
+    with pytest.raises(GraphError, match="must select the mask"):
+        ActionGraph(Project.discover(tmp_path)).build()
 
 
 def test_score_concat_requires_all_expected_chunks(tmp_path: Path) -> None:

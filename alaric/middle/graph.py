@@ -128,11 +128,31 @@ class ActionGraph:
                     raise GraphError(f"{resolved.name}: filter score route input mismatch")
             if "mask_input" in p:
                 mask_input = p["mask_input"]
-                if mask_input.params.get("input").name != p["input"].name:
-                    raise GraphError(f"{resolved.name}: filter mask route input mismatch")
+                if mask_input.action == "mask-common-conformer":
+                    mask_number = p.get("mask")
+                    if mask_number not in {1, 2}:
+                        raise GraphError(
+                            f"{resolved.name}: filter for mask-common-conformer requires mask: 1 or mask: 2"
+                        )
+                    if mask_input.params[f"input{mask_number}"].name != p["input"].name:
+                        raise GraphError(
+                            f"{resolved.name}: filter.mask must select the mask for filter.input"
+                        )
+                else:
+                    if "mask" in p:
+                        raise GraphError(
+                            f"{resolved.name}: filter.mask is only valid for mask-common-conformer"
+                        )
+                    if mask_input.params.get("input").name != p["input"].name:
+                        raise GraphError(f"{resolved.name}: filter mask route input mismatch")
         elif resolved.action == "identity":
             if final_fragment(p["input1"]) != final_fragment(p["input2"]):
                 raise GraphError(f"{resolved.name}: identity inputs must resolve to the same fragment")
+        elif resolved.action == "mask-common-conformer":
+            if final_fragment(p["input1"]) != final_fragment(p["input2"]):
+                raise GraphError(
+                    f"{resolved.name}: mask-common-conformer inputs must resolve to the same fragment"
+                )
         elif resolved.action in {"grow", "grow-test"}:
             restrict = p.get("restrict_input")
             if isinstance(restrict, ResolvedAction):

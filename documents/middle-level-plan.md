@@ -35,8 +35,10 @@ Supported action schemas:
 - `rmsd`: `input`, `fragment`, `exclude`, optional `reference`
 - `score_add`: `score_input1`, `score_input2`
 - `mask`: `input`, `score_input`, `threshold`
-- `filter`: either `input + score_input + threshold` or `input + mask_input`
+- `filter`: either `input + score_input + threshold` or `input + mask_input`; when the
+  mask input is `mask-common-conformer`, also require `mask: 1` or `mask: 2`
 - `identity`: `input1`, `input2`
+- `mask-common-conformer`: `input1`, `input2`
 
 Auto-resolution rules, field by field:
 - `fragment:auto`:
@@ -89,7 +91,11 @@ Cross-action validation:
 - `score_add` inputs must score the same underlying pose input
 - `mask.score_input.input == mask.input`
 - `filter` route input must equal `filter.input`
+- A `mask-common-conformer` filter requires `mask: 1` or `mask: 2`; the selected action
+  input must equal `filter.input`.
 - `identity` inputs must resolve to the same fragment
+- `mask-common-conformer` reads two pose pools and produces one compressed boolean mask per
+  input pool. A mask entry is true iff its pose conformer occurs in both pools.
 
 ## Implementation Changes
 Add `alaric/middle/`:
@@ -122,6 +128,10 @@ Backends:
   `default_nprocs()` so a SLURM allocation is honored. The result is independent of the
   worker count: organize canonicalizes the output into the input's own sort order.
 - `identity`: `identity_filter.py`
+- `mask-common-conformer`: `mask_common_conformer.py`; it streams only the conformer column
+  from each pool into memory, intersects the two conformer arrays, then writes
+  `mask1.npy.zstd` and `mask2.npy.zstd` one pool at a time, releasing each completed pool's
+  conformers and mask before processing the other.
 
 Hard repo/path constraints:
 - Generated scripts must invoke `${ALARIC_DIR}/score.sh`
@@ -149,7 +159,7 @@ Chunking rules are action-specific and must be encoded explicitly in chunk templ
   chunk by source pose range using `grow.py --pose-range FIRST LAST`
 - `score` chunking:
   chunk by source pose range using `score.sh POSE_DIR POSE_START POSE_END SEQUENCE RECEPTOR NB_KERNEL OUTPUT`
-- `rmsd`, `score_add`, `mask`, `filter`, `identity`:
+- `rmsd`, `score_add`, `mask`, `filter`, `identity`, `mask-common-conformer`:
   no chunk deployer support in this milestone unless later added explicitly
 
 Chunk-template behavior:
