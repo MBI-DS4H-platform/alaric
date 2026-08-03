@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 import shutil
@@ -22,10 +23,14 @@ from poses import PoseReader, select_pose_indices  # noqa: E402
 from alaric.middle.chain import (  # noqa: E402
     CHAINS_FILE,
     CHAINS_METADATA_FILE,
+    DEFAULT_MAX_CHAIN_ROWS,
+    MAX_CHAIN_ROWS,
     ChainError,
     ChainGraph,
     _identities,
+    _max_chains_millions,
     _write_unique_pose_dir,
+    build_and_write_chains,
     build_chains,
     count_chains,
     resolve_selection,
@@ -191,6 +196,49 @@ def test_build_writes_chains_file_and_metadata(tmp_path):
     # the fixture project has no DATA/, so these stay unresolved rather than failing
     assert [c["sequence"] for c in metadata["columns"]] == [None, None, None]
     assert metadata["exclude"] is None
+
+
+def test_streaming_build_writes_the_same_chain_table(tmp_path, monkeypatch):
+    """The CLI path must not need an in-memory (nchains, nfragments) array."""
+    _basic_project(tmp_path)
+    graph = _graph(tmp_path)
+    selected = resolve_selection(graph, None, None)
+    _layers, expected = build_chains(graph, selected, tmp_path / "expected")
+
+    # Guard the implementation detail that used to allocate every complete path.
+    monkeypatch.setattr(
+        "alaric.middle.chain._enumerate_paths",
+        lambda _layers: pytest.fail("streaming build enumerated a full path table"),
+    )
+    layers, metadata = build_and_write_chains(
+        graph, selected, tmp_path / "streamed", graph_json=tmp_path / "graph.json"
+    )
+
+    written = np.loadtxt(
+        tmp_path / "streamed" / CHAINS_FILE, dtype=np.int64, skiprows=1, ndmin=2
+    )
+    assert written.tolist() == expected.tolist()
+    assert metadata["nchains"] == len(expected)
+    assert json.loads((tmp_path / "streamed" / CHAINS_METADATA_FILE).read_text()) == metadata
+    assert layers.order == ["r1", "r2", "r3"]
+
+
+def test_streaming_build_rejects_tables_above_the_row_limit(tmp_path):
+    _basic_project(tmp_path)
+    graph = _graph(tmp_path)
+    selected = resolve_selection(graph, None, None)
+
+    with pytest.raises(ChainError, match="more than 1 rows"):
+        build_and_write_chains(graph, selected, tmp_path / "too-many", max_chain_rows=1)
+    assert not (tmp_path / "too-many").exists()
+    assert DEFAULT_MAX_CHAIN_ROWS == 100_000_000
+
+
+def test_max_chains_is_measured_in_millions_and_has_a_hard_cap():
+    assert _max_chains_millions("0.5") == 500_000
+    assert _max_chains_millions("1000") == MAX_CHAIN_ROWS
+    with pytest.raises(argparse.ArgumentTypeError, match="must not exceed"):
+        _max_chains_millions("1000.001")
 
 
 def test_build_matches_count(tmp_path):

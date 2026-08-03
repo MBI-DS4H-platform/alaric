@@ -17,7 +17,9 @@ Counting mode (``--count``):
 Build mode (``-o``) writes, into the output dir:
   - one pose dir per fragment, holding that fragment's *unique* surviving poses;
   - ``chains.txt``: a header line of pool names in fragment order, then one row per
-    chain of 1-based pose indices into those pose dirs;
+    chain of 1-based pose indices into those pose dirs. Rows are streamed, so this
+    remains bounded by the individual pool/provenance inputs rather than by the
+    (potentially much larger) number of complete chains;
   - ``chains.json``: per column the pool, fragment and dinucleotide sequence, plus the
     excluded PDB code -- what a consumer needs to turn the indices back into
     coordinates (see ``alaric-chain-coordinates``).
@@ -32,8 +34,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import shutil
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -66,6 +70,29 @@ class ChainError(MiddleError):
 # Build-mode outputs, written into the output dir next to the per-fragment pose dirs.
 CHAINS_FILE = "chains.txt"
 CHAINS_METADATA_FILE = "chains.json"
+# A chain table is useful only while it remains tractable for downstream tools.
+# Build mode defaults to 100 million rows, can be raised with --max-chains, and
+# is never allowed beyond one billion. ``--count`` remains unrestricted.
+DEFAULT_MAX_CHAIN_ROWS = 100_000_000
+MAX_CHAIN_ROWS = 1_000_000_000
+
+
+def _max_chains_millions(value: str) -> int:
+    """Parse the build row limit, expressed by users in millions of chains."""
+    try:
+        millions = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive number of millions") from exc
+    if not math.isfinite(millions) or millions <= 0:
+        raise argparse.ArgumentTypeError("must be a positive number of millions")
+    rows = int(millions * 1_000_000)
+    if rows < 1:
+        raise argparse.ArgumentTypeError("must be at least one chain")
+    if rows > MAX_CHAIN_ROWS:
+        raise argparse.ArgumentTypeError(
+            f"must not exceed {MAX_CHAIN_ROWS // 1_000_000:,} million chains"
+        )
+    return rows
 
 
 # -- variable-length relational primitives --------------------------------
@@ -122,6 +149,29 @@ class Edges:
 
     low: np.ndarray  # pose ids in the lower-fragment representative
     high: np.ndarray  # pose ids in the higher-fragment representative
+
+
+class _ChainScratch:
+    """Disk-backed arrays that keep chain-wide state out of RAM.
+
+    Each individual edge relation or pose-layer mask can still be worked on as
+    an ndarray.  The chain retains only mmap handles to completed layers, which
+    is important when a project has many representative fragments.
+    """
+
+    def __init__(self):
+        self._directory = tempfile.TemporaryDirectory(prefix="alaric-chain.")
+        self._root = Path(self._directory.name)
+        self._serial = 0
+
+    def store(self, label: str, value: np.ndarray) -> np.ndarray:
+        path = self._root / f"{self._serial:04d}-{label}.npy"
+        self._serial += 1
+        np.save(path, value, allow_pickle=False)
+        return np.load(path, mmap_mode="r", allow_pickle=False)
+
+    def close(self) -> None:
+        self._directory.cleanup()
 
 
 class ChainGraph:
@@ -320,9 +370,15 @@ class ChainGraph:
             )
         return None
 
-    def edges_for_link(self, link: dict) -> Edges:
+    def edges_for_link(self, link: dict, scratch: _ChainScratch | None = None) -> Edges:
         join = link["join_pool"]
         target_ids, ts = self._compose(link["target_rep"], link["target_to_join"])
+        if scratch is not None:
+            # A link joins two composed relations. Spill the first before
+            # composing the second so peak resident data is bounded by the two
+            # provenance routes rather than their accumulated chain history.
+            target_ids = scratch.store("link-target-ids", target_ids)
+            ts = scratch.store("link-target-join-ids", ts)
         source_ids, rs = self._compose(link["source_rep"], link["source_to_join"])
         # connect where both map to the same join pose
         s_out, t_out = _join(rs, source_ids, ts, target_ids)
@@ -348,6 +404,17 @@ class Layers:
     # deduplicated before paths are enumerated, so this points back to the
     # physical pose to materialize in the output directory.
     source_pose_ids: list[np.ndarray]
+    scratch: _ChainScratch | None = None
+
+    def close(self) -> None:
+        """Remove disk-backed intermediate arrays, if any.
+
+        ``Layers`` is returned by the Python API, so cleanup is explicit there.
+        The command-line paths close it after their last use.
+        """
+        if self.scratch is not None:
+            self.scratch.close()
+            self.scratch = None
 
 
 def _select_link(graph: ChainGraph, lower: str, upper: str) -> dict:
@@ -364,6 +431,7 @@ def _connectivity(graph: ChainGraph, selected: list[str]) -> Layers:
     order = sorted(selected, key=lambda p: graph.pools[p]["fragment"])
     fragments = [graph.pools[p]["fragment"] for p in order]
     nposes = [graph.nposes(p) for p in order]
+    scratch = _ChainScratch()
 
     if len(order) == 1:
         layers = Layers(
@@ -373,35 +441,53 @@ def _connectivity(graph: ChainGraph, selected: list[str]) -> Layers:
             [],
             [np.ones(nposes[0], dtype=bool)],
             [np.arange(nposes[0], dtype=np.int64)],
+            scratch,
         )
-        return _deduplicate_layers(graph, layers)
+        return _deduplicate_layers(graph, layers, scratch)
 
-    edges = [
-        graph.edges_for_link(_select_link(graph, lower, upper))
-        for lower, upper in zip(order, order[1:])
-    ]
+    edges: list[Edges] = []
+    for j, (lower, upper) in enumerate(zip(order, order[1:])):
+        edge = graph.edges_for_link(_select_link(graph, lower, upper), scratch)
+        edges.append(
+            Edges(
+                scratch.store(f"edge-{j}-low", edge.low),
+                scratch.store(f"edge-{j}-high", edge.high),
+            )
+        )
+        # Do not retain a second in-memory copy of this link while composing the
+        # next one.
+        del edge
     k = len(order)
     # keep only poses on a complete chain: forward AND backward reachable
-    fwd = [np.zeros(n, dtype=bool) for n in nposes]
-    fwd[0][:] = True
+    fwd: list[np.ndarray] = [None] * k  # type: ignore[list-item]
+    first_fwd = np.ones(nposes[0], dtype=bool)
+    fwd[0] = scratch.store("forward-0", first_fwd)
     for j in range(k - 1):
         alive = fwd[j][edges[j].low]
-        fwd[j + 1][edges[j].high[alive]] = True
-    bwd = [np.zeros(n, dtype=bool) for n in nposes]
-    bwd[-1][:] = True
+        next_fwd = np.zeros(nposes[j + 1], dtype=bool)
+        next_fwd[edges[j].high[alive]] = True
+        fwd[j + 1] = scratch.store(f"forward-{j + 1}", next_fwd)
+    bwd: list[np.ndarray] = [None] * k  # type: ignore[list-item]
+    last_bwd = np.ones(nposes[-1], dtype=bool)
+    bwd[-1] = scratch.store(f"backward-{k - 1}", last_bwd)
+    kept_mask: list[np.ndarray] = [None] * k  # type: ignore[list-item]
+    kept_mask[-1] = scratch.store("kept-last", fwd[-1] & bwd[-1])
     for j in range(k - 2, -1, -1):
         alive = bwd[j + 1][edges[j].high]
-        bwd[j][edges[j].low[alive]] = True
-    kept_mask = [f & b for f, b in zip(fwd, bwd)]
+        previous_bwd = np.zeros(nposes[j], dtype=bool)
+        previous_bwd[edges[j].low[alive]] = True
+        bwd[j] = scratch.store(f"backward-{j}", previous_bwd)
+        kept_mask[j] = scratch.store(f"kept-{j}", fwd[j] & bwd[j])
     layers = Layers(
         order,
         fragments,
         nposes,
         edges,
         kept_mask,
-        [np.arange(n, dtype=np.int64) for n in nposes],
+        [np.empty(0, dtype=np.int64) for _n in nposes],
+        scratch,
     )
-    return _deduplicate_layers(graph, layers)
+    return _deduplicate_layers(graph, layers, scratch)
 
 
 def _kept_edges(layers: Layers, j: int) -> tuple[np.ndarray, np.ndarray]:
@@ -425,7 +511,9 @@ def _identities(chunk) -> np.ndarray:
     )
 
 
-def _deduplicate_layers(graph: ChainGraph, layers: Layers) -> Layers:
+def _deduplicate_layers(
+    graph: ChainGraph, layers: Layers, scratch: _ChainScratch | None = None
+) -> Layers:
     """Collapse physically identical surviving poses before path enumeration.
 
     Connectivity is first pruned on the provenance graph, then equivalent poses
@@ -452,6 +540,11 @@ def _deduplicate_layers(graph: ChainGraph, layers: Layers) -> Layers:
         else:
             source_pose_ids.append(np.empty(0, dtype=np.int64))
             nposes.append(0)
+        if scratch is not None:
+            mapping = scratch.store(f"raw-to-unique-{len(raw_to_unique)}", mapping)
+            source_pose_ids[-1] = scratch.store(
+                f"source-pose-ids-{len(source_pose_ids) - 1}", source_pose_ids[-1]
+            )
         raw_to_unique.append(mapping)
 
     edges: list[Edges] = []
@@ -460,20 +553,34 @@ def _deduplicate_layers(graph: ChainGraph, layers: Layers) -> Layers:
         high = raw_to_unique[j + 1][edge.high]
         valid = (low >= 0) & (high >= 0)
         if not np.any(valid):
-            edges.append(
-                Edges(np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64))
-            )
+            low_out = np.empty(0, dtype=np.int64)
+            high_out = np.empty(0, dtype=np.int64)
+            if scratch is not None:
+                low_out = scratch.store(f"dedup-edge-{j}-low", low_out)
+                high_out = scratch.store(f"dedup-edge-{j}-high", high_out)
+            edges.append(Edges(low_out, high_out))
             continue
         pairs = np.unique(np.column_stack((low[valid], high[valid])), axis=0)
-        edges.append(Edges(low=pairs[:, 0], high=pairs[:, 1]))
+        low_out = pairs[:, 0]
+        high_out = pairs[:, 1]
+        if scratch is not None:
+            low_out = scratch.store(f"dedup-edge-{j}-low", low_out)
+            high_out = scratch.store(f"dedup-edge-{j}-high", high_out)
+        edges.append(Edges(low=low_out, high=high_out))
 
     return Layers(
         layers.order,
         layers.fragments,
         nposes,
         edges,
-        [np.ones(n, dtype=bool) for n in nposes],
+        [
+            scratch.store(f"dedup-kept-{j}", np.ones(n, dtype=bool))
+            if scratch is not None
+            else np.ones(n, dtype=bool)
+            for j, n in enumerate(nposes)
+        ],
         source_pose_ids,
+        scratch,
     )
 
 
@@ -489,27 +596,39 @@ class CountResult:
     total_chains: int
 
 
-def _count_paths(layers: Layers) -> int:
+def _count_paths(layers: Layers, *, max_count: int | None = None) -> int:
+    """Return the number of paths, or ``max_count + 1`` once exceeded."""
     if len(layers.order) == 1:
-        return int(layers.kept_mask[0].sum())
+        total = int(layers.kept_mask[0].sum())
+        return min(total, max_count + 1) if max_count is not None else total
     ways = np.where(layers.kept_mask[0], 1, 0).astype(np.int64)
     for j in range(len(layers.order) - 1):
-        lo, hi = _kept_edges(layers, j)
+        # ``_connectivity`` has already pruned and then deduplicated every
+        # layer, so retaining an edge requires no further boolean-filtered copy.
+        lo, hi = layers.edges[j].low, layers.edges[j].high
         nxt = np.zeros(layers.nposes[j + 1], dtype=np.int64)
         np.add.at(nxt, hi, ways[lo])
+        if max_count is not None:
+            # Saturating here means subsequent layers never need counts larger
+            # than the build-mode threshold, while preserving the answer below it.
+            np.minimum(nxt, max_count + 1, out=nxt)
         ways = nxt
-    return int(ways.sum())
+    total = int(ways.sum())
+    return min(total, max_count + 1) if max_count is not None else total
 
 
 def count_chains(graph: ChainGraph, selected: list[str]) -> CountResult:
     layers = _connectivity(graph, selected)
-    return CountResult(
-        order=layers.order,
-        fragments=layers.fragments,
-        kept=[int(m.sum()) for m in layers.kept_mask],
-        unique=[int(m.sum()) for m in layers.kept_mask],
-        total_chains=_count_paths(layers),
-    )
+    try:
+        return CountResult(
+            order=layers.order,
+            fragments=layers.fragments,
+            kept=[int(m.sum()) for m in layers.kept_mask],
+            unique=[int(m.sum()) for m in layers.kept_mask],
+            total_chains=_count_paths(layers),
+        )
+    finally:
+        layers.close()
 
 
 # -- building -------------------------------------------------------------
@@ -567,12 +686,15 @@ def _enumerate_paths(layers: Layers) -> np.ndarray:
     return paths
 
 
-def build_chains(
-    graph: ChainGraph, selected: list[str], output_dir: Path
-) -> tuple[Layers, np.ndarray]:
-    """Write one pose dir of unique poses per fragment under ``output_dir`` and
-    return the chains as 1-based indices into those pose dirs."""
-    layers = _connectivity(graph, selected)
+def _materialize_pose_dirs(
+    graph: ChainGraph, layers: Layers, output_dir: Path
+) -> list[np.ndarray]:
+    """Materialize layer poses and map layer node ids to written pose ids.
+
+    There is one mapping per representative pose directory.  Keeping those is
+    bounded by the input pools; in particular, it does not grow with the number
+    of complete chains.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
 
     rep_to_pool: list[np.ndarray] = []
@@ -584,13 +706,121 @@ def build_chains(
         one_based = _write_unique_pose_dir(graph, pool, source_ids, output_dir / pool)
         mapping = np.zeros(n, dtype=np.int64)
         mapping[kept_idx] = one_based
+        if layers.scratch is not None:
+            mapping = layers.scratch.store(f"written-pose-map-{j}", mapping)
         rep_to_pool.append(mapping)
+
+    return rep_to_pool
+
+
+def build_chains(
+    graph: ChainGraph, selected: list[str], output_dir: Path
+) -> tuple[Layers, np.ndarray]:
+    """Write one pose dir of unique poses per fragment under ``output_dir`` and
+    return the chains as 1-based indices into those pose dirs.
+
+    This compatibility API returns the full table, so callers which use it need
+    enough memory for every chain.  The command-line build path uses
+    :func:`build_and_write_chains` instead and streams that table to disk.
+    """
+    layers = _connectivity(graph, selected)
+    rep_to_pool = _materialize_pose_dirs(graph, layers, output_dir)
 
     paths = _enumerate_paths(layers)
     table = np.empty_like(paths)
     for j in range(len(layers.order)):
         table[:, j] = rep_to_pool[j][paths[:, j]]
     return layers, table
+
+
+def _visit_paths(layers: Layers, visit) -> int:
+    """Visit complete paths without constructing a chain table.
+
+    After layer deduplication, each edge array is sorted by its lower endpoint.
+    ``searchsorted`` therefore provides each node's adjacency range directly;
+    the only path state held here is one pose id per fragment.
+    """
+    nlayer = len(layers.order)
+    path = np.empty(nlayer, dtype=np.int64)
+    count = 0
+
+    def walk(layer: int, node: int) -> None:
+        nonlocal count
+        path[layer] = node
+        if layer == nlayer - 1:
+            visit(path)
+            count += 1
+            return
+        edge = layers.edges[layer]
+        start = np.searchsorted(edge.low, node, side="left")
+        stop = np.searchsorted(edge.low, node, side="right")
+        for child in edge.high[start:stop]:
+            walk(layer + 1, int(child))
+
+    for first in np.flatnonzero(layers.kept_mask[0]):
+        walk(0, int(first))
+    return count
+
+
+def _write_chain_table_streaming(
+    layers: Layers, rep_to_pool: list[np.ndarray], path: Path
+) -> int:
+    """Write ``chains.txt`` using O(number of fragments) path memory."""
+    with path.open("w") as handle:
+        handle.write("\t".join(layers.order) + "\n")
+
+        def write(path_ids: np.ndarray) -> None:
+            handle.write(
+                "\t".join(
+                    str(int(mapping[int(node)]))
+                    for mapping, node in zip(rep_to_pool, path_ids)
+                )
+                + "\n"
+            )
+
+        return _visit_paths(layers, write)
+
+
+def build_and_write_chains(
+    graph: ChainGraph,
+    selected: list[str],
+    output_dir: Path,
+    *,
+    graph_json: Path | None = None,
+    max_chain_rows: int = DEFAULT_MAX_CHAIN_ROWS,
+) -> tuple[Layers, dict]:
+    """Build chain output without materializing its potentially huge row table.
+
+    ``max_chain_rows`` may be increased up to :data:`MAX_CHAIN_ROWS`.
+    """
+    max_chain_rows = int(max_chain_rows)
+    if not 1 <= max_chain_rows <= MAX_CHAIN_ROWS:
+        raise ChainError(
+            f"max_chain_rows must be in 1..{MAX_CHAIN_ROWS:,}, got {max_chain_rows:,}"
+        )
+    layers = _connectivity(graph, selected)
+    output_dir = Path(output_dir)
+    nchains = _count_paths(layers, max_count=max_chain_rows)
+    if nchains > max_chain_rows:
+        layers.close()
+        raise ChainError(
+            f"chain table has more than {max_chain_rows:,} rows; refusing to write "
+            f"{CHAINS_FILE}"
+        )
+    rep_to_pool = _materialize_pose_dirs(graph, layers, output_dir)
+    written = _write_chain_table_streaming(layers, rep_to_pool, output_dir / CHAINS_FILE)
+    if written != nchains:
+        raise ChainError(
+            f"chain count changed while writing {CHAINS_FILE}: expected {nchains}, "
+            f"wrote {written}"
+        )
+    metadata = chain_metadata(
+        graph, layers, None, output_dir, graph_json=graph_json, nchains=nchains
+    )
+    (output_dir / CHAINS_METADATA_FILE).write_text(
+        json.dumps(metadata, indent=2) + "\n"
+    )
+    return layers, metadata
 
 
 # -- build-mode output files ----------------------------------------------
@@ -603,10 +833,11 @@ def _pose_dir_nposes(pose_dir: Path) -> int:
 def chain_metadata(
     graph: ChainGraph,
     layers: Layers,
-    table: np.ndarray,
+    table: np.ndarray | None,
     output_dir: Path,
     *,
     graph_json: Path | None = None,
+    nchains: int | None = None,
 ) -> dict:
     """Describe the built chains: one entry per column, in fragment order.
 
@@ -637,11 +868,16 @@ def chain_metadata(
             }
         )
 
+    if nchains is None:
+        if table is None:
+            raise ValueError("chain_metadata requires table or nchains")
+        nchains = len(table)
+
     return {
         "project": str(graph.project_root),
         "graph": str(graph_json) if graph_json is not None else None,
         "chains_file": CHAINS_FILE,
-        "nchains": int(len(table)),
+        "nchains": int(nchains),
         "exclude": exclude,
         "columns": columns,
     }
@@ -738,6 +974,17 @@ def main(argv: list[str] | None = None) -> int:
         f"plus the chains as pose indices ({CHAINS_FILE}) and their metadata "
         f"({CHAINS_METADATA_FILE}).",
     )
+    parser.add_argument(
+        "--max-chains",
+        type=_max_chains_millions,
+        default=DEFAULT_MAX_CHAIN_ROWS,
+        metavar="MILLIONS",
+        help=(
+            "Build mode: maximum chains.txt rows, in millions "
+            f"(default: {DEFAULT_MAX_CHAIN_ROWS // 1_000_000}; hard maximum: "
+            f"{MAX_CHAIN_ROWS // 1_000_000:,})."
+        ),
+    )
     parser.add_argument("--target", nargs="+", metavar="POOL", help="Use only these representatives.")
     parser.add_argument("--exclude", nargs="+", metavar="POOL", help="Drop these representatives.")
     parser.add_argument("--project-root", help="Override the project root for result dirs.")
@@ -756,15 +1003,17 @@ def main(argv: list[str] | None = None) -> int:
             print(_format_count(count_chains(graph, selected)))
         else:
             output_dir = Path(args.output_dir)
-            layers, table = build_chains(graph, selected, output_dir)
-            metadata = write_chain_outputs(
+            layers, metadata = build_and_write_chains(
                 graph,
-                layers,
-                table,
+                selected,
                 output_dir,
                 graph_json=Path(args.graph_json).resolve(),
+                max_chain_rows=args.max_chains,
             )
-            print(_format_build(metadata, output_dir))
+            try:
+                print(_format_build(metadata, output_dir))
+            finally:
+                layers.close()
     except ChainError as exc:
         parser.exit(2, f"error: {exc}\n")
 
