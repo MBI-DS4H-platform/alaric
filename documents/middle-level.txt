@@ -103,6 +103,21 @@ input: frag4-fwd-filtered . Name of action dir
 direction: fwd or forward or bwd or backward, or auto (read from dirname "fragX-fwd")
 crmsd: 0.25 or auto (read the corresponding pair from constraints.json)
 ovrmsd: 0.75 or auto (read the corresponding pair from constraints.json)
+restrict_input: frag5-anchor-filtered [optional]. Name of a pose action dir.
+
+Restriction keeps only those generated poses whose (conformer, rotamer, translation) also
+occurs in the restrict pool. Target conformers and rotamers absent from it are dropped
+before the RMSD kernel runs, so a small restrict pool makes grow considerably cheaper, not
+just its output smaller. The restrict pool must resolve to the same fragment and sequence
+as the grow target. It is a dependency (and so enters the sigil), but it is not where poses
+come from: it carries no provenance array and is excluded from the lineage walk.
+
+The restrict pool is loaded into an in-memory index, keyed by (conformer, rotamer) and
+holding the sorted unique translations of each. Peak memory is ~28 bytes per restrict pose,
+paid once per chunk process, so unlike the input pool the restrict pool must fit in RAM.
+This is meant for score-filtered pools; a raw gigapose anchor pool is out of reach, and at
+that size would prune no conformers or rotamers anyway. To intersect with a pool that large,
+grow unrestricted and use "identity" instead, which merge-joins on the .arc structure.
 
 ## grow-test
 
