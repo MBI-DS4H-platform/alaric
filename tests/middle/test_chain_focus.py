@@ -63,6 +63,26 @@ def test_focus_links_selected_pools_and_deduplicates_rows(tmp_path):
     assert json.loads((output / "chains.json").read_text()) == metadata
 
 
+def test_focus_chunked_zstd_input_matches_existing_output(tmp_path):
+    source = tmp_path / "chains"
+    _write_chains(source)
+    plain = source / "chains.txt"
+    import zstandard as zstd
+
+    plain.with_name("chains.txt.zst").write_bytes(
+        zstd.ZstdCompressor().compress(plain.read_bytes())
+    )
+    plain.unlink()
+    output = tmp_path / "focused"
+
+    metadata = focus_chains(source, ["r3", "r1"], output, chunk_size=2)
+
+    # The duplicate is in a different source chunk from its first occurrence.
+    assert (output / "chains.txt").read_text() == "r1\tr3\n1\t2\n1\t3\n2\t2\n"
+    assert (output / CHAIN_PROVENANCE_FILE).read_text() == "1\n2\n3\n1\n"
+    assert metadata["nchains"] == 3
+
+
 def test_focus_rejects_nonempty_output_dir(tmp_path):
     source = tmp_path / "chains"
     _write_chains(source)

@@ -16,10 +16,12 @@ from pathlib import Path
 import numpy as np
 
 from .chain import CHAINS_FILE, CHAINS_METADATA_FILE
+from .chain_coordinates import ChainCoordinatesError, iter_chain_table_chunks
 from .errors import MiddleError
 
 
 CHAIN_PROVENANCE_FILE = "chain-provenance.txt"
+DEFAULT_CHAIN_CHUNK_SIZE = 10_000_000
 
 
 class ChainFocusError(MiddleError):
@@ -36,7 +38,7 @@ def _direct_entry(name: object, what: str) -> str:
     return name
 
 
-def _load_input(chain_dir: Path) -> tuple[dict, np.ndarray]:
+def _load_input(chain_dir: Path) -> dict:
     metadata_path = chain_dir / CHAINS_METADATA_FILE
     if not metadata_path.is_file():
         raise ChainFocusError(
@@ -69,45 +71,22 @@ def _load_input(chain_dir: Path) -> tuple[dict, np.ndarray]:
     if len(set(pools)) != len(pools):
         raise ChainFocusError(f"{metadata_path}: duplicate pool columns are unsupported")
 
-    chains_path = chain_dir / metadata.get("chains_file", CHAINS_FILE)
-    if not chains_path.is_file():
-        raise ChainFocusError(f"{chains_path} not found")
-    lines = chains_path.read_text().splitlines()
-    if not lines:
-        raise ChainFocusError(f"{chains_path}: missing header")
-    header = lines[0].split("\t")
-    if header != pools:
-        raise ChainFocusError(
-            f"{chains_path} header {header} does not match {CHAINS_METADATA_FILE} pools {pools}"
-        )
-
-    rows: list[list[int]] = []
-    for line_no, line in enumerate(lines[1:], start=2):
-        fields = line.split("\t")
-        if len(fields) != len(pools):
-            raise ChainFocusError(
-                f"{chains_path}:{line_no}: expected {len(pools)} columns, got {len(fields)}"
-            )
-        try:
-            row = [int(value) for value in fields]
-        except ValueError as exc:
-            raise ChainFocusError(f"{chains_path}:{line_no}: invalid pose index") from exc
-        if any(value < 1 for value in row):
-            raise ChainFocusError(f"{chains_path}:{line_no}: pose indices must be positive")
-        rows.append(row)
-
     try:
         nchains = int(metadata["nchains"])
     except (KeyError, TypeError, ValueError) as exc:
         raise ChainFocusError(f"{metadata_path}: invalid nchains") from exc
-    if nchains != len(rows):
-        raise ChainFocusError(
-            f"{metadata_path}: nchains is {nchains}, but {chains_path} has {len(rows)} rows"
-        )
-    return metadata, np.asarray(rows, dtype=np.int64).reshape(len(rows), len(pools))
+    if nchains < 0:
+        raise ChainFocusError(f"{metadata_path}: nchains must be non-negative")
+    return metadata
 
 
-def focus_chains(chain_dir: Path, pools: list[str], output_dir: Path) -> dict:
+def focus_chains(
+    chain_dir: Path,
+    pools: list[str],
+    output_dir: Path,
+    *,
+    chunk_size: int = DEFAULT_CHAIN_CHUNK_SIZE,
+) -> dict:
     """Write a focused, deduplicated chain directory and return its metadata."""
     chain_dir = Path(chain_dir).resolve()
     output_dir = Path(output_dir)
@@ -119,8 +98,10 @@ def focus_chains(chain_dir: Path, pools: list[str], output_dir: Path) -> dict:
         raise ChainFocusError(f"output path is not a directory: {output_dir}")
     if output_dir.is_dir() and any(output_dir.iterdir()):
         raise ChainFocusError(f"output chains dir is not empty: {output_dir}")
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
 
-    metadata, table = _load_input(chain_dir)
+    metadata = _load_input(chain_dir)
     columns = metadata["columns"]
     requested = [_direct_entry(pool, "requested pool") for pool in pools]
     if len(set(requested)) != len(requested):
@@ -134,40 +115,67 @@ def focus_chains(chain_dir: Path, pools: list[str], output_dir: Path) -> dict:
     # pool names were supplied in another order.
     selected_indices = [i for i, column in enumerate(columns) if column["pool"] in requested]
     selected_columns = [columns[i].copy() for i in selected_indices]
-    selected_table = table[:, selected_indices]
-
-    unique_rows: list[np.ndarray] = []
-    provenance: list[int] = []
-    row_numbers: dict[tuple[int, ...], int] = {}
-    for row in selected_table:
-        key = tuple(int(value) for value in row)
-        focused_number = row_numbers.get(key)
-        if focused_number is None:
-            focused_number = len(unique_rows) + 1
-            row_numbers[key] = focused_number
-            unique_rows.append(row)
-        provenance.append(focused_number)
-    focused_table = np.asarray(unique_rows, dtype=np.int64).reshape(
-        len(unique_rows), len(selected_indices)
-    )
-
     output_dir.mkdir(parents=True, exist_ok=True)
     for column in selected_columns:
         pool = column["pool"]
         (output_dir / pool).symlink_to(chain_dir / pool, target_is_directory=True)
 
-    with (output_dir / CHAINS_FILE).open("w") as handle:
-        handle.write("\t".join(column["pool"] for column in selected_columns) + "\n")
-        np.savetxt(handle, focused_table, fmt="%d", delimiter="\t")
-    with (output_dir / CHAIN_PROVENANCE_FILE).open("w") as handle:
-        np.savetxt(handle, np.asarray(provenance, dtype=np.int64), fmt="%d")
+    # Focused rows are guaranteed to be much fewer than input rows. Keep just
+    # this first-seen map in memory; input rows themselves remain chunked.
+    row_numbers: dict[tuple[int, ...], int] = {}
+    try:
+        with (
+            (output_dir / CHAINS_FILE).open("w") as chains_handle,
+            (output_dir / CHAIN_PROVENANCE_FILE).open("w") as provenance_handle,
+        ):
+            chains_handle.write(
+                "\t".join(column["pool"] for column in selected_columns) + "\n"
+            )
+            try:
+                chunks = iter_chain_table_chunks(
+                    chain_dir, metadata, rows_per_chunk=chunk_size
+                )
+                for rows in chunks:
+                    if np.any(rows < 1):
+                        raise ChainFocusError("chain pose indices must be positive")
+                    selected_rows = rows[:, selected_indices]
+                    unique, first, inverse = np.unique(
+                        selected_rows,
+                        axis=0,
+                        return_index=True,
+                        return_inverse=True,
+                    )
+                    numbers = np.empty(len(unique), dtype=np.int64)
+                    is_new = np.zeros(len(unique), dtype=bool)
+                    in_source_order = np.argsort(first, kind="stable")
+                    for unique_index in in_source_order:
+                        key = tuple(int(value) for value in unique[unique_index])
+                        number = row_numbers.get(key)
+                        if number is None:
+                            number = len(row_numbers) + 1
+                            row_numbers[key] = number
+                            is_new[unique_index] = True
+                        numbers[unique_index] = number
+                    new_in_source_order = in_source_order[is_new[in_source_order]]
+                    if len(new_in_source_order):
+                        np.savetxt(
+                            chains_handle,
+                            unique[new_in_source_order],
+                            fmt="%d",
+                            delimiter="\t",
+                        )
+                    np.savetxt(provenance_handle, numbers[inverse], fmt="%d")
+            except ChainCoordinatesError as exc:
+                raise ChainFocusError(str(exc)) from None
+    except OSError as exc:
+        raise ChainFocusError(str(exc)) from exc
 
     focused_metadata = metadata.copy()
     focused_metadata.update(
         {
             "chains_file": CHAINS_FILE,
             "chain_provenance_file": CHAIN_PROVENANCE_FILE,
-            "nchains": len(focused_table),
+            "nchains": len(row_numbers),
             "columns": selected_columns,
         }
     )
