@@ -86,9 +86,15 @@ The score_input.input must be equal to the input
 input: name of action dir
 score_input: name of scoring action dir
 threshold: 0.23 or "auto" (try to extract from constraints.json)
-mask_input: name of mask action dir. 
+mask_input: name of mask action dir.
 score_input+threshold XOR mask_input must be defined.
 The score_input.input or mask_input.input must be equal to the input
+
+Both routes read the pool and the score/mask array piecemeal and filter in parallel per
+organized input file (see alaric/pose_filter.py), so memory does not scale with the pool.
+The score route also writes provenance.npy (uint64 input pose ids); the mask route writes
+order-array.npy (the request position of each organized pose) unless the input is a
+boolean mask, in which case pose order is unchanged and no order array is needed.
 
 ## grow
 

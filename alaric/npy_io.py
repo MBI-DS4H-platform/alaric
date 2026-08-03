@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 from pathlib import Path
 import tempfile
 
@@ -172,6 +173,107 @@ def open_npy_mmap(path: str | Path, *, tempdir: str | Path | None = None):
             del array
     finally:
         tmp_path.unlink(missing_ok=True)
+
+
+# Filesystem request size for a range-read array. Consumers ask for whatever range
+# they are working on; the reader fetches at least this much, so the request size seen
+# by the filesystem does not follow the caller's chunk size. One buffer per reader per
+# process, so the cost is this times the worker count.
+RANGE_READ_BLOCK = 32 * 1024 * 1024
+
+
+class NpyRangeReader:
+    """Positioned range reads from a large uncompressed 1-D .npy.
+
+    For a per-pose array that cannot be held in memory -- a 15-gigapose float32 score
+    file is 60 GB -- read only the range currently being processed. Deliberately not
+    ``mmap``: this is a one-shot sequential scan, often of a file on a network
+    filesystem and often from several processes at once, which is the case mapping
+    serves worst.
+
+    Access is ascending, so ranges are served from a read-ahead block: the filesystem
+    sees ``block`` -sized requests however small the caller's ranges are. Reads go
+    through ``os.pread``, so the descriptor stays correct when the reader is inherited
+    by forked workers (a shared file *offset* would not be).
+    """
+
+    def __init__(self, path: str | Path, *, block: int = RANGE_READ_BLOCK) -> None:
+        path = Path(path)
+        if is_compressed(path):
+            raise ValueError(f"{path}: a compressed array cannot be range-read")
+        with path.open("rb") as handle:
+            shape, fortran_order, dtype = _read_header(handle, path)
+            self._payload_offset = handle.tell()
+        if len(shape) != 1:
+            raise ValueError(f"{path}: expected a 1-D array, got shape {shape}")
+        if fortran_order:
+            raise ValueError(f"{path}: Fortran-ordered arrays are not supported")
+        self.path = path
+        self.dtype = dtype
+        self._length = int(shape[0])
+        self._items_per_block = max(1, int(block) // dtype.itemsize)
+        self._fd: int | None = None
+        self._buffer: np.ndarray | None = None
+        self._buffer_start = 0
+        self._buffer_stop = 0
+
+    def __len__(self) -> int:
+        return self._length
+
+    def _descriptor(self) -> int:
+        if self._fd is None:
+            self._fd = os.open(self.path, os.O_RDONLY)
+        return self._fd
+
+    def _pread(self, start: int, stop: int) -> np.ndarray:
+        itemsize = self.dtype.itemsize
+        offset = self._payload_offset + start * itemsize
+        remaining = (stop - start) * itemsize
+        fd = self._descriptor()
+        parts: list[bytes] = []
+        while remaining:
+            block = os.pread(fd, remaining, offset)
+            if not block:
+                raise ValueError(f"{self.path}: truncated at byte {offset}")
+            parts.append(block)
+            offset += len(block)
+            remaining -= len(block)
+        raw = parts[0] if len(parts) == 1 else b"".join(parts)
+        return np.frombuffer(raw, dtype=self.dtype)
+
+    def read(self, start: int, stop: int) -> np.ndarray:
+        start = max(0, int(start))
+        stop = min(self._length, int(stop))
+        if stop <= start:
+            return np.empty(0, dtype=self.dtype)
+        if self._buffer is not None and self._buffer_start <= start and stop <= self._buffer_stop:
+            return self._buffer[start - self._buffer_start : stop - self._buffer_start]
+        # Refill: at least the requested range, at least one block, never past the end.
+        buffer_stop = min(self._length, max(stop, start + self._items_per_block))
+        self._buffer = self._pread(start, buffer_stop)
+        self._buffer_start = start
+        self._buffer_stop = buffer_stop
+        return self._buffer[: stop - start]
+
+    def close(self) -> None:
+        self._buffer = None
+        self._buffer_start = self._buffer_stop = 0
+        if self._fd is not None:
+            os.close(self._fd)
+            self._fd = None
+
+    def __getstate__(self) -> dict:
+        # An fd is meaningless in another process, and the read-ahead is per-process
+        # state; both are re-established on first use there.
+        state = dict(self.__dict__)
+        state["_fd"] = None
+        state["_buffer"] = None
+        state["_buffer_start"] = 0
+        state["_buffer_stop"] = 0
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
 
 
 class NpyWriter:

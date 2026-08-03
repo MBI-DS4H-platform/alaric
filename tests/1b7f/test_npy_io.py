@@ -22,6 +22,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / ".alaric"))
 
 from npy_io import (  # noqa: E402
+    NpyRangeReader,
     NpyWriter,
     compress_npy_file,
     find_npy,
@@ -95,6 +96,42 @@ def test_round_trip(tmp_path: Path, name: str) -> None:
     with open_npy_mmap(path) as mapped:
         np.testing.assert_array_equal(mapped, array)
     assert read_npy_header(path) == (array.shape, array.dtype)
+
+
+def test_range_reader_serves_ranges_from_its_read_ahead_block(tmp_path: Path) -> None:
+    values = np.arange(1000, dtype=np.float32) / 7.0
+    np.save(tmp_path / "score.npy", values)
+    # a block far smaller than the file, so every boundary case is exercised
+    reader = NpyRangeReader(tmp_path / "score.npy", block=64 * values.dtype.itemsize)
+    try:
+        assert len(reader) == len(values)
+        assert reader.dtype == values.dtype
+        # ascending ranges, crossing block boundaries and landing inside them
+        for start in range(0, 1000, 37):
+            np.testing.assert_array_equal(
+                reader.read(start, start + 37), values[start : start + 37]
+            )
+        # a range larger than the block, a backward jump, and the tail
+        np.testing.assert_array_equal(reader.read(10, 500), values[10:500])
+        np.testing.assert_array_equal(reader.read(3, 9), values[3:9])
+        np.testing.assert_array_equal(reader.read(990, 1200), values[990:])
+        assert reader.read(1000, 1100).size == 0
+        assert reader.read(500, 400).size == 0
+    finally:
+        reader.close()
+
+
+def test_range_reader_result_survives_the_next_read(tmp_path: Path) -> None:
+    """A returned slice must not be invalidated when the block is refilled."""
+    values = np.arange(500, dtype=np.uint32)
+    np.save(tmp_path / "a.npy", values)
+    reader = NpyRangeReader(tmp_path / "a.npy", block=16 * values.dtype.itemsize)
+    try:
+        held = reader.read(0, 8)
+        reader.read(400, 480)
+        np.testing.assert_array_equal(held, values[0:8])
+    finally:
+        reader.close()
 
 
 def test_find_npy_resolves_either_form(tmp_path: Path) -> None:

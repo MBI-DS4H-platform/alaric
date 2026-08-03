@@ -7,23 +7,31 @@ Usage:
 ENERGY_FILE must contain one float per pose, in pose order.
 Writes filtered poses and provenance.npy (uint64, 0-based indices into POSE_DIR),
 zstd-compressed with --compress.
+
+Both the pool and the energy file are read piecemeal (see ``pose_filter``): at pool
+scale neither fits in memory -- 15 gigaposes is a 60 GB float32 energy file -- so peak
+memory depends on the chunk size and the number of poses *kept*, not on the pool size.
 """
 
 import sys
 import argparse
+import contextlib
 import shutil
-import numpy as np
 from pathlib import Path
 
 _CODE_DIR = Path(__file__).resolve().parent
 if str(_CODE_DIR) not in sys.path:
     sys.path.insert(0, str(_CODE_DIR))
 
-from npy_io import save_npy
-from organize import main as organize_main
-from poses import PoseReader, PoseWriter
-
-BUCKET_SIZE = 16
+from nprocs import default_nprocs  # noqa: E402
+from organize import main as organize_main  # noqa: E402
+from pose_filter import (  # noqa: E402
+    DEFAULT_CACHE_POSES,
+    DEFAULT_CHUNK_POSES,
+    ScoreThresholdSelector,
+    filter_pose_dir,
+    open_range_source,
+)
 
 
 def parse_args():
@@ -44,6 +52,25 @@ def parse_args():
             "Write zstd-compressed output: organized poses-*.arc.zst instead of "
             "poses-*.arc, and provenance.npy.zst instead of provenance.npy."
         ),
+    )
+    p.add_argument(
+        "--nprocs",
+        type=int,
+        default=default_nprocs(),
+        help="Worker processes; the pool is split per organized input file.",
+    )
+    p.add_argument(
+        "--chunk-poses",
+        type=int,
+        default=DEFAULT_CHUNK_POSES,
+        help="Pose rows worked on per step. The filesystem request size is set "
+        "separately (poses.ARC_STREAM_READ_SIZE, npy_io.RANGE_READ_BLOCK).",
+    )
+    p.add_argument(
+        "--cache-poses",
+        type=int,
+        default=DEFAULT_CACHE_POSES,
+        help="Kept poses buffered before a shard is flushed, shared across workers.",
     )
     return p.parse_args()
 
@@ -67,46 +94,26 @@ def main():
     out_dir = Path(args.out_dir)
     prepare_output_dir(out_dir, force=bool(args.force))
 
-    energies = np.lib.format.open_memmap(Path(args.energy_file))
-    mask = energies < args.threshold
-    keep_idx = np.where(mask)[0]  # 0-based
+    with contextlib.ExitStack() as stack:
+        energies = open_range_source(args.energy_file, stack)
+        selector = ScoreThresholdSelector(energies, args.threshold)
+        print(f"Total poses: {len(selector):,}", flush=True)
+        print(f"Threshold:   {args.threshold}", flush=True)
 
-    print(f"Total poses: {len(energies):,}", flush=True)
-    print(f"Threshold:   {args.threshold}", flush=True)
-    print(f"Passing:     {len(keep_idx):,}", flush=True)
+        stats = filter_pose_dir(
+            pose_dir,
+            out_dir,
+            selector,
+            provenance_path=out_dir / "provenance.npy",
+            compress=bool(args.compress),
+            nprocs=int(args.nprocs),
+            chunk_poses=int(args.chunk_poses),
+            cache_poses=int(args.cache_poses),
+        )
+    print(f"Passing:     {stats.kept_poses:,}", flush=True)
+    print(f"Wrote {stats.shards} arc shard(s)", flush=True)
 
-    # Read and filter poses
-    reader = PoseReader(pose_dir, rows_per_chunk=200_000)
-    writer = PoseWriter(out_dir, bucket_size=BUCKET_SIZE, cache_poses=5_000_000)
-
-    keep_set = set(keep_idx.tolist())
-    out_conformers = []
-    out_rotamers = []
-    out_translations = []
-    out_provenance = []
-
-    cur = 0
-    for chunk in reader.iter_chunks():
-        n = len(chunk.conformers)
-        for local_i in range(n):
-            global_i = cur + local_i
-            if global_i in keep_set:
-                out_conformers.append(int(chunk.conformers[local_i]))
-                out_rotamers.append(int(chunk.rotamers[local_i]))
-                out_translations.append(chunk.translations_grid[local_i].tolist())
-                out_provenance.append(global_i)
-        cur += n
-
-    conformers   = np.array(out_conformers,   dtype=np.uint16)
-    rotamers     = np.array(out_rotamers,     dtype=np.uint16)
-    translations = np.array(out_translations, dtype=np.int16)
-    provenance   = np.array(out_provenance,   dtype=np.uint64)
-
-    writer.add_chunk(conformers, rotamers, translations)
-    written = writer.finish()
-    print(f"Wrote {len(written)} arc shard(s)", flush=True)
-
-    # Organize the unorganized shards produced by PoseWriter.
+    # Organize the unorganized shards produced by the filter pass.
     organize_argv = [str(out_dir)]
     if args.compress:
         organize_argv.append("--compress")
@@ -114,13 +121,6 @@ def main():
     if organize_rc:
         raise RuntimeError(f"organize failed with exit code {organize_rc}")
 
-    provenance_path = save_npy(
-        out_dir / "provenance.npy", provenance, compress=bool(args.compress)
-    )
-    print(
-        f"Wrote {provenance_path.name}: shape={provenance.shape}, dtype={provenance.dtype}",
-        flush=True,
-    )
     print(f"Done → {out_dir}", flush=True)
 
 

@@ -28,6 +28,12 @@ ARC_ZSTD_SUFFIX = ".arc.zst"
 PROVENANCE_SUFFIX = ".provenance.npy"
 ARC_ZSTD_FRAME_BYTES = 4 * 1024 * 1024
 DEFAULT_POSE_CHUNK_SIZE = 10_000
+# Filesystem request size when a whole .arc.zst is streamed. zstandard would otherwise
+# ask for ~128 KB at a time, which is a poor request size for a shared/network
+# filesystem; a pose dir is read one long sequential pass at a time, so ask for much
+# more. Costs one buffer per *open stream* (one per worker), not per file.
+# Deliberately not used for header/offset reads, which want a small first request.
+ARC_STREAM_READ_SIZE = 8 * 1024 * 1024
 
 
 def _require_zstandard(action: str):
@@ -138,7 +144,9 @@ def _open_arc_bytes(path: str | Path) -> bytes:
     if path.name.endswith(ARC_ZSTD_SUFFIX):
         zstd = _require_zstandard("read")
         with path.open("rb") as compressed:
-            with zstd.ZstdDecompressor().stream_reader(compressed) as reader:
+            with zstd.ZstdDecompressor().stream_reader(
+                compressed, read_size=ARC_STREAM_READ_SIZE
+            ) as reader:
                 return reader.read()
     return path.read_bytes()
 
@@ -230,12 +238,16 @@ def iter_arc_pose_chunks(
     path: str | Path,
     *,
     rows_per_chunk: int = 1_000_000,
+    read_size: int = ARC_STREAM_READ_SIZE,
 ) -> Iterable[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]]:
     """Yield one .arc file as bounded pose chunks.
 
     The metadata arrays are copied once and reused across chunks. Pose chunks are
     copied out of the input stream so callers can safely keep them after the next
     read.
+
+    ``read_size`` is the filesystem request size, independent of ``rows_per_chunk``
+    (which sizes the arrays the caller works on).
     """
     if rows_per_chunk <= 0:
         raise ValueError("rows_per_chunk must be positive")
@@ -244,7 +256,9 @@ def iter_arc_pose_chunks(
     if path.name.endswith(ARC_ZSTD_SUFFIX):
         zstd = _require_zstandard("read")
         compressed = path.open("rb")
-        stream_context = zstd.ZstdDecompressor().stream_reader(compressed)
+        stream_context = zstd.ZstdDecompressor().stream_reader(
+            compressed, read_size=int(read_size)
+        )
     else:
         compressed = None
         stream_context = path.open("rb")

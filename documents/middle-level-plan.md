@@ -114,7 +114,13 @@ Backends:
   redundant `_ALARIC_DIR` sys.path shim.
 - `score_add`: new `alaric/score_add.py`
 - `mask`: new `alaric/mask.py`
-- `filter`: score+threshold route uses `filter-poses.py`; mask route uses `select-poses.py`
+- `filter`: score+threshold route uses `filter-poses.py`; mask route uses `select-poses.py`.
+  Both stream through `alaric/pose_filter.py`: the pool is read in chunks off the `.arc`
+  stream and the score/mask array is read only for the range in hand (a 15-gigapose pool
+  has a 60 GB float32 score file), so peak memory follows the chunk size, not the pool.
+  Work is split per organized input file across `--nprocs` workers, defaulting to
+  `default_nprocs()` so a SLURM allocation is honored. The result is independent of the
+  worker count: organize canonicalizes the output into the input's own sort order.
 - `identity`: `identity_filter.py`
 
 Hard repo/path constraints:
