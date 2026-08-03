@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 from alaric.mask import main as mask_main
 from alaric.mask_common_conformer import main as mask_common_conformer_main
 import alaric.middle.deploy as deploy_module
+import alaric.middle.result as result_module
 from alaric.middle.checksum import byte_checksum, write_array_sidecar, write_pose_sidecars
 from alaric.middle.deploy import deploy, generate_check_sh, generate_chunk_files, generate_run_sh
 from alaric.middle.errors import GraphError, MiddleError, SchemaError
@@ -932,3 +933,45 @@ def test_propagated_provenance_is_excluded_from_pose_result_checksum(tmp_path: P
     assert before == after
     assert b"prop-provenance.npy" not in (tmp_path / "pool.INDEX").read_bytes()
     assert b"prop-pair.npy" not in (tmp_path / "pool.INDEX").read_bytes()
+
+
+def test_provenance_download_merges_into_an_existing_result(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "DATA").mkdir()
+    action = tmp_path / "frag1-filter"
+    action.mkdir()
+    (action / "alaric.yaml").write_text("action: filter\ninput: frag1-input\nmask_input: mask\n")
+    # Only the project/action/sigil lifecycle matters here; do not resolve the action graph.
+    sigil = "test-sigil"
+    (action / "sigil.txt").write_text(sigil + "\n")
+    result = tmp_path / "CACHE" / "results" / sigil
+    result.mkdir(parents=True)
+    (result / "poses-1.arc").write_bytes(b"local poses")
+    checksum = tmp_path / "CACHE" / "checksum" / sigil
+    checksum.parent.mkdir(parents=True)
+    checksum.write_text("checksum\n")
+    monkeypatch.setenv("ALARIC_REMOTE_HOST", "remote")
+    monkeypatch.setenv("ALARIC_REMOTE_RESULT_DIR", "/remote/results")
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[0] == "rsync" and command[-2].startswith("remote:"):
+            staging = Path(command[-1].rstrip("/"))
+            staging.mkdir(parents=True)
+            (staging / "provenance.npy").write_bytes(b"remote provenance")
+        elif command[0] == "rsync":
+            (result / "provenance.npy").write_bytes(
+                (Path(command[-2].rstrip("/")) / "provenance.npy").read_bytes()
+            )
+
+        class Completed:
+            returncode = 0
+
+        return Completed()
+
+    monkeypatch.setattr(result_module.subprocess, "run", fake_run)
+    result_module._download(action, provenance_only=True)
+
+    assert (result / "poses-1.arc").read_bytes() == b"local poses"
+    assert (result / "provenance.npy").read_bytes() == b"remote provenance"
+    assert len([call for call in calls if call[0] == "rsync"]) == 2

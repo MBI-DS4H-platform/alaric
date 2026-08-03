@@ -96,7 +96,8 @@ def _download(action_dir: str | Path, *, provenance_only: bool = False) -> None:
     action = project.get_action_dir(action_dir)
     sigil = _sigil(action.path)
     result = _local_result(project, sigil)
-    if result.exists():
+    merge_into_existing = provenance_only and result.is_dir()
+    if result.exists() and not merge_into_existing:
         raise ResultError(f"local result already exists: {result}")
     host = os.environ.get("ALARIC_REMOTE_HOST")
     if not host:
@@ -126,7 +127,17 @@ def _download(action_dir: str | Path, *, provenance_only: bool = False) -> None:
         )
     command.extend([f"{host}:{_remote_base(sigil)}/", str(tmp) + "/"])
     subprocess.run(command, check=True)
-    tmp.rename(result)
+    if merge_into_existing:
+        # A representative's poses can already be materialized locally while its
+        # upstream lineage exists only remotely.  The selective staging directory
+        # contains no poses, so merging it can only add/refresh provenance arrays.
+        subprocess.run(
+            ["rsync", "-a", "--partial", str(tmp) + "/", str(result) + "/"],
+            check=True,
+        )
+        shutil.rmtree(tmp)
+    else:
+        tmp.rename(result)
     check(action_dir)
     link = action.path / "results"
     link.unlink(missing_ok=True)
