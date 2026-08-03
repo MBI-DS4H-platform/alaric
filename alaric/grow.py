@@ -80,6 +80,9 @@ class GrowthLayout:
 
 
 RestrictIndex = dict[int, dict[int, np.ndarray]]
+# Poses per read step when scanning a restrict pose dir. Only sizes the transient
+# per-chunk arrays; the filesystem request size is poses.ARC_STREAM_READ_SIZE.
+RESTRICT_CHUNK_POSES = 2_000_000
 
 
 def _existing_dir(path: str) -> str:
@@ -434,43 +437,99 @@ def _pack_translations(translations: np.ndarray) -> np.ndarray:
     ) | shifted[:, 2]
 
 
-def _load_restrict_index(restrict_poses: str | Path) -> RestrictIndex:
-    reader = PoseReader(restrict_poses)
-    parts: dict[int, dict[int, list[np.ndarray]]] = {}
-    total = 0
-    for chunk in reader.iter_chunks():
-        if len(chunk) == 0:
-            continue
-        total += len(chunk)
-        packed = _pack_translations(chunk.translations_grid)
-        order = np.lexsort((chunk.rotamers, chunk.conformers))
-        conformers = chunk.conformers[order]
-        rotamers = chunk.rotamers[order]
-        packed = packed[order]
-        run_starts = np.r_[
-            0,
-            np.flatnonzero(
-                (conformers[1:] != conformers[:-1])
-                | (rotamers[1:] != rotamers[:-1])
-            )
-            + 1,
-        ]
-        run_stops = np.r_[run_starts[1:], len(order)]
-        for start, stop in zip(run_starts, run_stops):
-            conformer = int(conformers[start])
-            rotamer = int(rotamers[start])
-            parts.setdefault(conformer, {}).setdefault(rotamer, []).append(
-                packed[start:stop].copy()
-            )
+def _restrict_stage(message: str, *, progress: bool) -> None:
+    """Name a phase that has no granularity to report, so a long pause is explainable."""
+    if progress:
+        print(f"      restrict: {message}", file=sys.stderr, flush=True)
+
+
+def _load_restrict_index(
+    restrict_poses: str | Path,
+    *,
+    chunk_poses: int = RESTRICT_CHUNK_POSES,
+    progress: bool = True,
+) -> RestrictIndex:
+    """Map every (conformer, rotamer) in a pose dir to its sorted, unique translations.
+
+    Grouped once, globally, rather than per read chunk. Grouping per chunk costs one
+    Python iteration (plus a small allocation) per *distinct pair per chunk*, which for
+    a pool with many distinct pairs is one per pose -- 174M of them for a 177-megapose
+    restrict pool, dwarfing the time spent actually reading it. Here the pass over poses
+    is pure NumPy and the Python loop runs once per distinct pair.
+
+    Peak memory is ~28 bytes/pose: the two key columns, the sort permutation, and the
+    reordering copy. The per-group arrays are views into the sorted translations, so the
+    index itself adds no per-pose cost.
+    """
+    reader = PoseReader(restrict_poses, rows_per_chunk=int(chunk_poses))
+    total = reader.selected_poses
     if total == 0:
         raise ValueError("restrict pose directory is empty")
 
+    # (conformer, rotamer) as one sortable key; translations packed into one uint64.
+    keys = np.empty(total, dtype=np.uint32)
+    packed = np.empty(total, dtype=np.uint64)
+    cursor = 0
+    with tqdm(
+        total=total,
+        desc="      restrict: reading",
+        unit="pose",
+        unit_scale=True,
+        mininterval=2.0,
+        disable=not progress,
+    ) as bar:
+        for chunk in reader.iter_chunks():
+            n = len(chunk)
+            if n == 0:
+                continue
+            stop = cursor + n
+            keys[cursor:stop] = (
+                chunk.conformers.astype(np.uint32) << np.uint32(16)
+            ) | chunk.rotamers.astype(np.uint32)
+            packed[cursor:stop] = _pack_translations(chunk.translations_grid)
+            cursor = stop
+            bar.update(n)
+    if cursor != total:
+        raise ValueError(
+            f"restrict pose dir yielded {cursor} poses, expected {total}"
+        )
+
+    # From here on it is a handful of whole-array NumPy passes. The sort is one call and
+    # is the longest of them, so it gets its own line rather than a bar it cannot fill.
+    _restrict_stage(f"sorting {total:,} poses", progress=progress)
+    order = np.lexsort((packed, keys))
+    keys = keys[order]
+    packed = packed[order]
+    del order
+
+    # Sorting by (key, translation) puts duplicates adjacent, so the per-group
+    # np.unique of the old grouping becomes one vectorized pass.
+    if total > 1:
+        keep = np.empty(total, dtype=bool)
+        keep[0] = True
+        np.logical_or(keys[1:] != keys[:-1], packed[1:] != packed[:-1], out=keep[1:])
+        if not keep.all():
+            keys = keys[keep]
+            packed = packed[keep]
+        del keep
+
+    starts = np.r_[0, np.flatnonzero(keys[1:] != keys[:-1]) + 1]
+    stops = np.r_[starts[1:], len(keys)]
+
     index: RestrictIndex = {}
-    for conformer, by_rotamer in parts.items():
-        index[conformer] = {}
-        for rotamer, arrays in by_rotamer.items():
-            values = arrays[0] if len(arrays) == 1 else np.concatenate(arrays)
-            index[conformer][rotamer] = np.unique(values)
+    with tqdm(
+        total=len(starts),
+        desc="      restrict: grouping",
+        unit="pair",
+        unit_scale=True,
+        mininterval=2.0,
+        disable=not progress,
+    ) as bar:
+        for key, start, stop in zip(
+            keys[starts].tolist(), starts.tolist(), stops.tolist()
+        ):
+            index.setdefault(key >> 16, {})[key & 0xFFFF] = packed[start:stop]
+            bar.update(1)
     return index
 
 
