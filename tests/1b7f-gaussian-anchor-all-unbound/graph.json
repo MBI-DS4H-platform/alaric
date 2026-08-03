@@ -1,88 +1,48 @@
 {
-  "project": "/home/sjoerd/alaric/tests/1b7f-gaussian-anchor-all-unbound",
+  "project": "/home/agent/alaric/tests/1b7f-gaussian-anchor-all-unbound",
   "pools": {
     "frag10-anchor": {
       "fragment": 10,
       "kind": "anchor",
       "parents": [],
-      "sigil": "cb5e872a47-null",
-      "result_dir": "CACHE/results/cb5e872a47-null",
+      "sigil": null,
+      "result_dir": null,
       "materialized": false
     },
-    "frag10-fwd": {
-      "fragment": 10,
-      "kind": "grow",
-      "parents": [
-        {
-          "pool": "frag9-fwd-filter",
-          "edge": "grow",
-          "array": "provenance.npy",
-          "orientation": "row=this,value=parent",
-          "cross_fragment": true
-        }
-      ],
-      "sigil": "899cd24cc2-268ee644c6",
-      "result_dir": "CACHE/results/899cd24cc2-268ee644c6",
-      "materialized": true,
-      "direction": "forward"
-    },
-    "frag10-fwd-filter": {
+    "frag10-anchor-filter": {
       "fragment": 10,
       "kind": "filter",
       "parents": [
         {
-          "pool": "frag10-fwd",
+          "pool": "frag10-anchor",
           "edge": "filter",
           "array": "provenance.npy",
           "orientation": "row=this,value=parent",
           "cross_fragment": false
         }
       ],
-      "sigil": "8077d3ba13-668b3882d8",
-      "result_dir": "CACHE/results/8077d3ba13-668b3882d8",
+      "sigil": null,
+      "result_dir": null,
       "materialized": false,
       "constraint": {
         "threshold": -14.06,
-        "score_input": "frag10-fwd-score"
+        "score_input": "frag10-anchor-score"
       }
-    },
-    "frag10-merged": {
-      "fragment": 10,
-      "kind": "merge",
-      "parents": [
-        {
-          "pool": "frag10-fwd-filter",
-          "edge": "merge",
-          "array": "map-1.npy",
-          "orientation": "cols=(parent,this)",
-          "cross_fragment": false
-        },
-        {
-          "pool": "frag10-anchor",
-          "edge": "merge",
-          "array": "map-2.npy",
-          "orientation": "cols=(parent,this)",
-          "cross_fragment": false
-        }
-      ],
-      "sigil": "5f096c3636-1d8b833866",
-      "result_dir": "CACHE/results/5f096c3636-1d8b833866",
-      "materialized": false
     },
     "frag4-anchor-bwd": {
       "fragment": 4,
       "kind": "anchor",
       "parents": [],
-      "sigil": "ce3c0718a0-null",
-      "result_dir": "CACHE/results/ce3c0718a0-null",
+      "sigil": null,
+      "result_dir": null,
       "materialized": false
     },
     "frag4-anchor-fwd": {
       "fragment": 4,
       "kind": "anchor",
       "parents": [],
-      "sigil": "23460f1d9a-null",
-      "result_dir": "CACHE/results/23460f1d9a-null",
+      "sigil": null,
+      "result_dir": null,
       "materialized": false
     },
     "frag4-merged": {
@@ -104,8 +64,8 @@
           "cross_fragment": false
         }
       ],
-      "sigil": "5f096c3636-4d6e27b039",
-      "result_dir": "CACHE/results/5f096c3636-4d6e27b039",
+      "sigil": null,
+      "result_dir": null,
       "materialized": false
     },
     "frag4-merged-filter": {
@@ -120,9 +80,9 @@
           "cross_fragment": false
         }
       ],
-      "sigil": "a883f6bb51-83f4f899c0",
-      "result_dir": "CACHE/results/a883f6bb51-83f4f899c0",
-      "materialized": true,
+      "sigil": null,
+      "result_dir": null,
+      "materialized": false,
       "constraint": {
         "threshold": -14.58,
         "score_input": "frag4-merged-score"
@@ -132,16 +92,16 @@
       "fragment": 5,
       "kind": "anchor",
       "parents": [],
-      "sigil": "bea3d83f04-null",
-      "result_dir": "CACHE/results/bea3d83f04-null",
+      "sigil": null,
+      "result_dir": null,
       "materialized": false
     },
     "frag5-anchor-fwd": {
       "fragment": 5,
       "kind": "anchor",
       "parents": [],
-      "sigil": "873a187bf2-null",
-      "result_dir": "CACHE/results/873a187bf2-null",
+      "sigil": null,
+      "result_dir": null,
       "materialized": false
     },
     "frag5-fwd-restrict": {
@@ -163,9 +123,9 @@
           "cross_fragment": false
         }
       ],
-      "sigil": "229d055bb5-2aeb6e632a",
-      "result_dir": "CACHE/results/229d055bb5-2aeb6e632a",
-      "materialized": true,
+      "sigil": null,
+      "result_dir": null,
+      "materialized": false,
       "direction": "forward"
     },
     "frag5-merged": {
@@ -187,8 +147,8 @@
           "cross_fragment": false
         }
       ],
-      "sigil": "5f096c3636-a3ab35eb4b",
-      "result_dir": "CACHE/results/5f096c3636-a3ab35eb4b",
+      "sigil": null,
+      "result_dir": null,
       "materialized": false
     },
     "frag5-merged-filter": {
@@ -203,9 +163,9 @@
           "cross_fragment": false
         }
       ],
-      "sigil": "cadd4cbb55-5b95237820",
-      "result_dir": "CACHE/results/cadd4cbb55-5b95237820",
-      "materialized": true,
+      "sigil": null,
+      "result_dir": null,
+      "materialized": false,
       "constraint": {
         "threshold": -21.44,
         "score_input": "frag5-merged-score-all"
@@ -215,8 +175,8 @@
       "fragment": 6,
       "kind": "anchor",
       "parents": [],
-      "sigil": "7d7c1a1589-null",
-      "result_dir": "CACHE/results/7d7c1a1589-null",
+      "sigil": null,
+      "result_dir": null,
       "materialized": false
     },
     "frag6-fwd": {
@@ -231,9 +191,9 @@
           "cross_fragment": true
         }
       ],
-      "sigil": "01d38aa187-3443e6c0f1",
-      "result_dir": "CACHE/results/01d38aa187-3443e6c0f1",
-      "materialized": true,
+      "sigil": null,
+      "result_dir": null,
+      "materialized": false,
       "direction": "forward"
     },
     "frag6-merged": {
@@ -255,8 +215,8 @@
           "cross_fragment": false
         }
       ],
-      "sigil": "5f096c3636-7624bcc713",
-      "result_dir": "CACHE/results/5f096c3636-7624bcc713",
+      "sigil": null,
+      "result_dir": null,
       "materialized": false
     },
     "frag6-merged-filter": {
@@ -271,9 +231,9 @@
           "cross_fragment": false
         }
       ],
-      "sigil": "70e52b020c-3925f33062",
-      "result_dir": "CACHE/results/70e52b020c-3925f33062",
-      "materialized": true,
+      "sigil": null,
+      "result_dir": null,
+      "materialized": false,
       "constraint": {
         "threshold": 9.26,
         "score_input": "frag6-merged-score"
@@ -291,8 +251,8 @@
           "cross_fragment": true
         }
       ],
-      "sigil": "4c00843b7f-cec9e9539f",
-      "result_dir": "CACHE/results/4c00843b7f-cec9e9539f",
+      "sigil": null,
+      "result_dir": null,
       "materialized": false,
       "direction": "forward"
     },
@@ -308,9 +268,9 @@
           "cross_fragment": false
         }
       ],
-      "sigil": "036d98d218-78199b0f02",
-      "result_dir": "CACHE/results/036d98d218-78199b0f02",
-      "materialized": true,
+      "sigil": null,
+      "result_dir": null,
+      "materialized": false,
       "constraint": {
         "threshold": -14.56,
         "score_input": "frag7-fwd-score"
@@ -335,8 +295,8 @@
           "cross_fragment": false
         }
       ],
-      "sigil": "5f096c3636-d1c4f459bf",
-      "result_dir": "CACHE/results/5f096c3636-d1c4f459bf",
+      "sigil": null,
+      "result_dir": null,
       "materialized": false
     },
     "frag8-fwd": {
@@ -351,8 +311,8 @@
           "cross_fragment": true
         }
       ],
-      "sigil": "754d7304ff-97c7081e75",
-      "result_dir": "CACHE/results/754d7304ff-97c7081e75",
+      "sigil": null,
+      "result_dir": null,
       "materialized": false,
       "direction": "forward"
     },
@@ -368,13 +328,37 @@
           "cross_fragment": false
         }
       ],
-      "sigil": "5aba0c4a56-8b68bc5563",
-      "result_dir": "CACHE/results/5aba0c4a56-8b68bc5563",
-      "materialized": true,
+      "sigil": null,
+      "result_dir": null,
+      "materialized": false,
       "constraint": {
         "threshold": -21.39,
         "score_input": "frag8-fwd-score"
       }
+    },
+    "frag9-bwd-restrict": {
+      "fragment": 9,
+      "kind": "grow",
+      "parents": [
+        {
+          "pool": "frag10-anchor-filter",
+          "edge": "grow",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": true
+        },
+        {
+          "pool": "frag9-fwd-filter-uniq",
+          "edge": "restrict",
+          "array": null,
+          "orientation": null,
+          "cross_fragment": false
+        }
+      ],
+      "sigil": null,
+      "result_dir": null,
+      "materialized": false,
+      "direction": "backward"
     },
     "frag9-fwd": {
       "fragment": 9,
@@ -388,9 +372,9 @@
           "cross_fragment": true
         }
       ],
-      "sigil": "db55f5fb2d-9b70f8f059",
-      "result_dir": "CACHE/results/db55f5fb2d-9b70f8f059",
-      "materialized": true,
+      "sigil": null,
+      "result_dir": null,
+      "materialized": false,
       "direction": "forward"
     },
     "frag9-fwd-filter": {
@@ -405,13 +389,59 @@
           "cross_fragment": false
         }
       ],
-      "sigil": "a0fd97fae0-637a680fa1",
-      "result_dir": "CACHE/results/a0fd97fae0-637a680fa1",
-      "materialized": true,
+      "sigil": null,
+      "result_dir": null,
+      "materialized": false,
       "constraint": {
         "threshold": -15.25,
         "score_input": "frag9-fwd-score"
       }
+    },
+    "frag9-fwd-filter-uniq": {
+      "fragment": 9,
+      "kind": "dedup",
+      "parents": [
+        {
+          "pool": "frag9-fwd-filter",
+          "edge": "dedup",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        },
+        {
+          "pool": "frag9-fwd-filter",
+          "edge": "dedup",
+          "array": "map-2.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": null,
+      "result_dir": null,
+      "materialized": false
+    },
+    "frag9-reconnect": {
+      "fragment": 9,
+      "kind": "merge",
+      "parents": [
+        {
+          "pool": "frag9-fwd-filter-uniq",
+          "edge": "merge",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        },
+        {
+          "pool": "frag9-bwd-restrict",
+          "edge": "merge",
+          "array": "map-2.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": null,
+      "result_dir": null,
+      "materialized": false
     }
   },
   "representatives": {
@@ -420,43 +450,15 @@
     "6": "frag6-merged-filter",
     "7": "frag7-fwd-filter",
     "8": "frag8-fwd-filter",
-    "9": "frag9-fwd-filter",
-    "10": "frag10-merged"
+    "9": "frag9-reconnect",
+    "10": "frag10-anchor-filter"
   },
   "skipped_fragments": {},
-  "selected": [],
+  "selected": [
+    "frag9-reconnect"
+  ],
   "dropped_pools": {},
   "links": [
-    {
-      "grow_pool": "frag10-fwd",
-      "direction": "forward",
-      "source_fragment": 9,
-      "source_rep": "frag9-fwd-filter",
-      "target_fragment": 10,
-      "target_rep": "frag10-merged",
-      "join_pool": "frag9-fwd-filter",
-      "target_to_join": [
-        {
-          "pool": "frag10-merged",
-          "array": "map-1.npy",
-          "orientation": "cols=(parent,this)",
-          "to": "frag10-fwd-filter"
-        },
-        {
-          "pool": "frag10-fwd-filter",
-          "array": "provenance.npy",
-          "orientation": "row=this,value=parent",
-          "to": "frag10-fwd"
-        },
-        {
-          "pool": "frag10-fwd",
-          "array": "provenance.npy",
-          "orientation": "row=this,value=parent",
-          "to": "frag9-fwd-filter"
-        }
-      ],
-      "source_to_join": []
-    },
     {
       "grow_pool": "frag5-fwd-restrict",
       "direction": "forward",
@@ -560,14 +562,50 @@
       "source_to_join": []
     },
     {
+      "grow_pool": "frag9-bwd-restrict",
+      "direction": "backward",
+      "source_fragment": 10,
+      "source_rep": "frag10-anchor-filter",
+      "target_fragment": 9,
+      "target_rep": "frag9-reconnect",
+      "join_pool": "frag10-anchor-filter",
+      "target_to_join": [
+        {
+          "pool": "frag9-reconnect",
+          "array": "map-2.npy",
+          "orientation": "cols=(parent,this)",
+          "to": "frag9-bwd-restrict"
+        },
+        {
+          "pool": "frag9-bwd-restrict",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag10-anchor-filter"
+        }
+      ],
+      "source_to_join": []
+    },
+    {
       "grow_pool": "frag9-fwd",
       "direction": "forward",
       "source_fragment": 8,
       "source_rep": "frag8-fwd-filter",
       "target_fragment": 9,
-      "target_rep": "frag9-fwd-filter",
+      "target_rep": "frag9-reconnect",
       "join_pool": "frag8-fwd-filter",
       "target_to_join": [
+        {
+          "pool": "frag9-reconnect",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "to": "frag9-fwd-filter-uniq"
+        },
+        {
+          "pool": "frag9-fwd-filter-uniq",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "to": "frag9-fwd-filter"
+        },
         {
           "pool": "frag9-fwd-filter",
           "array": "provenance.npy",
