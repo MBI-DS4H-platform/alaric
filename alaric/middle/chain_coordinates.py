@@ -146,6 +146,51 @@ def read_chain_table(
     return table, start
 
 
+def iter_chain_table_chunks(
+    chain_dir: Path, metadata: dict, *, rows_per_chunk: int
+):
+    """Yield ``chains.txt`` rows in bounded batches, preserving table order."""
+    if rows_per_chunk <= 0:
+        raise ValueError("rows_per_chunk must be positive")
+    path = chain_dir / metadata.get("chains_file", CHAINS_FILE)
+    if not path.is_file() and not str(path).endswith(".zst"):
+        compressed = path.with_name(path.name + ".zst")
+        if compressed.is_file():
+            path = compressed
+    if not path.is_file():
+        raise ChainCoordinatesError(f"{path} not found")
+    pools = [c["pool"] for c in metadata["columns"]]
+    expected_rows = int(metadata.get("nchains", 0))
+    yielded = 0
+    with _open_chain_table(path) as handle:
+        header = handle.readline().rstrip("\n").split("\t")
+        if header != pools:
+            raise ChainCoordinatesError(
+                f"{path} header {header} does not match {CHAINS_METADATA_FILE} pools "
+                f"{pools}: the two files are out of sync"
+            )
+        while yielded < expected_rows:
+            rows = np.loadtxt(
+                handle,
+                dtype=np.int64,
+                delimiter="\t",
+                max_rows=min(rows_per_chunk, expected_rows - yielded),
+                ndmin=2,
+            )
+            if rows.shape[1] != len(pools):
+                raise ChainCoordinatesError(
+                    f"{path}: expected {len(pools)} columns, got {rows.shape[1]}"
+                )
+            yielded += len(rows)
+            yield rows
+        # Reject a table that disagrees with its metadata even if the extra rows
+        # were never needed by the caller.
+        if handle.readline():
+            raise ChainCoordinatesError(
+                f"{path}: contains more rows than chains.json records ({expected_rows})"
+            )
+
+
 @contextmanager
 def _open_chain_table(path: Path):
     """Open a plain or zstd-compressed chain table as UTF-8 text."""

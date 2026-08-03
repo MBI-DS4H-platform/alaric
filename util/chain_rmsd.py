@@ -18,6 +18,7 @@ import argparse
 from dataclasses import dataclass
 from pathlib import Path
 import sys
+import tempfile
 
 import numpy as np
 
@@ -43,6 +44,7 @@ from rmsd import (  # noqa: E402
 from alaric.middle.chain_coordinates import (  # noqa: E402
     ChainCoordinatesError,
     chain_coordinates as materialize_chain_coordinates,
+    iter_chain_table_chunks,
     load_metadata,
     read_chain_table,
 )
@@ -51,6 +53,7 @@ OUTPUT_FILE = "chain_rmsd.txt"
 POOL_OUTPUT_FILE = "rmsd.txt"
 MAX_PAIRWISE_CHAINS = 50_000
 PAIRWISE_BLOCK_SIZE = 512
+CHAIN_TABLE_CHUNK_SIZE = 100_000
 
 
 class ChainRmsdError(RuntimeError):
@@ -144,6 +147,130 @@ def write_pool_rmsd(pose_dir: Path, values: np.ndarray) -> Path:
     return output
 
 
+def _save_pool_vectors(
+    scratch_dir: Path, index: int, full: np.ndarray, first: np.ndarray, second: np.ndarray
+) -> tuple[Path, Path, Path]:
+    """Spill one pool's vectors for random chain-table lookups in phase two."""
+    paths = tuple(
+        scratch_dir / f"pool-{index}-{name}.npy" for name in ("full", "first", "second")
+    )
+    for path, values in zip(paths, (full, first, second)):
+        np.save(path, values, allow_pickle=False)
+    return paths
+
+
+def _check_chain_ids(rows: np.ndarray, columns: list[Column]) -> None:
+    for j, column in enumerate(columns):
+        ids = rows[:, j]
+        if int(ids.min()) < 1 or int(ids.max()) > column.nposes:
+            raise ChainRmsdError(
+                f"{column.pool}: chain pose index out of range 1...{column.nposes} "
+                f"(got {int(ids.min())}...{int(ids.max())})"
+            )
+
+
+def write_chain_rmsds(
+    chain_dir: Path,
+    output_path: Path,
+    *,
+    chunksize: int = DEFAULT_POSE_CHUNK_SIZE,
+    chain_rows_per_chunk: int = CHAIN_TABLE_CHUNK_SIZE,
+    verify_checksums: bool = False,
+) -> int:
+    """Calculate pool RMSDs and stream ``chain_rmsd.txt`` in chain-table order.
+
+    Full, first-nucleotide, and second-nucleotide RMSDs are spilled one pool at
+    a time. The chain pass then keeps only its output chunk, a weighted
+    per-chain nucleotide-squared-RMSD vector, and the current nucleotide vector.
+    """
+    chain_dir = Path(chain_dir)
+    output_path = Path(output_path)
+    try:
+        metadata = load_metadata(chain_dir)
+    except ChainCoordinatesError as exc:
+        raise ChainRmsdError(str(exc)) from None
+    nchains = int(metadata.get("nchains", 0))
+    if nchains <= 0:
+        raise ChainRmsdError("chain table contains no chains")
+    columns = _columns(chain_dir, metadata)
+    reference_path, pdb_code = _data_inputs(chain_dir)
+
+    with tempfile.TemporaryDirectory(prefix="alaric-chain-rmsd.") as scratch_name:
+        scratch_dir = Path(scratch_name)
+        vector_paths: list[tuple[Path, Path, Path]] = []
+        for j, column in enumerate(columns):
+            sequence = _reference_sequence(reference_path, column.fragment)
+            if column.sequence and column.sequence != sequence:
+                raise ChainRmsdError(
+                    f"{column.pool}: metadata sequence {column.sequence!r} does not "
+                    f"match reference sequence {sequence!r} for frag{column.fragment}"
+                )
+            library, factory = _load_library(
+                sequence,
+                verify_checksums=verify_checksums,
+                excluded_pdb_codes={pdb_code},
+            )
+            try:
+                _sequence, reference_coordinates = _load_reference_coordinates(
+                    reference_path, column.fragment, sequence, library.template
+                )
+                full, first, second = _rmsd_vectors(
+                    column.pose_dir, reference_coordinates, library, chunksize=chunksize
+                )
+            finally:
+                factory.unload_rotaconformers()
+            write_pool_rmsd(column.pose_dir, full)
+            vector_paths.append(_save_pool_vectors(scratch_dir, j, full, first, second))
+            del full, first, second
+
+        vectors = [
+            tuple(np.load(path, mmap_mode="r", allow_pickle=False) for path in paths)
+            for paths in vector_paths
+        ]
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        written = 0
+        with output_path.open("w") as handle:
+            handle.write("\t".join(["chain_rmsd"] + [c.pool for c in columns]) + "\n")
+            try:
+                rows_iter = iter_chain_table_chunks(
+                    chain_dir, metadata, rows_per_chunk=chain_rows_per_chunk
+                )
+                for rows in rows_iter:
+                    _check_chain_ids(rows, columns)
+                    values = np.empty((len(rows), len(columns) + 1), dtype=np.float32)
+                    weighted_nucleotide_sd: np.ndarray | None = None
+                    current_nucleotide: np.ndarray | None = None
+                    for j, (full, first, second) in enumerate(vectors):
+                        ids = rows[:, j] - 1
+                        values[:, j + 1] = full[ids]
+                        if weighted_nucleotide_sd is None:
+                            weighted_nucleotide_sd = np.square(first[ids])
+                        else:
+                            assert current_nucleotide is not None
+                            np.add(current_nucleotide, first[ids], out=current_nucleotide)
+                            current_nucleotide *= 0.5
+                            np.square(current_nucleotide, out=current_nucleotide)
+                            weighted_nucleotide_sd += current_nucleotide
+                        current_nucleotide = second[ids]
+                    assert weighted_nucleotide_sd is not None and current_nucleotide is not None
+                    np.square(current_nucleotide, out=current_nucleotide)
+                    weighted_nucleotide_sd += current_nucleotide
+                    np.divide(
+                        weighted_nucleotide_sd,
+                        len(columns) + 1,
+                        out=weighted_nucleotide_sd,
+                    )
+                    np.sqrt(weighted_nucleotide_sd, out=weighted_nucleotide_sd)
+                    values[:, 0] = weighted_nucleotide_sd
+                    np.savetxt(handle, values, delimiter="\t", fmt=f"%.{RMSD_DECIMALS}f")
+                    written += len(rows)
+            except ChainCoordinatesError as exc:
+                raise ChainRmsdError(str(exc)) from None
+    if written != nchains:
+        raise ChainRmsdError(f"expected {nchains} chains, wrote {written}")
+    return written
+
+
 def _excluded_pdb_code(chain_dir: Path) -> str:
     data_dir = chain_dir.absolute().parent / "DATA"
     if not data_dir.is_dir():
@@ -205,11 +332,13 @@ def calculate_chain_rmsds(
     chunksize: int = DEFAULT_POSE_CHUNK_SIZE,
     verify_checksums: bool = False,
 ) -> tuple[list[str], np.ndarray]:
-    """Return output headers and the per-chain RMSD table.
+    """Return output headers and the complete per-chain RMSD table.
 
     Each non-leading output column is the full dinucleotide RMSD for the pose
     selected by that chain.  The first column is the approximation described in
-    this module's docstring.
+    this module's docstring. This compatibility helper necessarily materializes
+    every output row; the command-line path uses :func:`write_chain_rmsds` to
+    stream large chain tables instead.
     """
     chain_dir = Path(chain_dir)
     try:
@@ -416,6 +545,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Poses to process per RMSD chunk (default: {DEFAULT_POSE_CHUNK_SIZE}).",
     )
     parser.add_argument(
+        "--chain-chunksize",
+        type=_positive_int,
+        default=CHAIN_TABLE_CHUNK_SIZE,
+        help=(
+            "Chains to assemble and write at once "
+            f"(default: {CHAIN_TABLE_CHUNK_SIZE})."
+        ),
+    )
+    parser.add_argument(
         "--verify-checksums",
         action="store_true",
         help="Enable fraglib checksum verification when loading the library config.",
@@ -441,15 +579,16 @@ def main(argv: list[str] | None = None) -> int:
 
     output = args.output or args.chain_dir / OUTPUT_FILE
     try:
-        headers, values = calculate_chain_rmsds(
+        written = write_chain_rmsds(
             args.chain_dir,
+            output,
             chunksize=args.chunksize,
+            chain_rows_per_chunk=args.chain_chunksize,
             verify_checksums=args.verify_checksums,
         )
     except (ChainRmsdError, OSError, ValueError) as exc:
         raise SystemExit(f"error: {exc}") from None
-    write_table(output, headers, values)
-    print(f"wrote {len(values)} chains to {output}")
+    print(f"wrote {written} chains to {output}")
     return 0
 
 

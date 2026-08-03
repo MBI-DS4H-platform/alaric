@@ -133,6 +133,32 @@ def test_chain_table_can_be_read_from_a_zstd_sibling(tmp_path, monkeypatch, chai
     np.testing.assert_allclose(values[:, 0], [np.sqrt(63.5), 7.25], rtol=0, atol=1e-6)
 
 
+def test_streaming_chain_output_uses_bounded_chain_chunks(
+    tmp_path, monkeypatch, chain_rmsd
+):
+    chain_dir = _write_chain_dir(tmp_path, table=[[2, 1, 2], [1, 1, 1]])
+    plain = chain_dir / "chains.txt"
+    import zstandard as zstd
+
+    plain.with_name("chains.txt.zst").write_bytes(
+        zstd.ZstdCompressor().compress(plain.read_bytes())
+    )
+    plain.unlink()
+    _patch_calculation_dependencies(monkeypatch, chain_rmsd)
+    output = tmp_path / "chain_rmsd.txt"
+
+    written = chain_rmsd.write_chain_rmsds(
+        chain_dir, output, chunksize=17, chain_rows_per_chunk=1
+    )
+
+    assert written == 2
+    assert output.read_text() == (
+        "chain_rmsd\tpool2\tpool3\tpool4\n"
+        "7.969\t20.000\t30.000\t42.000\n"
+        "7.250\t10.000\t30.000\t40.000\n"
+    )
+
+
 def test_sibling_data_inputs_are_required(tmp_path, chain_rmsd):
     chain_dir = tmp_path / "chains"
     chain_dir.mkdir()
