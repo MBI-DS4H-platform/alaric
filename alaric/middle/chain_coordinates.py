@@ -21,6 +21,7 @@ import argparse
 import json
 from contextlib import contextmanager
 from dataclasses import dataclass
+import io
 from pathlib import Path
 import sys
 
@@ -112,10 +113,14 @@ def read_chain_table(
 ) -> tuple[np.ndarray, int]:
     """Read the selected chain rows as 1-based pose indices, and where they start."""
     path = chain_dir / metadata.get("chains_file", CHAINS_FILE)
+    if not path.is_file() and not str(path).endswith(".zst"):
+        compressed = path.with_name(path.name + ".zst")
+        if compressed.is_file():
+            path = compressed
     if not path.is_file():
         raise ChainCoordinatesError(f"{path} not found")
     pools = [c["pool"] for c in metadata["columns"]]
-    with path.open() as handle:
+    with _open_chain_table(path) as handle:
         header = handle.readline().rstrip("\n").split("\t")
     if header != pools:
         raise ChainCoordinatesError(
@@ -124,20 +129,40 @@ def read_chain_table(
         )
 
     start, stop = _chain_range(chain_range, int(metadata["nchains"]))
-    table = np.loadtxt(
-        path,
-        dtype=np.int64,
-        delimiter="\t",
-        skiprows=1 + start,
-        max_rows=stop - start,
-        ndmin=2,
-    )
+    with _open_chain_table(path) as handle:
+        table = np.loadtxt(
+            handle,
+            dtype=np.int64,
+            delimiter="\t",
+            skiprows=1 + start,
+            max_rows=stop - start,
+            ndmin=2,
+        )
     if table.shape != (stop - start, len(pools)):
         raise ChainCoordinatesError(
             f"{path}: expected {stop - start} rows of {len(pools)} columns, "
             f"got {table.shape[0]} rows of {table.shape[1]}"
         )
     return table, start
+
+
+@contextmanager
+def _open_chain_table(path: Path):
+    """Open a plain or zstd-compressed chain table as UTF-8 text."""
+    if not str(path).endswith(".zst"):
+        with path.open() as handle:
+            yield handle
+        return
+    try:
+        import zstandard as zstd
+    except ImportError as exc:
+        raise ChainCoordinatesError(
+            f"zstandard is required to read compressed chain table {path}"
+        ) from exc
+    with path.open("rb") as compressed:
+        with zstd.ZstdDecompressor().stream_reader(compressed) as binary:
+            with io.TextIOWrapper(binary) as text:
+                yield text
 
 
 # -- sequence / exclude resolution ----------------------------------------

@@ -103,6 +103,9 @@ def test_chain_table_uses_pose_order_and_meaned_shared_nucleotides(
     expected_chain = [np.sqrt(63.5), 7.25]
     np.testing.assert_allclose(values[:, 0], expected_chain, rtol=0, atol=1e-6)
     np.testing.assert_allclose(values[:, 1:], [[20, 30, 42], [10, 30, 40]])
+    assert (chain_dir / "pool2" / "rmsd.txt").read_text() == "10.000\n20.000\n"
+    assert (chain_dir / "pool3" / "rmsd.txt").read_text() == "30.000\n31.000\n"
+    assert (chain_dir / "pool4" / "rmsd.txt").read_text() == "40.000\n42.000\n"
 
     output = tmp_path / "table.txt"
     chain_rmsd.write_table(output, headers, values)
@@ -111,6 +114,23 @@ def test_chain_table_uses_pose_order_and_meaned_shared_nucleotides(
         "7.969\t20.000\t30.000\t42.000\n"
         "7.250\t10.000\t30.000\t40.000\n"
     )
+
+
+def test_chain_table_can_be_read_from_a_zstd_sibling(tmp_path, monkeypatch, chain_rmsd):
+    chain_dir = _write_chain_dir(tmp_path, table=[[2, 1, 2], [1, 1, 1]])
+    plain = chain_dir / "chains.txt"
+    import zstandard as zstd
+
+    plain.with_name("chains.txt.zst").write_bytes(
+        zstd.ZstdCompressor().compress(plain.read_bytes())
+    )
+    plain.unlink()
+    _patch_calculation_dependencies(monkeypatch, chain_rmsd)
+
+    headers, values = chain_rmsd.calculate_chain_rmsds(chain_dir, chunksize=17)
+
+    assert headers == ["chain_rmsd", "pool2", "pool3", "pool4"]
+    np.testing.assert_allclose(values[:, 0], [np.sqrt(63.5), 7.25], rtol=0, atol=1e-6)
 
 
 def test_sibling_data_inputs_are_required(tmp_path, chain_rmsd):

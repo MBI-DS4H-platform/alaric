@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Calculate fragment and approximate chain RMSDs for an ``alaric-chain`` output.
+"""Calculate pose-pool, fragment, and approximate chain RMSDs.
 
-The per-fragment columns are ordinary dinucleotide RMSDs.  The leading column
-approximates the RMSD of ``alaric-chain-coordinates`` output without writing
-coordinates: each nucleotide shared by two fragments is assigned the arithmetic
-mean of the two corresponding mononucleotide RMSDs.
+For every pose pool, the ordinary dinucleotide RMSD is written to ``rmsd.txt``
+in pose order. The per-fragment columns of ``chain_rmsd.txt`` select those
+values through the chain table. Its leading column approximates the RMSD of
+``alaric-chain-coordinates`` output without writing coordinates: each nucleotide
+shared by two fragments is assigned the arithmetic mean of the two corresponding
+mononucleotide RMSDs.
 
 ``--pairwise`` instead materializes those averaged chain coordinates and writes
 the all-versus-all, same-frame RMSD matrix.
@@ -46,6 +48,7 @@ from alaric.middle.chain_coordinates import (  # noqa: E402
 )
 
 OUTPUT_FILE = "chain_rmsd.txt"
+POOL_OUTPUT_FILE = "rmsd.txt"
 MAX_PAIRWISE_CHAINS = 50_000
 PAIRWISE_BLOCK_SIZE = 512
 
@@ -132,6 +135,13 @@ def _rmsd_vectors(
     if offset != nposes:
         raise ChainRmsdError(f"{pose_dir}: expected {nposes} poses, read {offset}")
     return full, first, second
+
+
+def write_pool_rmsd(pose_dir: Path, values: np.ndarray) -> Path:
+    """Write one full-dinucleotide RMSD per pose in the pool's native order."""
+    output = pose_dir / POOL_OUTPUT_FILE
+    np.savetxt(output, values, fmt=f"%.{RMSD_DECIMALS}f")
+    return output
 
 
 def _excluded_pdb_code(chain_dir: Path) -> str:
@@ -223,8 +233,11 @@ def calculate_chain_rmsds(
 
     reference_path, pdb_code = _data_inputs(chain_dir)
     full_values = np.empty((len(table), len(columns)), dtype=np.float32)
-    nucleotide_values: list[np.ndarray] = []
-    prior_second: np.ndarray | None = None
+    # The pool-level first/second vectors fit in memory. At chain level, retain
+    # only the running sum of nucleotide squared RMSDs and the current
+    # nucleotide vector; do not retain one vector per nucleotide position.
+    weighted_nucleotide_sd: np.ndarray | None = None
+    current_nucleotide: np.ndarray | None = None
 
     for j, column in enumerate(columns):
         sequence = _reference_sequence(reference_path, column.fragment)
@@ -248,18 +261,28 @@ def calculate_chain_rmsds(
         finally:
             factory.unload_rotaconformers()
 
+        write_pool_rmsd(column.pose_dir, full)
         ids = table[:, j] - 1
         full_values[:, j] = full[ids]
-        first_values = first[ids]
-        second_values = second[ids]
-        if prior_second is None:
-            nucleotide_values.append(first_values)
+        if weighted_nucleotide_sd is None:
+            weighted_nucleotide_sd = np.square(first[ids])
         else:
-            nucleotide_values.append((prior_second + first_values) / 2.0)
-        prior_second = second_values
-    assert prior_second is not None
-    nucleotide_values.append(prior_second)
-    chain_rmsd = np.sqrt(np.mean(np.square(np.stack(nucleotide_values)), axis=0))
+            assert current_nucleotide is not None
+            np.add(current_nucleotide, first[ids], out=current_nucleotide)
+            current_nucleotide *= 0.5
+            # ``current_nucleotide`` is no longer needed after contributing this
+            # shared nucleotide, so square it in place instead of allocating a
+            # third per-chain vector.
+            np.square(current_nucleotide, out=current_nucleotide)
+            weighted_nucleotide_sd += current_nucleotide
+        current_nucleotide = second[ids]
+    assert weighted_nucleotide_sd is not None and current_nucleotide is not None
+    np.square(current_nucleotide, out=current_nucleotide)
+    weighted_nucleotide_sd += current_nucleotide
+    np.divide(weighted_nucleotide_sd, len(columns) + 1, out=weighted_nucleotide_sd)
+    del current_nucleotide
+    np.sqrt(weighted_nucleotide_sd, out=weighted_nucleotide_sd)
+    chain_rmsd = weighted_nucleotide_sd
     output = np.column_stack((chain_rmsd, full_values))
     return ["chain_rmsd"] + [column.pool for column in columns], output
 
