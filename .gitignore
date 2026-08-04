@@ -22,6 +22,11 @@ tests/1b7f/frag4-merged/
 tests/1b7f/frag4-identity/
 tests/1b7f/frag4-det-*/
 tests/*/CACHE
+tests/1b7f-single-conformer/*/*
+!tests/1b7f-single-conformer/DATA
+!tests/1b7f-single-conformer/DATA/*
+!tests/1b7f-single-conformer/frag*
+!tests/1b7f-single-conformer/frag*/alaric.yaml
 tests/1b7f-gaussian-anchor/*/*
 !tests/1b7f-gaussian-anchor/DATA
 !tests/1b7f-gaussian-anchor/DATA/*
