@@ -31,6 +31,17 @@ def _load_refe_best_fit_pairs_module():
     return module
 
 
+def _load_refe_best_fit_bases_module():
+    path = HERE / ".util" / "refe-best-fit-bases.py"
+    spec = importlib.util.spec_from_file_location("refe_best_fit_bases", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_refe_best_fit_pairs_fixture_matches_utility_output() -> None:
     module = _load_refe_best_fit_pairs_module()
     output = io.StringIO()
@@ -46,6 +57,25 @@ def test_refe_best_fit_pairs_fixture_matches_utility_output() -> None:
 
     assert status == 0
     expected = (HERE / "data" / "refe-best-fit-pairs.tsv").read_text()
+    assert output.getvalue() == expected
+
+
+def test_refe_best_fit_bases_fixture_matches_utility_output() -> None:
+    module = _load_refe_best_fit_bases_module()
+    output = io.StringIO()
+
+    with redirect_stdout(output):
+        status = module.main(
+            [
+                str(HERE / "data" / "refe-best-fit.tsv"),
+                str(HERE / "pdbs" / "rna.pdb"),
+                "--exclude",
+                "1b7f",
+            ]
+        )
+
+    assert status == 0
+    expected = (HERE / "data" / "refe-best-fit-bases.tsv").read_text()
     assert output.getvalue() == expected
 
 
