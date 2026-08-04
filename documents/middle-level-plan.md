@@ -279,6 +279,21 @@ a pool. Adding resume later means per-chunk done-markers, which is safe *because
 is atomic. Cleanup is best-effort: SIGKILL cannot be trapped, so a hard-killed job leaks its
 pool — harmless, since the name is unique.
 
+`score`'s chunk dir cannot use that trick in the independently-submitted mode: the chunk jobs
+and the organize job have to agree on a path without talking to each other, so it defaults to
+the deterministic `$ALARIC_REMOTE_RESULT_DIR/<SIGIL>-CHUNKS/`. That dir therefore outlives a
+failed attempt and is shared by every re-deploy of the same sigil — and `nchunks` is *not*
+part of the sigil, so a second attempt at a different `nchunks` meets `chunk-<N>/score.npy`
+files covering entirely different pose ranges. `chunkN.sh` starts with `rm -rf "$CHUNK_DIR"`,
+which handles every chunk that actually runs; the hole is a chunk job that never starts
+(cancelled in the queue, node failure before exec), leaving its predecessor's file in place
+for `organize.sh` to fold in as if it were this run's. So `organize.sh` recomputes the input
+pose count and passes it as `score_concat.py --nposes`, which requires the concatenation to
+cover the pool exactly. Without it that scenario is a silently wrong result that still
+checksums self-consistently: `score_concat.py` hashes the bytes as it writes them rather than
+re-reading the finished (network-resident) file, so `score.npy.CHECKSUM` would agree with the
+wrong content and nothing downstream would notice.
+
 `grow`/`grow-test` are **excluded** from this redirection for now: they emit provenance
 sidecars next to each shard, written non-atomically, so their crash semantics need their own
 analysis. They keep the shared-FS pool in every mode.

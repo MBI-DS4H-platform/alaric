@@ -28,4 +28,12 @@ bash {{ alaric_dir }}/score.sh \
   {{ nb_kernel }} \
   "$CHUNK_DIR/score.npy"
 ### ORGANIZE ###
+# Recomputed here rather than carried over from the chunks: organize.sh is its own script
+# (and its own job), and the concat has to be checked against the pool itself.
+TOTAL=$({{ python }} - <<"PY"
+from poses import PoseReader
+import os
+print(PoseReader.get_nposes(os.path.expandvars({{ input_result_python }})))
+PY
+)
 {{ score_concat_command }}

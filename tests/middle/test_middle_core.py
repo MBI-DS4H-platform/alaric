@@ -248,9 +248,12 @@ def test_deploy_score_chunk_emits_independent_chunk_and_organize_scripts(tmp_pat
         assert '"$FIRST"' in body and '"$LAST"' in body
         assert "np.concatenate" not in body
 
-    # The organize step concatenates the chunk scores via the memory-safe helper.
+    # The organize step concatenates the chunk scores via the memory-safe helper, and
+    # requires them to cover the input pool exactly.
     organize = (d / "organize.sh").read_text()
     assert "score_concat.py" in organize
+    assert "PoseReader.get_nposes" in organize
+    assert '--nposes "$TOTAL"' in organize
     assert "np.concatenate" not in organize
     assert "result_sidecar.py array" not in organize
     assert "score.npy.CHECKSUM ../CACHE/checksum/" in organize
@@ -529,6 +532,10 @@ def test_remote_score_deploy_defaults_to_compiled_kernel(tmp_path: Path) -> None
     assert '"$CHUNK_DIR/score.npy"' in chunk
     assert "score_concat.py ${SCORE_CHUNKS} " in files["organize.sh"]
     assert "--nchunks 2" in files["organize.sh"]
+    # organize.sh recomputes the pool size itself and requires the concat to cover it, so a
+    # chunk score left over from an earlier deploy at a different --nchunks cannot slip in.
+    assert "PoseReader.get_nposes" in files["organize.sh"]
+    assert '--nposes "$TOTAL"' in files["organize.sh"]
 
 
 def test_remote_deploy_uses_sigil_dir_and_project_alias(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -870,6 +877,27 @@ def test_score_concat_requires_all_expected_chunks(tmp_path: Path) -> None:
 
     with pytest.raises(FileNotFoundError):
         score_concat_main([str(chunks), str(tmp_path / "score.npy"), "--nchunks", "2"])
+
+
+def test_score_concat_rejects_chunks_that_do_not_cover_the_pool(tmp_path: Path) -> None:
+    # A chunk score left behind by an earlier deploy at a different --nchunks covers the
+    # wrong pose range; --nposes is what stops it from being folded in silently.
+    chunks = tmp_path / "chunks"
+    for idx, values in enumerate(
+        (np.array([1.0, 2.0], dtype=np.float32), np.array([3.0], dtype=np.float32)), start=1
+    ):
+        chunk = chunks / f"chunk-{idx}"
+        chunk.mkdir(parents=True)
+        np.save(chunk / "score.npy", values)
+
+    output = tmp_path / "score.npy"
+    with pytest.raises(ValueError, match="cover 3 poses, expected 4"):
+        score_concat_main([str(chunks), str(output), "--nchunks", "2", "--nposes", "4"])
+    assert not output.exists()
+
+    # The matching count still goes through.
+    assert score_concat_main([str(chunks), str(output), "--nchunks", "2", "--nposes", "3"]) == 0
+    np.testing.assert_array_equal(np.load(output), np.array([1.0, 2.0, 3.0], dtype=np.float32))
 
 
 def test_score_concat_writes_checksum_while_copying(tmp_path: Path) -> None:

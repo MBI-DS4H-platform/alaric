@@ -144,12 +144,19 @@ def score_concat_command(alaric_dir: str, output_dir: str, chunks_dir: str, loca
     # Memory-safe concat of the per-chunk score.npy files (memmap streaming, not
     # np.concatenate). On remote, point the staging dir at node-local scratch via TMPDIR so
     # the output file is built locally and then copied to the final (network FS) destination.
+    #
+    # --nposes is load-bearing: the chunk dir is keyed on the sigil alone and survives a
+    # failed attempt, so a chunk score written by an earlier deploy at a different --nchunks
+    # can still be sitting there when this one runs. Requiring the concatenation to cover the
+    # input pool exactly turns that into an error instead of a wrong result. $TOTAL is
+    # computed by the organize body, the same way each chunk computes its own range.
     lines: list[str] = []
     if location == "remote":
         lines.append(f'export TMPDIR="{SCRATCH_EXPR}"')
     lines.append(
         f"{python_bin()} {alaric_dir}/score_concat.py {shell_path(chunks_dir)} "
-        f"{shell_path(f'{output_dir}/score.npy')} --nchunks " + "{{ nchunks }}"
+        f"{shell_path(f'{output_dir}/score.npy')} --nposes \"$TOTAL\" --nchunks "
+        + "{{ nchunks }}"
     )
     return "\n".join(lines)
 

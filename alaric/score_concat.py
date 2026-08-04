@@ -6,7 +6,8 @@ and ``np.concatenate``-ing holds the entire score array (plus a copy) in RAM, wh
 dangerous past a few gigaposes (a 20-Gpose float64 score is ~160 GB).
 
 Instead this:
-  - verifies every expected chunk score exists,
+  - verifies every expected chunk score exists, and -- given ``--nposes`` -- that the chunks
+    together cover exactly the input pool,
   - reads every chunk via ``mmap_mode="r"`` (no full load),
   - streams them block-by-block into a memmapped output ``.npy`` written to a **local**
     staging dir (``$TMPDIR`` -> node-local scratch on the cluster), so peak RAM is one block,
@@ -47,7 +48,12 @@ def _chunk_score_files(chunks_dir: Path, nchunks: int | None) -> list[Path]:
 
 
 def concatenate(
-    chunks_dir: Path, output: Path, *, nchunks: int | None = None, block: int = 10_000_000
+    chunks_dir: Path,
+    output: Path,
+    *,
+    nchunks: int | None = None,
+    nposes: int | None = None,
+    block: int = 10_000_000,
 ) -> str:
     """Concatenate chunks and return the checksum of the resulting ``.npy`` file.
 
@@ -67,6 +73,19 @@ def concatenate(
         if m.dtype != dtype:
             raise ValueError(f"inconsistent score dtype in {path}: {m.dtype} != {dtype}")
         total += int(m.shape[0])
+    if nposes is not None and total != int(nposes):
+        # The chunk dir is keyed on the sigil alone, so it outlives a failed attempt and is
+        # shared by every re-deploy of this action -- including one at a different --nchunks,
+        # whose chunk-<N>/score.npy files cover different pose ranges. A chunk job that never
+        # started (cancelled in the queue, node failure before exec) leaves its predecessor's
+        # file in place, and it would otherwise be folded in as if it were this run's. The
+        # concatenation has to cover the input pool exactly, so that is caught here rather
+        # than becoming a silently wrong -- but self-consistently checksummed -- result.
+        raise ValueError(
+            f"{chunks_dir}: chunk scores cover {total} poses, expected {nposes}; "
+            "a chunk score from an earlier deploy at a different --nchunks is the likely "
+            "cause -- remove the chunk dir and rerun the chunks"
+        )
 
     # Stage on node-local scratch ($TMPDIR), then move to the final destination.
     stagedir = Path(tempfile.mkdtemp(prefix="alaric-score-concat-"))
@@ -108,13 +127,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("output", type=Path, help="Final concatenated score.npy path")
     parser.add_argument("--nchunks", type=int, help="Expected number of chunk score files.")
     parser.add_argument(
+        "--nposes",
+        type=int,
+        help="Expected total number of poses. The concatenated length must match it "
+        "exactly, which is what rules out a stale chunk score from an earlier deploy "
+        "at a different --nchunks.",
+    )
+    parser.add_argument(
         "--block",
         type=int,
         default=10_000_000,
         help="Elements copied per block (bounds peak memory; default 10000000).",
     )
     args = parser.parse_args(argv)
-    concatenate(args.chunks_dir, args.output, nchunks=args.nchunks, block=args.block)
+    concatenate(
+        args.chunks_dir,
+        args.output,
+        nchunks=args.nchunks,
+        nposes=args.nposes,
+        block=args.block,
+    )
     return 0
 
 
