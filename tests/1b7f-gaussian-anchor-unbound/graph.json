@@ -9,65 +9,25 @@
       "result_dir": "CACHE/results/32413e27d4-null",
       "materialized": false
     },
-    "frag10-fwd": {
-      "fragment": 10,
-      "kind": "grow",
-      "parents": [
-        {
-          "pool": "frag9-fwd-filter",
-          "edge": "grow",
-          "array": "provenance.npy",
-          "orientation": "row=this,value=parent",
-          "cross_fragment": true
-        }
-      ],
-      "sigil": "899cd24cc2-3a1ca4c7b9",
-      "result_dir": "CACHE/results/899cd24cc2-3a1ca4c7b9",
-      "materialized": true,
-      "direction": "forward"
-    },
-    "frag10-fwd-filter": {
+    "frag10-anchor-filter": {
       "fragment": 10,
       "kind": "filter",
       "parents": [
         {
-          "pool": "frag10-fwd",
+          "pool": "frag10-anchor",
           "edge": "filter",
           "array": "provenance.npy",
           "orientation": "row=this,value=parent",
           "cross_fragment": false
         }
       ],
-      "sigil": "8077d3ba13-6c5da65af0",
-      "result_dir": "CACHE/results/8077d3ba13-6c5da65af0",
-      "materialized": true,
+      "sigil": "8077d3ba13-25480322bc",
+      "result_dir": "CACHE/results/8077d3ba13-25480322bc",
+      "materialized": false,
       "constraint": {
         "threshold": -14.06,
-        "score_input": "frag10-fwd-score"
+        "score_input": "frag10-anchor-score"
       }
-    },
-    "frag10-merged": {
-      "fragment": 10,
-      "kind": "merge",
-      "parents": [
-        {
-          "pool": "frag10-fwd-filter",
-          "edge": "merge",
-          "array": "map-1.npy",
-          "orientation": "cols=(parent,this)",
-          "cross_fragment": false
-        },
-        {
-          "pool": "frag10-anchor",
-          "edge": "merge",
-          "array": "map-2.npy",
-          "orientation": "cols=(parent,this)",
-          "cross_fragment": false
-        }
-      ],
-      "sigil": "5f096c3636-b8547238b5",
-      "result_dir": "CACHE/results/5f096c3636-b8547238b5",
-      "materialized": false
     },
     "frag4-anchor-bwd": {
       "fragment": 4,
@@ -236,64 +196,64 @@
       "materialized": true,
       "direction": "forward"
     },
-    "frag6-fwd-filter": {
+    "frag6-merged": {
+      "fragment": 6,
+      "kind": "merge",
+      "parents": [
+        {
+          "pool": "frag6-fwd",
+          "edge": "merge",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        },
+        {
+          "pool": "frag6-anchor",
+          "edge": "merge",
+          "array": "map-2.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "5f096c3636-80d65a37bd",
+      "result_dir": "CACHE/results/5f096c3636-80d65a37bd",
+      "materialized": false
+    },
+    "frag6-merged-filter": {
       "fragment": 6,
       "kind": "filter",
       "parents": [
         {
-          "pool": "frag6-fwd-uniq",
+          "pool": "frag6-merged",
           "edge": "filter",
           "array": "provenance.npy",
           "orientation": "row=this,value=parent",
           "cross_fragment": false
         }
       ],
-      "sigil": "70e52b020c-3fe369b69e",
-      "result_dir": "CACHE/results/70e52b020c-3fe369b69e",
-      "materialized": true,
+      "sigil": "70e52b020c-827603bf78",
+      "result_dir": "CACHE/results/70e52b020c-827603bf78",
+      "materialized": false,
       "constraint": {
         "threshold": 9.26,
-        "score_input": "frag6-fwd-score"
+        "score_input": "frag6-merged-score"
       }
-    },
-    "frag6-fwd-uniq": {
-      "fragment": 6,
-      "kind": "dedup",
-      "parents": [
-        {
-          "pool": "frag6-fwd",
-          "edge": "dedup",
-          "array": "map-1.npy",
-          "orientation": "cols=(parent,this)",
-          "cross_fragment": false
-        },
-        {
-          "pool": "frag6-fwd",
-          "edge": "dedup",
-          "array": "map-2.npy",
-          "orientation": "cols=(parent,this)",
-          "cross_fragment": false
-        }
-      ],
-      "sigil": "5f096c3636-86f0dea24a",
-      "result_dir": "CACHE/results/5f096c3636-86f0dea24a",
-      "materialized": true
     },
     "frag7-fwd": {
       "fragment": 7,
       "kind": "grow",
       "parents": [
         {
-          "pool": "frag6-fwd-filter",
+          "pool": "frag6-merged-filter",
           "edge": "grow",
           "array": "provenance.npy",
           "orientation": "row=this,value=parent",
           "cross_fragment": true
         }
       ],
-      "sigil": "4c00843b7f-5a91ee32d9",
-      "result_dir": "CACHE/results/4c00843b7f-5a91ee32d9",
-      "materialized": true,
+      "sigil": "4c00843b7f-707cc25c79",
+      "result_dir": "CACHE/results/4c00843b7f-707cc25c79",
+      "materialized": false,
       "direction": "forward"
     },
     "frag7-fwd-filter": {
@@ -308,9 +268,9 @@
           "cross_fragment": false
         }
       ],
-      "sigil": "036d98d218-f44929155c",
-      "result_dir": "CACHE/results/036d98d218-f44929155c",
-      "materialized": true,
+      "sigil": "036d98d218-5ab9950c04",
+      "result_dir": "CACHE/results/036d98d218-5ab9950c04",
+      "materialized": false,
       "constraint": {
         "threshold": -14.56,
         "score_input": "frag7-fwd-score"
@@ -335,9 +295,9 @@
           "cross_fragment": false
         }
       ],
-      "sigil": "5f096c3636-1ff62428e3",
-      "result_dir": "CACHE/results/5f096c3636-1ff62428e3",
-      "materialized": true
+      "sigil": "5f096c3636-288cbe59d3",
+      "result_dir": "CACHE/results/5f096c3636-288cbe59d3",
+      "materialized": false
     },
     "frag8-fwd": {
       "fragment": 8,
@@ -351,9 +311,9 @@
           "cross_fragment": true
         }
       ],
-      "sigil": "754d7304ff-278497bd54",
-      "result_dir": "CACHE/results/754d7304ff-278497bd54",
-      "materialized": true,
+      "sigil": "75bec33984-e00efe62e8",
+      "result_dir": "CACHE/results/75bec33984-e00efe62e8",
+      "materialized": false,
       "direction": "forward"
     },
     "frag8-fwd-filter": {
@@ -368,13 +328,37 @@
           "cross_fragment": false
         }
       ],
-      "sigil": "5aba0c4a56-6e3aa112c9",
-      "result_dir": "CACHE/results/5aba0c4a56-6e3aa112c9",
-      "materialized": true,
+      "sigil": "5aba0c4a56-922b4742c8",
+      "result_dir": "CACHE/results/5aba0c4a56-922b4742c8",
+      "materialized": false,
       "constraint": {
         "threshold": -21.39,
         "score_input": "frag8-fwd-score"
       }
+    },
+    "frag9-bwd-restrict": {
+      "fragment": 9,
+      "kind": "grow",
+      "parents": [
+        {
+          "pool": "frag10-anchor-filter",
+          "edge": "grow",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": true
+        },
+        {
+          "pool": "frag9-fwd-filter-uniq",
+          "edge": "restrict",
+          "array": null,
+          "orientation": null,
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "2175aaf054-280255db4e",
+      "result_dir": "CACHE/results/2175aaf054-280255db4e",
+      "materialized": false,
+      "direction": "backward"
     },
     "frag9-fwd": {
       "fragment": 9,
@@ -388,9 +372,9 @@
           "cross_fragment": true
         }
       ],
-      "sigil": "db55f5fb2d-d68730444a",
-      "result_dir": "CACHE/results/db55f5fb2d-d68730444a",
-      "materialized": true,
+      "sigil": "db55f5fb2d-e62b433184",
+      "result_dir": "CACHE/results/db55f5fb2d-e62b433184",
+      "materialized": false,
       "direction": "forward"
     },
     "frag9-fwd-filter": {
@@ -405,58 +389,74 @@
           "cross_fragment": false
         }
       ],
-      "sigil": "a0fd97fae0-00511cb74f",
-      "result_dir": "CACHE/results/a0fd97fae0-00511cb74f",
-      "materialized": true,
+      "sigil": "a0fd97fae0-e5df2fd443",
+      "result_dir": "CACHE/results/a0fd97fae0-e5df2fd443",
+      "materialized": false,
       "constraint": {
         "threshold": -15.25,
         "score_input": "frag9-fwd-score"
       }
+    },
+    "frag9-fwd-filter-uniq": {
+      "fragment": 9,
+      "kind": "dedup",
+      "parents": [
+        {
+          "pool": "frag9-fwd-filter",
+          "edge": "dedup",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        },
+        {
+          "pool": "frag9-fwd-filter",
+          "edge": "dedup",
+          "array": "map-2.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "5f096c3636-6d632d6d1f",
+      "result_dir": "CACHE/results/5f096c3636-6d632d6d1f",
+      "materialized": false
+    },
+    "frag9-reconnect": {
+      "fragment": 9,
+      "kind": "merge",
+      "parents": [
+        {
+          "pool": "frag9-fwd-filter-uniq",
+          "edge": "merge",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        },
+        {
+          "pool": "frag9-bwd-restrict",
+          "edge": "merge",
+          "array": "map-2.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "5f096c3636-01e8a353fd",
+      "result_dir": "CACHE/results/5f096c3636-01e8a353fd",
+      "materialized": false
     }
   },
   "representatives": {
     "4": "frag4-merged-filter",
     "5": "frag5-fwd-restrict",
-    "6": "frag6-fwd-filter",
+    "6": "frag6-merged-filter",
     "7": "frag7-fwd-filter",
     "8": "frag8-fwd-filter",
-    "9": "frag9-fwd-filter",
-    "10": "frag10-merged"
+    "9": "frag9-reconnect",
+    "10": "frag10-anchor-filter"
   },
   "skipped_fragments": {},
   "selected": [],
   "dropped_pools": {},
   "links": [
-    {
-      "grow_pool": "frag10-fwd",
-      "direction": "forward",
-      "source_fragment": 9,
-      "source_rep": "frag9-fwd-filter",
-      "target_fragment": 10,
-      "target_rep": "frag10-merged",
-      "join_pool": "frag9-fwd-filter",
-      "target_to_join": [
-        {
-          "pool": "frag10-merged",
-          "array": "map-1.npy",
-          "orientation": "cols=(parent,this)",
-          "to": "frag10-fwd-filter"
-        },
-        {
-          "pool": "frag10-fwd-filter",
-          "array": "provenance.npy",
-          "orientation": "row=this,value=parent",
-          "to": "frag10-fwd"
-        },
-        {
-          "pool": "frag10-fwd",
-          "array": "provenance.npy",
-          "orientation": "row=this,value=parent",
-          "to": "frag9-fwd-filter"
-        }
-      ],
-      "source_to_join": []
-    },
     {
       "grow_pool": "frag5-fwd-restrict",
       "direction": "forward",
@@ -481,17 +481,17 @@
       "source_fragment": 5,
       "source_rep": "frag5-fwd-restrict",
       "target_fragment": 6,
-      "target_rep": "frag6-fwd-filter",
+      "target_rep": "frag6-merged-filter",
       "join_pool": "frag5-fwd-restrict",
       "target_to_join": [
         {
-          "pool": "frag6-fwd-filter",
+          "pool": "frag6-merged-filter",
           "array": "provenance.npy",
           "orientation": "row=this,value=parent",
-          "to": "frag6-fwd-uniq"
+          "to": "frag6-merged"
         },
         {
-          "pool": "frag6-fwd-uniq",
+          "pool": "frag6-merged",
           "array": "map-1.npy",
           "orientation": "cols=(parent,this)",
           "to": "frag6-fwd"
@@ -509,10 +509,10 @@
       "grow_pool": "frag7-fwd",
       "direction": "forward",
       "source_fragment": 6,
-      "source_rep": "frag6-fwd-filter",
+      "source_rep": "frag6-merged-filter",
       "target_fragment": 7,
       "target_rep": "frag7-fwd-filter",
-      "join_pool": "frag6-fwd-filter",
+      "join_pool": "frag6-merged-filter",
       "target_to_join": [
         {
           "pool": "frag7-fwd-filter",
@@ -530,7 +530,7 @@
           "pool": "frag7-fwd",
           "array": "provenance.npy",
           "orientation": "row=this,value=parent",
-          "to": "frag6-fwd-filter"
+          "to": "frag6-merged-filter"
         }
       ],
       "source_to_join": []
@@ -560,14 +560,50 @@
       "source_to_join": []
     },
     {
+      "grow_pool": "frag9-bwd-restrict",
+      "direction": "backward",
+      "source_fragment": 10,
+      "source_rep": "frag10-anchor-filter",
+      "target_fragment": 9,
+      "target_rep": "frag9-reconnect",
+      "join_pool": "frag10-anchor-filter",
+      "target_to_join": [
+        {
+          "pool": "frag9-reconnect",
+          "array": "map-2.npy",
+          "orientation": "cols=(parent,this)",
+          "to": "frag9-bwd-restrict"
+        },
+        {
+          "pool": "frag9-bwd-restrict",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag10-anchor-filter"
+        }
+      ],
+      "source_to_join": []
+    },
+    {
       "grow_pool": "frag9-fwd",
       "direction": "forward",
       "source_fragment": 8,
       "source_rep": "frag8-fwd-filter",
       "target_fragment": 9,
-      "target_rep": "frag9-fwd-filter",
+      "target_rep": "frag9-reconnect",
       "join_pool": "frag8-fwd-filter",
       "target_to_join": [
+        {
+          "pool": "frag9-reconnect",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "to": "frag9-fwd-filter-uniq"
+        },
+        {
+          "pool": "frag9-fwd-filter-uniq",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "to": "frag9-fwd-filter"
+        },
         {
           "pool": "frag9-fwd-filter",
           "array": "provenance.npy",

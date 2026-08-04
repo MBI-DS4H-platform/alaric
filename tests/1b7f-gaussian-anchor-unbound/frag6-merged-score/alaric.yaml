@@ -2,4 +2,4 @@ action: score
 sequence: auto
 exclude: auto
 protein: 3sxl_dom1
-input: frag10-fwd
+input: frag6-merged

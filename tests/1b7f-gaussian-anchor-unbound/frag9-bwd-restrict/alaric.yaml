@@ -1,8 +1,9 @@
 action: grow
-input: frag9-fwd-filter
+input: frag10-anchor-filter
+restrict_input: frag9-fwd-filter-uniq
 fragment: auto
 sequence: auto
 exclude: auto
-direction: fwd
+direction: bwd
 crmsd: 0.39
 ovrmsd: 0.80

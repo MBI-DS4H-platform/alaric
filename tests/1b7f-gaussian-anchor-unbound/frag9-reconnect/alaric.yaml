@@ -1,0 +1,3 @@
+action: identity
+input1: frag9-fwd-filter-uniq
+input2: frag9-bwd-restrict
