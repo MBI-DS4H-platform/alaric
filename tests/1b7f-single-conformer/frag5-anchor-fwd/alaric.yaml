@@ -1,0 +1,8 @@
+action: anchor-test
+conformer: 3995
+fragment: auto
+sequence: auto
+exclude: auto
+nucleotide: first
+protein: 1b7f_dom2
+resid: 256

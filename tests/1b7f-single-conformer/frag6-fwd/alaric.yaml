@@ -1,5 +1,5 @@
 action: grow
-input: frag5-merged
+input: frag5-fwd-restrict
 fragment: auto
 sequence: auto
 exclude: auto
