@@ -1,0 +1,623 @@
+{
+  "project": "/home/sjoerd/alaric/tests/1b7f-anchor-refe",
+  "pools": {
+    "frag10-anchor": {
+      "fragment": 10,
+      "kind": "anchor",
+      "parents": [],
+      "sigil": "681ab69793-null",
+      "result_dir": "CACHE/results/681ab69793-null",
+      "materialized": true
+    },
+    "frag10-anchor-filter": {
+      "fragment": 10,
+      "kind": "filter",
+      "parents": [
+        {
+          "pool": "frag10-anchor",
+          "edge": "filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "d3c26fbc95-6113b86a09",
+      "result_dir": "CACHE/results/d3c26fbc95-6113b86a09",
+      "materialized": false,
+      "constraint": {
+        "threshold": -13.99,
+        "score_input": "frag10-anchor-score"
+      }
+    },
+    "frag4-anchor-bwd": {
+      "fragment": 4,
+      "kind": "anchor",
+      "parents": [],
+      "sigil": "697022a971-null",
+      "result_dir": "CACHE/results/697022a971-null",
+      "materialized": true
+    },
+    "frag4-anchor-fwd": {
+      "fragment": 4,
+      "kind": "anchor",
+      "parents": [],
+      "sigil": "878d2c67e5-null",
+      "result_dir": "CACHE/results/878d2c67e5-null",
+      "materialized": true
+    },
+    "frag4-merged": {
+      "fragment": 4,
+      "kind": "merge",
+      "parents": [
+        {
+          "pool": "frag4-anchor-fwd",
+          "edge": "merge",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        },
+        {
+          "pool": "frag4-anchor-bwd",
+          "edge": "merge",
+          "array": "map-2.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "5f096c3636-c01ab800e3",
+      "result_dir": "CACHE/results/5f096c3636-c01ab800e3",
+      "materialized": false
+    },
+    "frag4-merged-filter": {
+      "fragment": 4,
+      "kind": "filter",
+      "parents": [
+        {
+          "pool": "frag4-merged",
+          "edge": "filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "a1763ed99a-839e3d663a",
+      "result_dir": "CACHE/results/a1763ed99a-839e3d663a",
+      "materialized": false,
+      "constraint": {
+        "threshold": -14.02,
+        "score_input": "frag4-merged-score"
+      }
+    },
+    "frag5-anchor-bwd": {
+      "fragment": 5,
+      "kind": "anchor",
+      "parents": [],
+      "sigil": "aa007f6199-null",
+      "result_dir": "CACHE/results/aa007f6199-null",
+      "materialized": true
+    },
+    "frag5-anchor-fwd": {
+      "fragment": 5,
+      "kind": "anchor",
+      "parents": [],
+      "sigil": "d1d7bb70a8-null",
+      "result_dir": "CACHE/results/d1d7bb70a8-null",
+      "materialized": true
+    },
+    "frag5-fwd-restrict": {
+      "fragment": 5,
+      "kind": "grow",
+      "parents": [
+        {
+          "pool": "frag4-merged-filter",
+          "edge": "grow",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": true
+        },
+        {
+          "pool": "frag5-merged-filter",
+          "edge": "restrict",
+          "array": null,
+          "orientation": null,
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "229d055bb5-9a6a8b6ab1",
+      "result_dir": "CACHE/results/229d055bb5-9a6a8b6ab1",
+      "materialized": false,
+      "direction": "forward"
+    },
+    "frag5-merged": {
+      "fragment": 5,
+      "kind": "merge",
+      "parents": [
+        {
+          "pool": "frag5-anchor-fwd",
+          "edge": "merge",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        },
+        {
+          "pool": "frag5-anchor-bwd",
+          "edge": "merge",
+          "array": "map-2.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "5f096c3636-e759666187",
+      "result_dir": "CACHE/results/5f096c3636-e759666187",
+      "materialized": false
+    },
+    "frag5-merged-filter": {
+      "fragment": 5,
+      "kind": "filter",
+      "parents": [
+        {
+          "pool": "frag5-merged",
+          "edge": "filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "78417c10d5-e9feeb81ce",
+      "result_dir": "CACHE/results/78417c10d5-e9feeb81ce",
+      "materialized": false,
+      "constraint": {
+        "threshold": -22.28,
+        "score_input": "frag5-merged-score-all"
+      }
+    },
+    "frag6-anchor": {
+      "fragment": 6,
+      "kind": "anchor",
+      "parents": [],
+      "sigil": "842c04c071-null",
+      "result_dir": "CACHE/results/842c04c071-null",
+      "materialized": true
+    },
+    "frag6-fwd": {
+      "fragment": 6,
+      "kind": "grow",
+      "parents": [
+        {
+          "pool": "frag5-fwd-restrict",
+          "edge": "grow",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": true
+        }
+      ],
+      "sigil": "01d38aa187-635ffd7f2c",
+      "result_dir": "CACHE/results/01d38aa187-635ffd7f2c",
+      "materialized": false,
+      "direction": "forward"
+    },
+    "frag6-merged": {
+      "fragment": 6,
+      "kind": "merge",
+      "parents": [
+        {
+          "pool": "frag6-fwd",
+          "edge": "merge",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        },
+        {
+          "pool": "frag6-anchor",
+          "edge": "merge",
+          "array": "map-2.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "5f096c3636-e03f0171e2",
+      "result_dir": "CACHE/results/5f096c3636-e03f0171e2",
+      "materialized": false
+    },
+    "frag6-merged-filter": {
+      "fragment": 6,
+      "kind": "filter",
+      "parents": [
+        {
+          "pool": "frag6-merged",
+          "edge": "filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "94218aa2f6-98b615654b",
+      "result_dir": "CACHE/results/94218aa2f6-98b615654b",
+      "materialized": false,
+      "constraint": {
+        "threshold": -16.59,
+        "score_input": "frag6-merged-score"
+      }
+    },
+    "frag7-fwd": {
+      "fragment": 7,
+      "kind": "grow",
+      "parents": [
+        {
+          "pool": "frag6-merged-filter",
+          "edge": "grow",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": true
+        }
+      ],
+      "sigil": "4c00843b7f-db723ac654",
+      "result_dir": "CACHE/results/4c00843b7f-db723ac654",
+      "materialized": false,
+      "direction": "forward"
+    },
+    "frag7-fwd-filter": {
+      "fragment": 7,
+      "kind": "filter",
+      "parents": [
+        {
+          "pool": "frag7-fwd-uniq",
+          "edge": "filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "acafac729b-aede6335b6",
+      "result_dir": "CACHE/results/acafac729b-aede6335b6",
+      "materialized": false,
+      "constraint": {
+        "threshold": -12.69,
+        "score_input": "frag7-fwd-score"
+      }
+    },
+    "frag7-fwd-uniq": {
+      "fragment": 7,
+      "kind": "dedup",
+      "parents": [
+        {
+          "pool": "frag7-fwd",
+          "edge": "dedup",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        },
+        {
+          "pool": "frag7-fwd",
+          "edge": "dedup",
+          "array": "map-2.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "5f096c3636-ad00d5ce46",
+      "result_dir": "CACHE/results/5f096c3636-ad00d5ce46",
+      "materialized": false
+    },
+    "frag8-fwd": {
+      "fragment": 8,
+      "kind": "grow",
+      "parents": [
+        {
+          "pool": "frag7-fwd-filter",
+          "edge": "grow",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": true
+        }
+      ],
+      "sigil": "75bec33984-77ec8d7b4d",
+      "result_dir": "CACHE/results/75bec33984-77ec8d7b4d",
+      "materialized": false,
+      "direction": "forward"
+    },
+    "frag8-fwd-filter": {
+      "fragment": 8,
+      "kind": "filter",
+      "parents": [
+        {
+          "pool": "frag8-fwd",
+          "edge": "filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "fbc5b9a808-e19e70f837",
+      "result_dir": "CACHE/results/fbc5b9a808-e19e70f837",
+      "materialized": false,
+      "constraint": {
+        "threshold": -22.29,
+        "score_input": "frag8-fwd-score"
+      }
+    },
+    "frag9-bwd-restrict": {
+      "fragment": 9,
+      "kind": "grow",
+      "parents": [
+        {
+          "pool": "frag10-anchor-filter",
+          "edge": "grow",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": true
+        },
+        {
+          "pool": "frag9-fwd-filter-uniq",
+          "edge": "restrict",
+          "array": null,
+          "orientation": null,
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "2175aaf054-c48734c53a",
+      "result_dir": "CACHE/results/2175aaf054-c48734c53a",
+      "materialized": false,
+      "direction": "backward"
+    },
+    "frag9-fwd": {
+      "fragment": 9,
+      "kind": "grow",
+      "parents": [
+        {
+          "pool": "frag8-fwd-filter",
+          "edge": "grow",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": true
+        }
+      ],
+      "sigil": "db55f5fb2d-0c7711b0e5",
+      "result_dir": "CACHE/results/db55f5fb2d-0c7711b0e5",
+      "materialized": false,
+      "direction": "forward"
+    },
+    "frag9-fwd-filter": {
+      "fragment": 9,
+      "kind": "filter",
+      "parents": [
+        {
+          "pool": "frag9-fwd",
+          "edge": "filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "8e4c610aad-f3ba69fa62",
+      "result_dir": "CACHE/results/8e4c610aad-f3ba69fa62",
+      "materialized": false,
+      "constraint": {
+        "threshold": -21.6,
+        "score_input": "frag9-fwd-score"
+      }
+    },
+    "frag9-fwd-filter-uniq": {
+      "fragment": 9,
+      "kind": "dedup",
+      "parents": [
+        {
+          "pool": "frag9-fwd-filter",
+          "edge": "dedup",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        },
+        {
+          "pool": "frag9-fwd-filter",
+          "edge": "dedup",
+          "array": "map-2.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "5f096c3636-7426c04bcb",
+      "result_dir": "CACHE/results/5f096c3636-7426c04bcb",
+      "materialized": false
+    },
+    "frag9-reconnect": {
+      "fragment": 9,
+      "kind": "merge",
+      "parents": [
+        {
+          "pool": "frag9-fwd-filter-uniq",
+          "edge": "merge",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        },
+        {
+          "pool": "frag9-bwd-restrict",
+          "edge": "merge",
+          "array": "map-2.npy",
+          "orientation": "cols=(parent,this)",
+          "cross_fragment": false
+        }
+      ],
+      "sigil": "5f096c3636-2657548de4",
+      "result_dir": "CACHE/results/5f096c3636-2657548de4",
+      "materialized": false
+    }
+  },
+  "representatives": {
+    "4": "frag4-merged-filter",
+    "5": "frag5-fwd-restrict",
+    "6": "frag6-merged-filter",
+    "7": "frag7-fwd-filter",
+    "8": "frag8-fwd-filter",
+    "9": "frag9-reconnect",
+    "10": "frag10-anchor-filter"
+  },
+  "skipped_fragments": {},
+  "selected": [],
+  "dropped_pools": {},
+  "links": [
+    {
+      "grow_pool": "frag5-fwd-restrict",
+      "direction": "forward",
+      "source_fragment": 4,
+      "source_rep": "frag4-merged-filter",
+      "target_fragment": 5,
+      "target_rep": "frag5-fwd-restrict",
+      "join_pool": "frag4-merged-filter",
+      "target_to_join": [
+        {
+          "pool": "frag5-fwd-restrict",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag4-merged-filter"
+        }
+      ],
+      "source_to_join": []
+    },
+    {
+      "grow_pool": "frag6-fwd",
+      "direction": "forward",
+      "source_fragment": 5,
+      "source_rep": "frag5-fwd-restrict",
+      "target_fragment": 6,
+      "target_rep": "frag6-merged-filter",
+      "join_pool": "frag5-fwd-restrict",
+      "target_to_join": [
+        {
+          "pool": "frag6-merged-filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag6-merged"
+        },
+        {
+          "pool": "frag6-merged",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "to": "frag6-fwd"
+        },
+        {
+          "pool": "frag6-fwd",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag5-fwd-restrict"
+        }
+      ],
+      "source_to_join": []
+    },
+    {
+      "grow_pool": "frag7-fwd",
+      "direction": "forward",
+      "source_fragment": 6,
+      "source_rep": "frag6-merged-filter",
+      "target_fragment": 7,
+      "target_rep": "frag7-fwd-filter",
+      "join_pool": "frag6-merged-filter",
+      "target_to_join": [
+        {
+          "pool": "frag7-fwd-filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag7-fwd-uniq"
+        },
+        {
+          "pool": "frag7-fwd-uniq",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "to": "frag7-fwd"
+        },
+        {
+          "pool": "frag7-fwd",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag6-merged-filter"
+        }
+      ],
+      "source_to_join": []
+    },
+    {
+      "grow_pool": "frag8-fwd",
+      "direction": "forward",
+      "source_fragment": 7,
+      "source_rep": "frag7-fwd-filter",
+      "target_fragment": 8,
+      "target_rep": "frag8-fwd-filter",
+      "join_pool": "frag7-fwd-filter",
+      "target_to_join": [
+        {
+          "pool": "frag8-fwd-filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag8-fwd"
+        },
+        {
+          "pool": "frag8-fwd",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag7-fwd-filter"
+        }
+      ],
+      "source_to_join": []
+    },
+    {
+      "grow_pool": "frag9-bwd-restrict",
+      "direction": "backward",
+      "source_fragment": 10,
+      "source_rep": "frag10-anchor-filter",
+      "target_fragment": 9,
+      "target_rep": "frag9-reconnect",
+      "join_pool": "frag10-anchor-filter",
+      "target_to_join": [
+        {
+          "pool": "frag9-reconnect",
+          "array": "map-2.npy",
+          "orientation": "cols=(parent,this)",
+          "to": "frag9-bwd-restrict"
+        },
+        {
+          "pool": "frag9-bwd-restrict",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag10-anchor-filter"
+        }
+      ],
+      "source_to_join": []
+    },
+    {
+      "grow_pool": "frag9-fwd",
+      "direction": "forward",
+      "source_fragment": 8,
+      "source_rep": "frag8-fwd-filter",
+      "target_fragment": 9,
+      "target_rep": "frag9-reconnect",
+      "join_pool": "frag8-fwd-filter",
+      "target_to_join": [
+        {
+          "pool": "frag9-reconnect",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "to": "frag9-fwd-filter-uniq"
+        },
+        {
+          "pool": "frag9-fwd-filter-uniq",
+          "array": "map-1.npy",
+          "orientation": "cols=(parent,this)",
+          "to": "frag9-fwd-filter"
+        },
+        {
+          "pool": "frag9-fwd-filter",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag9-fwd"
+        },
+        {
+          "pool": "frag9-fwd",
+          "array": "provenance.npy",
+          "orientation": "row=this,value=parent",
+          "to": "frag8-fwd-filter"
+        }
+      ],
+      "source_to_join": []
+    }
+  ]
+}

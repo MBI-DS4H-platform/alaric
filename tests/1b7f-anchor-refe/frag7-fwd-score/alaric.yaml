@@ -1,0 +1,5 @@
+action: score
+sequence: auto
+exclude: auto
+protein: 1b7f_dom1
+input: frag7-fwd-uniq

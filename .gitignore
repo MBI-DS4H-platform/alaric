@@ -27,6 +27,11 @@ tests/1b7f-single-conformer/*/*
 !tests/1b7f-single-conformer/DATA/*
 !tests/1b7f-single-conformer/frag*
 !tests/1b7f-single-conformer/frag*/alaric.yaml
+tests/1b7f-anchor-refe/*/*
+!tests/1b7f-anchor-refe/DATA
+!tests/1b7f-anchor-refe/DATA/*
+!tests/1b7f-anchor-refe/frag*
+!tests/1b7f-anchor-refe/frag*/alaric.yaml
 tests/1b7f-gaussian-anchor/*/*
 !tests/1b7f-gaussian-anchor/DATA
 !tests/1b7f-gaussian-anchor/DATA/*

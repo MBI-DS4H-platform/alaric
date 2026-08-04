@@ -1,0 +1,6 @@
+action: anchor-refe
+fragment: auto
+sequence: auto
+exclude: auto
+nucleotide: first
+ovrmsd: 0.61

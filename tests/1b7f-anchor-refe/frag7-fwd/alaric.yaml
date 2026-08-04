@@ -1,0 +1,8 @@
+action: grow
+input: frag6-merged-filter
+fragment: auto
+sequence: auto
+exclude: auto
+direction: auto
+crmsd: 0.24
+ovrmsd: 0.52
