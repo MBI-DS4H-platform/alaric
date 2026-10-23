@@ -2,12 +2,10 @@
 """Run the reference best-fit fitter as one cached Seamless bash transform."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
-import shlex
 import sys
 
-import refe_best_fit_seamless_support as support
+from seamlessify_refe_best_fit import seamlessify_refe_best_fit
 
 
 USAGE = """Usage: refe-best-fit-SEAMLESS.py [WRAPPER_OPTIONS] RNA.pdb [FITTER_OPTIONS]
@@ -25,11 +23,6 @@ Fitter options include --exclude-pdb-code CODE, --grid-spacing FLOAT,
 Requires Python 3.12+, Seamless, numpy<2, scipy, ruamel.yaml, biopython and the
 fragment library. See documents/refe-best-fit-seamless.md.
 """
-
-META_PIN = "META__FILE__fraglib.yaml"
-SUPPORT_FILENAME = "refe_best_fit_seamless_support.py"
-RESULT_CELLTYPE = "folder"
-
 
 def _parse_arguments(argv: list[str]):
     output = Path("best-fits")
@@ -86,58 +79,16 @@ def main(argv: list[str] | None = None) -> int:
         argv = sys.argv[1:]
     output, config, pdb, fitter_arguments, conda_environment = _parse_arguments(argv)
 
-    input_paths = support.input_paths()
-    input_paths.extend([Path(support.__file__).resolve(), pdb])
-    input_names: dict[str, Path] = {}
-    for path in input_paths:
-        prior = input_names.get(path.name)
-        if prior is not None:
-            raise ValueError(
-                f"Seamless flat input name collision: {prior} and {path} both map to {path.name!r}"
-            )
-        input_names[path.name] = path
-
-    identities = json.dumps(
-        support.identities(Path(support.__file__).resolve().parent.parent / "fraglib"),
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-
     import seamless_config
 
     seamless_config.init()
-    from seamless import Checksum
     from seamless.util.mount_directory import write_to_directory
-    from seamless_transformer import Transformer
-    from seamless_transformer.cmd.file_load import files_to_checksums
-
-    all_checksums, _ = files_to_checksums(
-        [str(path) for path in input_names.values()] + [str(config)],
-        directories={},
-        max_upload_files=None,
-        max_upload_size=None,
-        auto_confirm="yes",
+    transformer = seamlessify_refe_best_fit(
+        pdb,
+        fitter_arguments,
+        fraglib_config=config,
+        conda_environment=conda_environment,
     )
-
-    transformer = Transformer("bash", direct=True)
-    worker_command = shlex.join(
-        ["python", "-B", SUPPORT_FILENAME, "run", pdb.name, *fitter_arguments]
-    )
-    transformer.code = (
-        f"export fraglib_config=fraglib.yaml && {worker_command} "
-        "&& mv best-fit-output RESULT"
-    )
-    for name, path in input_names.items():
-        transformer.celltypes[name] = "bytes"
-        transformer.args[name].checksum = Checksum(all_checksums[str(path)])
-
-    transformer.celltypes[META_PIN] = "bytes"
-    transformer.args[META_PIN].checksum = Checksum(all_checksums[str(config)])
-    transformer.celltypes.fraglib_identities = "str"
-    transformer.args.fraglib_identities = identities
-    transformer.celltypes.result = RESULT_CELLTYPE
-    if conda_environment is not None:
-        transformer.environment.set_conda_env(conda_environment)
 
     result = transformer.run()
     write_to_directory(

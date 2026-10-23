@@ -52,8 +52,9 @@ From any directory, with the repository checked out at `/path/to/alaric`:
   /path/to/alaric/tests/1b7f/pdbs/rna.pdb --exclude-pdb-code 1b7f
 ```
 
-The Python CLI uses the same options and output layout through Seamless's
-Transformer API:
+The original Python CLI path remains available with the same options and output
+layout. It initializes configuration, calls the importable factory described
+below, runs its Transformer, and writes the results:
 
 ```bash
 /path/to/alaric/util/refe-best-fit-SEAMLESS.py \
@@ -71,6 +72,47 @@ Use `--conda ENV` to run the transformation in an existing conda environment
 on the executing host. Without this option, the command uses the executing
 host's `python` on `PATH`.
 
+## Importable factory for workflows
+
+The construction code is available as
+`util/seamlessify_refe_best_fit.py`. With the checkout root on Python's import
+path, import it as follows:
+
+```python
+from util.seamlessify_refe_best_fit import seamlessify_refe_best_fit
+from seamless_workflow import Context
+
+# The application has already initialized seamless_config and selected storage.
+with Context() as ctx:
+    ctx.best_fit = seamlessify_refe_best_fit(
+        "/path/to/alaric/tests/1b7f/pdbs/rna.pdb",
+        ("--exclude-pdb-code", "1b7f"),
+        fraglib_config="/path/to/fraglib.yaml",
+    )
+    ctx.compute(timeout=300)
+    result_index = ctx.best_fit.result.value
+    # Consume the folder result in the workflow, or materialize it here.
+```
+
+Alternatively, with the checkout's `util/` directory on the import path, use
+`from seamlessify_refe_best_fit import seamlessify_refe_best_fit`. Neither form
+requires an Alaric pip installation.
+
+The signature is
+`seamlessify_refe_best_fit(rna_pdb, fitter_arguments=(), *, fraglib_config=None, conda_environment=None)`.
+It returns a delayed bash `Transformer`, ready for assignment to a workflow
+Context. Construction registers the input files through Seamless, but does not
+run the fit or write an output directory. Outside a workflow, callers may also
+explicitly call the returned Transformer's `.run()` and materialize its folder
+result with Seamless's `write_to_directory` helper.
+
+**The caller must initialize `seamless_config` before calling the factory.**
+The factory never calls `seamless_config.init()` or changes the caller's
+configuration. The existing Python CLI remains responsible for its own
+initialization. `fraglib_config=None` selects `~/.alaric/fraglib.yaml`;
+`conda_environment` selects the worker environment. Pass fitter options as a
+sequence of strings; `--pdb-output` is managed internally.
+
 ## Identity and materialization
 
 The RNA PDB, source modules, and templates are ordinary checksum-bearing inputs.
@@ -80,7 +122,7 @@ sidecars, keyed by library-relative artifact name. The 36 sidecars cover the
 conformer arrays, replacements, extensions, origins, rotamers and indices for
 AA, AC, CA and CC. They use `library.py`'s expected layout and contain a SHA-256
 hex digest followed by a newline. Neither wrapper hashes library payloads,
-copies inputs, or writes intermediate metadata files. The Python CLI registers
+copies inputs, or writes intermediate metadata files. The Python factory registers
 files with Seamless's `files_to_checksums` and materializes the result through
 its `write_to_directory` helper.
 
@@ -118,18 +160,25 @@ for expected in /path/to/alaric/tests/1b7f/best-fits/*.pdb; do
 done
 ```
 
-The opt-in integration test runs both CLIs from outside the checkout, compares
-the TSV and all 11 PDBs byte for byte, and checks persistent-cache replay with
-changed meta-file/environment settings:
+Focused tests guard both import styles and factory construction against
+configuration initialization, verify the returned Transformer and its pins,
+and check Context binding without running the fit. The opt-in integration tests
+retain both original CLIs and execute the factory through a real Context,
+compare the TSV and all 11 PDBs byte for byte, and check persistent-cache replay
+with changed meta-file/environment settings:
 
 ```bash
 RUN_SEAMLESS_BEST_FIT_TESTS=1 python -m pytest -q \
+  tests/test_seamlessify_refe_best_fit.py \
   tests/test_refe_best_fit_seamless_inputs.py \
   tests/1b7f/test_refe_best_fit_seamless.py
 ```
 
-Validation passed all four tests in a Python environment with no Alaric
-distribution or importable Alaric package. The integration tests explicitly
+Validation passed six focused tests and three real-library integration cases
+in a Python environment with no Alaric distribution installed. The Context
+integration initializes configuration in the caller, then replaces
+`seamless_config.init` with a failing guard during factory construction and
+workflow execution. The integration tests explicitly
 select temporary caches for testing; neither CLI assigns `SEAMLESS_CACHE`.
 
 Persistent caching and local execution are implemented. Configured Seamless

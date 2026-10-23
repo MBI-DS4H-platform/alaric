@@ -54,3 +54,71 @@ def test_standalone_wrapper_matches_goldens(tmp_path: Path, wrapper: str) -> Non
     assert (replay / "best-fits.tsv").read_bytes() == (output / "best-fits.tsv").read_bytes()
     for path in expected:
         assert (replay / "pdbs" / path.name).read_bytes() == path.read_bytes()
+
+
+def test_factory_matches_goldens_with_caller_owned_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import seamless_config
+
+    monkeypatch.setenv("SEAMLESS_CACHE", str(tmp_path / "factory-cache"))
+    seamless_config.init()
+
+    def fail_init(*args, **kwargs):
+        raise AssertionError("factory reset caller-owned Seamless configuration")
+
+    monkeypatch.setattr(seamless_config, "init", fail_init)
+
+    from seamless.util.mount_directory import write_to_directory
+    from seamless_workflow import Context
+    monkeypatch.syspath_prepend(str(ROOT / "util"))
+    from seamlessify_refe_best_fit import seamlessify_refe_best_fit
+
+    # Spell out the default so this workflow has a different identity from the
+    # CLI cases and must exercise computation through Context on a cold cache.
+    arguments = ("--exclude-pdb-code", "1b7f", "--rotamer-precision", "0.5")
+    output = tmp_path / "factory output"
+    with Context() as context:
+        context.step = seamlessify_refe_best_fit(
+            HERE / "pdbs" / "rna.pdb",
+            arguments,
+        )
+        context.compute(timeout=300)
+        result = context.step.result.value
+        write_to_directory(
+            str(output), result, cleanup=False, deep=True, text_only=False
+        )
+
+    assert (output / "best-fits.tsv").read_bytes() == (
+        HERE / "data" / "refe-best-fit.tsv"
+    ).read_bytes()
+    expected = sorted((HERE / "best-fits").glob("*.pdb"))
+    actual = sorted((output / "pdbs").glob("*.pdb"))
+    assert [path.name for path in actual] == [path.name for path in expected]
+    for path in expected:
+        assert (output / "pdbs" / path.name).read_bytes() == path.read_bytes()
+
+    unusable_hints = tmp_path / "changed-location-hints.yaml"
+    unusable_hints.write_text("not a usable library configuration\n")
+    replay_output = tmp_path / "factory cached output"
+    with Context() as context:
+        context.step = seamlessify_refe_best_fit(
+            HERE / "pdbs" / "rna.pdb",
+            arguments,
+            fraglib_config=unusable_hints,
+            conda_environment="deliberately-absent-cache-probe",
+        )
+        context.compute(timeout=60)
+        cached_result = context.step.result.value
+        write_to_directory(
+            str(replay_output),
+            cached_result,
+            cleanup=False,
+            deep=True,
+            text_only=False,
+        )
+    assert (replay_output / "best-fits.tsv").read_bytes() == (
+        output / "best-fits.tsv"
+    ).read_bytes()
+    for path in expected:
+        assert (replay_output / "pdbs" / path.name).read_bytes() == path.read_bytes()
