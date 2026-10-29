@@ -115,8 +115,6 @@ Proposed CLI:
 - `--anchor-reference-ring FILE`: coordinates for the canonical selected-ring
   frame used when the precalculation was built. This can be required initially;
   later it could be folded into metadata in `DIR`.
-- Optional `--precalculated-threshold NAME` or explicit file overrides can be
-  added once the naming convention for multiple threshold sets is known.
 
 Validation:
 

@@ -253,45 +253,32 @@ def resolve_action(
         p["__protein"] = path.name
         files["protein"] = path
     if action in {"anchor", "anchor-test"}:
-        # Handle precomputed filter parameters: both must be present or both must be absent
-        has_filter_name = "precomputed_filter_name" in p
-        has_filter_threshold = "precomputed_filter_threshold" in p
-        if has_filter_name != has_filter_threshold:
-            raise ResolveError(
-                "precomputed_filter_name and precomputed_filter_threshold must both be present or both absent"
-            )
-        if has_filter_name and has_filter_threshold:
-            filter_name = str(p["precomputed_filter_name"])
-            threshold = str(p["precomputed_filter_threshold"])
-            filter_dir = _resolve_precomputed_filter_directory(project, filter_name, threshold)
-            p["__precomputed_filter_dir"] = str(filter_dir)
-            # Reference file depends on which nucleotide (first or second) in the sequence
-            sequence = str(p["sequence"]).upper()
-            nucleotide_idx = 0 if p["nucleotide"] == "first" else 1
-            if nucleotide_idx >= len(sequence):
-                raise ResolveError(f"sequence {sequence} too short for nucleotide:{p['nucleotide']}")
-            nucleotide = sequence[nucleotide_idx]
-            ring_code = _nucleotide_to_ring_code(nucleotide)
-            # Validate that reference file exists; will be referenced from ALARIC_DIR/../ring-refe/
-            _resolve_ring_reference_file(project.root, ring_code)
-            p["__anchor_reference_ring"] = f"refe-{ring_code}.npy"
+        # The precomputed filter is the only anchor mode (both keys are required by the schema)
+        filter_name = str(p["precomputed_filter_name"])
+        threshold = str(p["precomputed_filter_threshold"])
+        filter_dir = _resolve_precomputed_filter_directory(project, filter_name, threshold)
+        p["__precomputed_filter_dir"] = str(filter_dir)
+        # Reference file depends on which nucleotide (first or second) in the sequence
+        sequence = str(p["sequence"]).upper()
+        nucleotide_idx = 0 if p["nucleotide"] == "first" else 1
+        if nucleotide_idx >= len(sequence):
+            raise ResolveError(f"sequence {sequence} too short for nucleotide:{p['nucleotide']}")
+        nucleotide = sequence[nucleotide_idx]
+        ring_code = _nucleotide_to_ring_code(nucleotide)
+        # Validate that reference file exists; will be referenced from ALARIC_DIR/../ring-refe/
+        _resolve_ring_reference_file(project.root, ring_code)
+        p["__anchor_reference_ring"] = f"refe-{ring_code}.npy"
 
-            # Resolve protein ring reference based on residue type
-            protein_path = files.get("protein")
-            if protein_path is None:
-                # If protein wasn't resolved yet (shouldn't happen), derive it
-                _, protein_path = resolve_protein(project, p.get("protein", "auto"), all_atom=False)
-            resid = int(p["resid"])
-            protein_resname = _protein_residue_from_pdb(protein_path, resid)
-            # Validate that reference file exists
-            _resolve_ring_reference_file(project.root, protein_resname)
-            p["__anchor_reference_protein_ring"] = f"refe-{protein_resname}.npy"
-        else:
-            # Without precomputed filters, angle and dihedral are required
-            if p.get("dihedral") == "auto" or "dihedral" not in p:
-                p["dihedral"] = _read_anchor_yaml(project, "dihedral")
-            if p.get("angle") == "auto" or "angle" not in p:
-                p["angle"] = _read_anchor_yaml(project, "angle")
+        # Resolve protein ring reference based on residue type
+        protein_path = files.get("protein")
+        if protein_path is None:
+            # If protein wasn't resolved yet (shouldn't happen), derive it
+            _, protein_path = resolve_protein(project, p.get("protein", "auto"), all_atom=False)
+        resid = int(p["resid"])
+        protein_resname = _protein_residue_from_pdb(protein_path, resid)
+        # Validate that reference file exists
+        _resolve_ring_reference_file(project.root, protein_resname)
+        p["__anchor_reference_protein_ring"] = f"refe-{protein_resname}.npy"
     if action in {"grow", "grow-test"}:
         p["direction"] = resolve_direction(p["direction"], spec.name)
         dep = resolved_by_name.get(str(p["input"]))

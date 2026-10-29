@@ -27,13 +27,10 @@ protein: 1b7f or auto . In both cases, read from ../DATA, either 1b7f-aa.pdb or 
 resid: 123
 nucleotide: first or second
 
-Either provide angle+dihedral (for brute-force anchoring), or precomputed_filter_name+precomputed_filter_threshold (for ring-level precalculation):
+Anchoring uses precomputed ring-level filters only (brute-force angle/dihedral anchoring has been removed):
 
-dihedral: 45 -45  , or auto (read from ../DATA/anchor.yaml) [omit if using precomputed filters]
-angle: 30, or auto (read from ../DATA/anchor.yaml) [omit if using precomputed filters]
-
-precomputed_filter_name: gaussian [optional; must be paired with precomputed_filter_threshold]
-precomputed_filter_threshold: r90 or r95 or r99 [optional; loads from ./precomputed-filters/<name>/<threshold>/*.npy.zst]
+precomputed_filter_name: gaussian [required]
+precomputed_filter_threshold: rrm50, rrm60, rrm70, rrm80, rrm90, rrm95, or a variant such as rrm95-tilt30, rrm95-disp45, rrm95-tilt30-disp45 (same for rrm90) [required; loads from ./precomputed-filters/gaussian/<threshold>/*.npy(.zst); see alaric/gaussian_stacking_filter.json. Generate with util/gaussian-precalc.py <threshold>]
 
 ## anchor-refe
 

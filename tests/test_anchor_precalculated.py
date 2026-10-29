@@ -270,11 +270,6 @@ def test_precalculated_pose_rotates_translation_onto_real_protein_ring(
         lattice_step=0.25,
         capacity_table=np.full((1, 1, 1), 12, dtype=np.int16),
     )
-    protein_plane = anchor.calc_plane(protein_ring)
-    protein_x = protein_ring[0] - protein_ring.mean(axis=0)
-    protein_x /= np.linalg.norm(protein_x)
-    protein_y = np.cross(protein_plane, protein_x)
-    protein_y /= np.linalg.norm(protein_y)
     config = anchor._StackWorkConfig(
         coordinates=conformer_ring[None, :, :],
         ring_mask=np.ones(len(conformer_ring), dtype=bool),
@@ -282,19 +277,11 @@ def test_precalculated_pose_rotates_translation_onto_real_protein_ring(
         rotaconformers_index=np.array([1]),
         selected_rotamer_positions=None,
         protein_center=protein_ring.mean(axis=0),
-        protein_plane=protein_plane,
-        protein_x=protein_x,
-        protein_y=protein_y,
-        max_angle_deg=30.0,
-        margin=0.5,
-        dihedral_min_deg=None,
-        dihedral_max_deg=None,
         output_dir=tmp_path,
         cache_size=1000,
         bucket_size=16,
         unorganized_subdirs=False,
         center_batch_size=16,
-        offset_chunk_size=1000,
         writer_memory_lock=None,
         precalculated_anchor=precalculated,
         min_cell_fraction=0.0,
@@ -365,19 +352,11 @@ def test_cache_lookup_never_replaces_original_local_rotamer_ids(
         rotaconformers_index=np.array([8]),
         selected_rotamer_positions=np.array([3, 7]),
         protein_center=np.zeros(3),
-        protein_plane=np.array([0.0, 0.0, 1.0]),
-        protein_x=np.array([1.0, 0.0, 0.0]),
-        protein_y=np.array([0.0, 1.0, 0.0]),
-        max_angle_deg=30.0,
-        margin=0.5,
-        dihedral_min_deg=None,
-        dihedral_max_deg=None,
         output_dir=tmp_path,
         cache_size=1000,
         bucket_size=16,
         unorganized_subdirs=False,
         center_batch_size=16,
-        offset_chunk_size=1000,
         writer_memory_lock=None,
         precalculated_anchor=precalculated,
         min_cell_fraction=0.0,

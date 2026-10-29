@@ -15,7 +15,7 @@ MASK = "mask"
 
 
 ACTION_SCHEMAS: dict[str, set[str]] = {
-    "anchor": {"action", "type", "fragment", "sequence", "exclude", "protein", "resid", "nucleotide", "dihedral", "angle", "margin", "precomputed_filter_name", "precomputed_filter_threshold"},
+    "anchor": {"action", "type", "fragment", "sequence", "exclude", "protein", "resid", "nucleotide", "precomputed_filter_name", "precomputed_filter_threshold"},
     "anchor-test": {"action", "type", "fragment", "sequence", "exclude", "protein", "resid", "nucleotide", "dihedral", "angle", "margin", "nconformers", "conformer", "precomputed_filter_name", "precomputed_filter_threshold"},
     "anchor-refe": {"action", "type", "fragment", "sequence", "exclude", "nucleotide", "ovrmsd", "reference"},
     "grow": {"action", "type", "input", "restrict_input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
@@ -30,8 +30,8 @@ ACTION_SCHEMAS: dict[str, set[str]] = {
 }
 
 REQUIRED: dict[str, set[str]] = {
-    "anchor": {"fragment", "sequence", "exclude", "protein", "resid", "nucleotide"},
-    "anchor-test": {"fragment", "sequence", "exclude", "protein", "resid", "nucleotide"},
+    "anchor": {"fragment", "sequence", "exclude", "protein", "resid", "nucleotide", "precomputed_filter_name", "precomputed_filter_threshold"},
+    "anchor-test": {"fragment", "sequence", "exclude", "protein", "resid", "nucleotide", "precomputed_filter_name", "precomputed_filter_threshold"},
     "anchor-refe": {"fragment", "sequence", "exclude", "nucleotide", "ovrmsd"},
     "grow": {"input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
     "grow-test": {"input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd", "conformer"},
@@ -77,8 +77,8 @@ OUTPUT_KIND = {
 }
 
 AUTO_FIELDS = {
-    "anchor": {"fragment", "sequence", "exclude", "protein", "dihedral", "angle"},
-    "anchor-test": {"fragment", "sequence", "exclude", "protein", "dihedral", "angle"},
+    "anchor": {"fragment", "sequence", "exclude", "protein"},
+    "anchor-test": {"fragment", "sequence", "exclude", "protein"},
     "anchor-refe": {"fragment", "sequence", "exclude", "ovrmsd"},
     "grow": {"fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
     "grow-test": {"fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
@@ -125,8 +125,6 @@ def normalize_action(name: str, path: Path, data: dict[str, Any]) -> ActionSpec:
         if nuc not in {"first", "second"}:
             raise SchemaError(f"{path}: nucleotide must be first or second")
         data["nucleotide"] = nuc
-        if action != "anchor-refe":
-            data.setdefault("margin", 0.5)
         if action == "anchor-test":
             has_nconformers = "nconformers" in data
             has_conformer = "conformer" in data

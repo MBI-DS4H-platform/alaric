@@ -18,24 +18,16 @@ from tqdm import tqdm
 from library import config
 from npy_io import find_npy, load_npy
 from nprocs import default_nprocs
-from offsets import get_discrete_offsets
 from parse_pdb import parse_pdb
 from poses import PoseWriter, discover_organized
 from rna_pdb import ppdb2nucseq
 from stack_geometry import (
     as_coordinates,
-    calc_plane,
     residue_ring_coordinates,
     residue_ring_atom_mask,
 )
 
 GRID_SPACING = sqrt(3) / 3
-LATERAL_SLOPE = 1.78966
-
-# Recall levels a precalculation directory can be built for.  These name cache
-# directories only: the runtime never evaluates the underlying filter, so it
-# does not need to know what model or thresholds produced them.
-PRECALCULATED_THRESHOLDS = ("r90", "r95", "r99")
 
 # Universal Hopf-fibration division of SO(3) used to build every precalculated
 # filter: 6 cube faces x HOPF_N x HOPF_N base directions x HOPF_NPSI fibre steps.
@@ -79,21 +71,13 @@ class _StackWorkConfig:
     rotaconformers_index: np.ndarray
     selected_rotamer_positions: np.ndarray | None
     protein_center: np.ndarray
-    protein_plane: np.ndarray
-    protein_x: np.ndarray
-    protein_y: np.ndarray
-    max_angle_deg: float
-    margin: float
-    dihedral_min_deg: float | None
-    dihedral_max_deg: float | None
     output_dir: Path
     cache_size: int
     bucket_size: int
     unorganized_subdirs: bool
     center_batch_size: int
-    offset_chunk_size: int
     writer_memory_lock: object | None
-    precalculated_anchor: _PrecalculatedAnchor | None = None
+    precalculated_anchor: _PrecalculatedAnchor
     min_cell_fraction: float = MIN_CELL_FRACTION
 
 
@@ -142,19 +126,6 @@ def _dinucleotide_sequence(seq: str) -> str:
     return seq
 
 
-def _dihedral_pair(values: Sequence[str]) -> tuple[float, float]:
-    if len(values) != 2:
-        raise argparse.ArgumentTypeError(
-            "--dihedral requires 2 floats: MIN MAX or MAX MIN"
-        )
-    try:
-        a = float(values[0])
-        b = float(values[1])
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("--dihedral values must be floats") from exc
-    return (a, b)
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="anchor",
@@ -183,27 +154,6 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         type=_dinucleotide_sequence,
         help="Dinucleotide sequence (e.g. AA, AC, GU).",
-    )
-    parser.add_argument(
-        "--dihedral",
-        nargs=2,
-        metavar=("MIN_DEG", "MAX_DEG"),
-        required=False,
-        help="""Minimum and maximum dihedral angle in degrees.
-If the maximum is smaller than the minimum, only the tails are kept, 
-and the values in between are eliminated.""",
-    )
-    parser.add_argument(
-        "--angle",
-        type=float,
-        required=False,
-        help="Maximum stacking angle (in degrees). Required unless --precalculated-anchor is used.",
-    )
-    parser.add_argument(
-        "--margin",
-        type=float,
-        default=0.5,
-        help="Distance vector slack in angstroms (default: 0.5).",
     )
     nuc_group = parser.add_mutually_exclusive_group(required=True)
     nuc_group.add_argument(
@@ -310,21 +260,15 @@ and the values in between are eliminated.""",
     parser.add_argument(
         "--precalculated-anchor",
         metavar="DIR",
+        required=True,
         help=(
-            "Use a ring-level precalculated filter from DIR. DIR may "
-            "contain the arrays directly or contain r90/r95/r99 subdirectories."
-        ),
-    )
-    parser.add_argument(
-        "--precalculated-threshold",
-        choices=sorted(PRECALCULATED_THRESHOLDS),
-        help=(
-            "Cache recall level. Required unless it can be inferred from "
-            "the precalculation directory name."
+            "Directory with the ring-level precalculated filter arrays "
+            "(e.g. precomputed-filters/gaussian/rrm95)."
         ),
     )
     parser.add_argument(
         "--anchor-reference-ring",
+        required=True,
         type=_existing_file,
         metavar="FILE",
         help="Canonical A/C nucleotide ring coordinates used to build the cache.",
@@ -350,30 +294,11 @@ def _find_precalculated_array(directory: Path, name: str) -> Path:
     return path
 
 
-def _resolve_precalculated_directory(
-    directory: str | Path,
-    threshold_name: str | None,
-) -> tuple[Path, str]:
+def _resolve_precalculated_directory(directory: str | Path) -> Path:
     directory = Path(directory)
     if not directory.is_dir():
         raise ValueError(f"precalculation directory does not exist: {directory}")
-
-    inferred = directory.name if directory.name in PRECALCULATED_THRESHOLDS else None
-    if threshold_name is None:
-        threshold_name = inferred
-    elif inferred is not None and inferred != threshold_name:
-        raise ValueError(
-            f"--precalculated-threshold {threshold_name} conflicts with directory {directory.name}"
-        )
-    if threshold_name is None:
-        raise ValueError(
-            "--precalculated-threshold is required when the cache directory name "
-            "is not r90, r95, or r99"
-        )
-    threshold_directory = directory / threshold_name
-    if threshold_directory.is_dir():
-        directory = threshold_directory
-    return directory, threshold_name
+    return directory
 
 
 def _load_reference_coordinates(path: str | Path) -> np.ndarray:
@@ -635,14 +560,11 @@ def _pose_cell_capacity(
 
 def _load_precalculated_anchor(
     directory: str | Path,
-    threshold_name: str | None,
     nucleotide_reference_path: str | Path,
     protein_reference_path: str | Path,
     protein_ring: np.ndarray,
 ) -> _PrecalculatedAnchor:
-    directory, threshold_name = _resolve_precalculated_directory(
-        directory, threshold_name
-    )
+    directory = _resolve_precalculated_directory(directory)
     arrays = {
         name: load_npy(_find_precalculated_array(directory, name))
         for name in (
@@ -682,20 +604,6 @@ def _load_precalculated_anchor(
             lattice_step, protein_reference_to_world
         ),
     )
-
-
-def _calc_planes(coordinates: np.ndarray) -> np.ndarray:
-    centered = coordinates - coordinates.mean(axis=1)[:, None, :]
-    covar = np.einsum("ijk,ijl->ikl", centered, centered)
-    _, _, wt = np.linalg.svd(covar)
-    directionless = wt[:, 2, :] / np.linalg.norm(wt[:, 2, :], axis=-1)[:, None]
-    directed = np.cross(
-        centered[:, 1, :] - centered[:, 0, :],
-        centered[:, 2, :] - centered[:, 1, :],
-        axis=1,
-    )
-    flip = np.sign(np.einsum("ij,ij->i", directionless, directed))
-    return directionless * flip[:, None]
 
 
 def _select_library(
@@ -839,33 +747,6 @@ def _select_rotamer_positions(
             f"--rotamer-range LAST={last} is larger than the smallest selected rotamer list ({smallest_count})"
         )
     return np.arange(first - 1, last, dtype=np.int64)
-
-
-def _dihedral_filter(
-    angles: np.ndarray,
-    dihedral: np.ndarray,
-    max_angle_deg: float,
-    dihedral_min_deg: float | None,
-    dihedral_max_deg: float | None,
-) -> np.ndarray:
-    mask = angles <= max_angle_deg / 180.0 * np.pi
-    if dihedral_min_deg is not None:
-        assert dihedral_max_deg is not None
-        dihedral_min = dihedral_min_deg / 180.0 * np.pi
-        dihedral_max = dihedral_max_deg / 180.0 * np.pi
-        if dihedral_max < dihedral_min:
-            dihedral_mask = (dihedral <= dihedral_max) | (dihedral >= dihedral_min)
-        else:
-            dihedral_mask = (dihedral >= dihedral_min) & (dihedral <= dihedral_max)
-        mask &= dihedral_mask
-    return mask
-
-
-def _build_reverse_table(reverse_map: dict) -> np.ndarray:
-    reverse_table = np.empty((max(reverse_map.keys()) + 1, 3), dtype=np.int16)
-    for p_index, xyz in reverse_map.items():
-        reverse_table[p_index] = xyz
-    return reverse_table
 
 
 def _snap_cache_rotations(
@@ -1069,170 +950,8 @@ def _process_conformer(
     conformer_index: int,
     config: _StackWorkConfig,
     pose_writer: PoseWriter,
-    reverse_table: np.ndarray | None,
-) -> tuple[int, int, np.ndarray | None]:
-    if config.precalculated_anchor is not None:
-        candidates, surviving = _process_conformer_precalculated(
-            conformer_index, config, pose_writer
-        )
-        return candidates, surviving, reverse_table
-
-    total_candidates = 0
-    total_surviving = 0
-
-    ring_coordinates = config.coordinates[conformer_index, config.ring_mask]
-    if len(ring_coordinates) < 3:
-        return total_candidates, total_surviving, reverse_table
-
-    rotamer_end = int(config.rotaconformers_index[conformer_index])
-    rotamer_start = (
-        0
-        if conformer_index == 0
-        else int(config.rotaconformers_index[conformer_index - 1])
-    )
-    rotamer_count = rotamer_end - rotamer_start
-    if rotamer_count <= 0:
-        return total_candidates, total_surviving, reverse_table
-
-    if config.selected_rotamer_positions is None:
-        local_rotamer_indices = np.arange(rotamer_count, dtype=np.int64)
-        rotamer_block = config.rotaconformers[rotamer_start:rotamer_end]
-    else:
-        local_rotamer_indices = config.selected_rotamer_positions.astype(
-            np.int64, copy=False
-        )
-        rotamer_block = config.rotaconformers[rotamer_start + local_rotamer_indices]
-
-    rotamer_matrices = _rotamers_to_matrices(rotamer_block)
-    base_center = ring_coordinates.mean(axis=0)
-    base_plane = calc_plane(ring_coordinates)
-    base_x = ring_coordinates[0] - base_center
-    ring_planes = base_plane @ rotamer_matrices
-
-    cross_norm = np.linalg.norm(
-        np.cross(config.protein_plane[None, :], ring_planes), axis=1
-    )
-    cross_norm = np.minimum(cross_norm, 1.0)
-    angles = np.arcsin(cross_norm)
-
-    ring_centers = base_center @ rotamer_matrices
-    ring_x = base_x @ rotamer_matrices
-    ring_x -= (
-        np.einsum("ij,j->i", ring_x, config.protein_plane)[:, None]
-        * config.protein_plane[None, :]
-    )
-    ring_x_norm = np.linalg.norm(ring_x, axis=1)
-    degenerate = ring_x_norm < 0.0001
-    safe_norm = np.where(degenerate, 1.0, ring_x_norm)
-    normalized_ring_x = ring_x / safe_norm[:, None]
-    dihedral_x = np.einsum("ij,j->i", normalized_ring_x, config.protein_x)
-    dihedral_y = np.einsum("ij,j->i", normalized_ring_x, config.protein_y)
-    dihedral = np.angle(dihedral_x + 1.0j * dihedral_y)
-    dihedral[degenerate] = np.pi / 2
-
-    angle_mask = _dihedral_filter(
-        angles,
-        dihedral,
-        max_angle_deg=config.max_angle_deg,
-        dihedral_min_deg=config.dihedral_min_deg,
-        dihedral_max_deg=config.dihedral_max_deg,
-    )
-    if not np.any(angle_mask):
-        return total_candidates, total_surviving, reverse_table
-
-    if config.selected_rotamer_positions is None:
-        passing_rotamers_raw = np.flatnonzero(angle_mask).astype(np.int64, copy=False)
-    else:
-        passing_rotamers_raw = local_rotamer_indices[angle_mask]
-    if (
-        len(passing_rotamers_raw)
-        and passing_rotamers_raw.max() > np.iinfo(np.uint16).max
-    ):
-        raise ValueError(
-            "Rotamer index exceeds uint16 range; use --rotamer-range to constrain per-conformer rotamers"
-        )
-    if conformer_index > np.iinfo(np.uint16).max:
-        raise ValueError("Conformer index exceeds uint16 range")
-
-    passing_rotamers = passing_rotamers_raw.astype(np.uint16, copy=False)
-    passing_centers = ring_centers[angle_mask].astype(np.float32, copy=False)
-    if len(passing_centers) == 0:
-        return total_candidates, total_surviving, reverse_table
-
-    for batch_start in range(0, len(passing_centers), config.center_batch_size):
-        batch_end = min(batch_start + config.center_batch_size, len(passing_centers))
-        centers_batch = passing_centers[batch_start:batch_end]
-        rot_batch = passing_rotamers[batch_start:batch_end]
-
-        displacement_world = config.protein_center[None, :] - centers_batch
-        displacement_grid = displacement_world / GRID_SPACING
-        radius_grid = np.full(
-            (len(displacement_grid),),
-            (5.0 + config.margin) / GRID_SPACING,
-            dtype=np.float32,
-        )
-        disp_indices, p_indices, rounded, reverse_map = get_discrete_offsets(
-            displacement_grid,
-            radius_grid,
-        )
-        if len(disp_indices) == 0:
-            continue
-
-        total_candidates += len(disp_indices)
-
-        if reverse_table is None:
-            reverse_table = _build_reverse_table(reverse_map)
-
-        rounded16 = rounded.astype(np.int16, copy=False)
-        for offset_start in range(0, len(disp_indices), config.offset_chunk_size):
-            offset_end = min(
-                offset_start + config.offset_chunk_size,
-                len(disp_indices),
-            )
-            disp_chunk = disp_indices[offset_start:offset_end]
-            p_chunk = p_indices[offset_start:offset_end]
-
-            offset_grid = rounded16[disp_chunk] + reverse_table[p_chunk]
-            center_vec = (
-                offset_grid.astype(np.float32) * GRID_SPACING
-                - displacement_world[disp_chunk]
-            )
-
-            center_dis = np.linalg.norm(center_vec, axis=1)
-            axial = np.abs(center_vec.dot(config.protein_plane))
-            axial = np.maximum(0.0, np.minimum(center_dis - 0.001, axial))
-            lateral = np.sqrt(np.maximum(0.0, center_dis * center_dis - axial * axial))
-            center_dis_corrected = center_dis - lateral / LATERAL_SLOPE
-
-            mask_a = (axial >= 2.3 - config.margin) & (
-                axial <= 4.5 + config.margin
-            )
-            mask_b = (center_dis_corrected >= 2.3 - config.margin) & (
-                center_dis_corrected <= 3.8 + config.margin
-            )
-            mask_c = center_dis <= 5.0 + config.margin
-            keep_mask = mask_a & mask_b & mask_c
-            if not np.any(keep_mask):
-                continue
-
-            kept_disp = disp_chunk[keep_mask]
-            kept_p = p_chunk[keep_mask]
-            total_surviving += len(kept_disp)
-
-            translations = rounded16[kept_disp] + reverse_table[kept_p]
-            conformers_chunk = np.full(
-                len(kept_disp),
-                conformer_index,
-                dtype=np.uint16,
-            )
-            rotamers_chunk = rot_batch[kept_disp]
-            pose_writer.add_chunk(
-                conformers_chunk,
-                rotamers_chunk,
-                translations,
-            )
-
-    return total_candidates, total_surviving, reverse_table
+) -> tuple[int, int]:
+    return _process_conformer_precalculated(conformer_index, config, pose_writer)
 
 
 def _process_conformer_batch(
@@ -1256,7 +975,6 @@ def _process_conformer_batch(
     )
     total_candidates = 0
     total_surviving = 0
-    reverse_table: np.ndarray | None = None
     pending_conformers = 0
     pending_candidates = 0
     last_progress = time.monotonic()
@@ -1276,11 +994,10 @@ def _process_conformer_batch(
 
     try:
         for conformer_index in conformer_indices:
-            candidates, surviving, reverse_table = _process_conformer(
+            candidates, surviving = _process_conformer(
                 int(conformer_index),
                 config,
                 pose_writer,
-                reverse_table,
             )
             total_candidates += candidates
             total_surviving += surviving
@@ -1365,11 +1082,6 @@ def _chunk_conformers(
 
 
 def _run(args: argparse.Namespace) -> int:
-    dihedral_min_deg, dihedral_max_deg = None, None
-    if args.dihedral is not None:
-        dihedral_min_deg, dihedral_max_deg = _dihedral_pair(args.dihedral)
-    if args.margin < 0:
-        raise ValueError("--margin must be non-negative")
     if args.cache_size <= 0:
         raise ValueError("--cache-size must be positive")
     if args.bucket_size < 1 or args.bucket_size > 65535:
@@ -1380,25 +1092,6 @@ def _run(args: argparse.Namespace) -> int:
         raise ValueError("--poselock must be positive when set")
     if args.poselock is not None and args.poselock > args.nprocs:
         raise ValueError("--poselock must be smaller than or equal to --nprocs")
-    if args.precalculated_anchor is None:
-        if args.precalculated_threshold is not None:
-            raise ValueError(
-                "--precalculated-threshold requires --precalculated-anchor"
-            )
-        if args.anchor_reference_ring is not None:
-            raise ValueError("--anchor-reference-ring requires --precalculated-anchor")
-        if args.anchor_reference_protein_ring is not None:
-            raise ValueError(
-                "--anchor-reference-protein-ring requires --precalculated-anchor"
-            )
-        if args.angle is None:
-            raise ValueError("--angle is required without --precalculated-anchor")
-        if args.dihedral is None:
-            raise ValueError("--dihedral is required without --precalculated-anchor")
-    elif args.anchor_reference_ring is None:
-        raise ValueError(
-            "--anchor-reference-ring is required with --precalculated-anchor"
-        )
 
     output_dir = Path(args.output)
     if discover_organized(output_dir):
@@ -1423,11 +1116,6 @@ def _run(args: argparse.Namespace) -> int:
             f"Residue {args.resid} ({protein_resname}) is not an aromatic supported protein ring"
         )
     protein_center = protein_ring.mean(axis=0)
-    protein_plane = calc_plane(protein_ring)
-    protein_x = protein_ring[0] - protein_center
-    protein_x /= np.linalg.norm(protein_x)
-    protein_y = np.cross(protein_plane, protein_x)
-    protein_y /= np.linalg.norm(protein_y)
 
     print("[2/7] Loading fragment library...", file=sys.stderr)
     coordinates, conformer_mask, ring_mask, rotaconformers, rotaconformers_index = (
@@ -1444,7 +1132,7 @@ def _run(args: argparse.Namespace) -> int:
         args.conformer,
     )
     print(
-        f"[3/7] Filtering angle/dihedral for {len(selected_conformers)} conformers...",
+        f"[3/7] Selected {len(selected_conformers)} conformers...",
         file=sys.stderr,
     )
 
@@ -1454,48 +1142,36 @@ def _run(args: argparse.Namespace) -> int:
         rotaconformers_index,
     )
 
-    precalculated_anchor = None
-    if args.precalculated_anchor is not None:
-        protein_reference_path = args.anchor_reference_protein_ring
-        if protein_reference_path is None:
-            reference_name = _protein_reference_name(protein_resname)
-            protein_reference_path = str(
-                Path(args.anchor_reference_ring).parent
-                / f"refe-{reference_name}.npy"
-            )
-            if not Path(protein_reference_path).is_file():
-                raise ValueError(
-                    "could not locate the canonical protein ring automatically: "
-                    f"{protein_reference_path}; pass --anchor-reference-protein-ring"
-                )
-        print("[3/7] Loading precalculated anchor filter...", file=sys.stderr)
-        precalculated_anchor = _load_precalculated_anchor(
-            args.precalculated_anchor,
-            args.precalculated_threshold,
-            args.anchor_reference_ring,
-            protein_reference_path,
-            protein_ring,
+    protein_reference_path = args.anchor_reference_protein_ring
+    if protein_reference_path is None:
+        reference_name = _protein_reference_name(protein_resname)
+        protein_reference_path = str(
+            Path(args.anchor_reference_ring).parent / f"refe-{reference_name}.npy"
         )
-        selected_base = args.sequence[0 if args.first else 1]
-        expected_ring_size = 9 if selected_base in {"A", "G"} else 6
-        if len(precalculated_anchor.nucleotide_reference) != expected_ring_size:
-            canonical = "A/purine" if expected_ring_size == 9 else "C/pyrimidine"
+        if not Path(protein_reference_path).is_file():
             raise ValueError(
-                f"selected base {selected_base} requires the {canonical} reference "
-                f"with {expected_ring_size} ring atoms, got {len(precalculated_anchor.nucleotide_reference)}"
+                "could not locate the canonical protein ring automatically: "
+                f"{protein_reference_path}; pass --anchor-reference-protein-ring"
             )
+    print("[3/7] Loading precalculated anchor filter...", file=sys.stderr)
+    precalculated_anchor = _load_precalculated_anchor(
+        args.precalculated_anchor,
+        args.anchor_reference_ring,
+        protein_reference_path,
+        protein_ring,
+    )
+    selected_base = args.sequence[0 if args.first else 1]
+    expected_ring_size = 9 if selected_base in {"A", "G"} else 6
+    if len(precalculated_anchor.nucleotide_reference) != expected_ring_size:
+        canonical = "A/purine" if expected_ring_size == 9 else "C/pyrimidine"
+        raise ValueError(
+            f"selected base {selected_base} requires the {canonical} reference "
+            f"with {expected_ring_size} ring atoms, got {len(precalculated_anchor.nucleotide_reference)}"
+        )
 
     print("[4/7] Generating offset candidates...", file=sys.stderr)
-    if precalculated_anchor is None:
-        print("[5/7] Applying distance-vector filter...", file=sys.stderr)
-    else:
-        print("[5/7] Collapsing cache candidates onto the pose grid...", file=sys.stderr)
-    center_batch_size = (
-        128
-        if precalculated_anchor is not None
-        else (512 if args.rotamer_range is not None else 256)
-    )
-    offset_chunk_size = 2_000_000
+    print("[5/7] Collapsing cache candidates onto the pose grid...", file=sys.stderr)
+    center_batch_size = 128
     total_candidates = 0
     total_surviving = 0
     total_poses = 0
@@ -1520,39 +1196,23 @@ def _run(args: argparse.Namespace) -> int:
         rotaconformers_index=rotaconformers_index,
         selected_rotamer_positions=selected_rotamer_positions,
         protein_center=protein_center,
-        protein_plane=protein_plane,
-        protein_x=protein_x,
-        protein_y=protein_y,
-        max_angle_deg=args.angle,
-        margin=args.margin,
-        dihedral_min_deg=dihedral_min_deg,
-        dihedral_max_deg=dihedral_max_deg,
         output_dir=output_dir,
         cache_size=args.cache_size,
         bucket_size=args.bucket_size,
         unorganized_subdirs=bool(args.unorganized_subdirs),
         center_batch_size=center_batch_size,
-        offset_chunk_size=offset_chunk_size,
         writer_memory_lock=writer_memory_lock,
         precalculated_anchor=precalculated_anchor,
     )
 
     conformer_pbar = tqdm(
         total=len(selected_conformers),
-        desc=(
-            "Conformer-cache filter"
-            if precalculated_anchor is not None
-            else "Conformer-angle filter"
-        ),
+        desc="Conformer-cache filter",
         unit="conf",
         mininterval=2.0,
     )
     distance_pbar = tqdm(
-        desc=(
-            "Offset-cache filter"
-            if precalculated_anchor is not None
-            else "Offset-distance filter"
-        ),
+        desc="Offset-cache filter",
         unit="cand",
         mininterval=2.0,
     )

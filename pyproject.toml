@@ -39,3 +39,4 @@ alaric-propagate-provenance = "alaric.middle.propagate_provenance:main"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+markers = ["gaussian_caches: needs installed precomputed-filters/gaussian-rrm caches (skips if absent; fails if ALARIC_GAUSSIAN_CACHES_REQUIRED=1)"]

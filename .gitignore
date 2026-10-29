@@ -59,3 +59,5 @@ tests/1b7f-project-*/
 alaric.egg-info/
 
 build/
+# Precomputed filter caches (regenerate with util/gaussian-precalc-all.py)
+precomputed-filters/

@@ -24,9 +24,7 @@ anchor_opts=(
   --protein {{ protein_path }} \
   --resid {{ resid }} \
   --sequence {{ sequence }} \
-  --dihedral {{ dihedral_args }} \
-  --angle {{ angle }} \
-  --margin {{ margin }} \
+  {{ precalculated_args }} \
   {{ nucleotide_flag }} \
   --output {{ output_path }} \
   {{ exclude_args }} \

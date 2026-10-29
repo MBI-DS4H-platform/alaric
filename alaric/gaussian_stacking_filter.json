@@ -1,0 +1,3146 @@
+{
+ "schema": 1,
+ "filter_set_version": "2026.1",
+ "spec_digest": "bf1e90c08d7ef65eb78ef13b424162059389d92411c9406d0e2376a1bf358a7a",
+ "model": {
+  "descriptor_order": [
+   "distance_A",
+   "displacement_rad",
+   "tilt_rad"
+  ],
+  "definitions": {
+   "v": "RNA ring centroid minus protein ring centroid, in the protein ring frame (z is the protein normal)",
+   "d": "|v|",
+   "phi": "arccos(|v_z|/d), the angle from the protein normal; stage 3's slip angle is the same phi",
+   "theta": "arccos(min(1, |R33|)), the angle between the two ring normals",
+   "normals": "Kabsch fit of each ring onto the reference rings (G->A, U->C, TYR->PHE)"
+  },
+  "mean": [
+   3.778988652846167,
+   0.3359170155526752,
+   0.21710309041293038
+  ],
+  "covariance": [
+   [
+    0.13402643421739668,
+    0.048747464673082525,
+    0.03661672105978793
+   ],
+   [
+    0.048747464673082525,
+    0.05051245758442225,
+    0.018930688724029816
+   ],
+   [
+    0.03661672105978793,
+    0.018930688724029816,
+    0.039514509672839315
+   ]
+  ],
+  "precision": [
+   [
+    13.055035569772702,
+    -9.829936278368704,
+    -7.388302029768115
+   ],
+   [
+    -9.829936278368704,
+    31.531026898594526,
+    -5.996886272605505
+   ],
+   [
+    -7.388302029768115,
+    -5.996886272605505,
+    35.02664194314763
+   ]
+  ],
+  "normalizer": 0.17639457343866755,
+  "formula": "score = exp(-q/2)/normalizer",
+  "quadratic_form": "q = P00*D0^2 + P11*D1^2 + P22*D2^2 + 2*(P01*D0*D1 + P02*D0*D2 + P12*D1*D2), D = x - mean",
+  "degrees_to_radians": "deg*(pi/180)",
+  "source": {
+   "path": "/srv/shared/stacking-prediction-plots/recover-gaussian/gaussian_model.json",
+   "sha256": "0bfb8acf592dc45a52819a41618583e7a5624b7f3cdcaa71d70d910f47cc7db8"
+  }
+ },
+ "mask": {
+  "applies_to": "caches, pose_pass, browser",
+  "distance_lt_A": 5,
+  "displacement_lt_deg": 60,
+  "exact": {
+   "distance": "x^2+y^2+z^2 < 25",
+   "displacement": "3z^2 > x^2+y^2"
+  }
+ },
+ "filters": {
+  "tilt30": {
+   "descriptor": "tilt",
+   "lt_deg": 30,
+   "exact": "4*R33^2 > 3"
+  },
+  "disp45": {
+   "descriptor": "displacement",
+   "lt_deg": 45,
+   "exact": "z^2 > x^2+y^2"
+  }
+ },
+ "grid": {
+  "hopf": {
+   "faces": 6,
+   "n": 16,
+   "npsi": 64,
+   "cells": 98304,
+   "index": "((face*16+p)*16+q)*64+m"
+  },
+  "lattice": {
+   "min": -5,
+   "max": 5,
+   "step": 0.25,
+   "order": "C (z fastest)",
+   "origin": "excluded"
+  },
+  "layout": "canonical: rows/translations with >=1 accepted pair; int32 sizes/concat"
+ },
+ "thresholds": {
+  "rrm50": {
+   "rrm_target": 50,
+   "parent": null,
+   "filters": [],
+   "accept": ">=",
+   "cutoff": 3.30384,
+   "cutoff_decimal": "3.30384",
+   "raw_cutoff": 3.303844018095503,
+   "cutoff_rule": "parent Gaussian-only RRM-N cutoff of the report, floored to 1e-5",
+   "source": {
+    "report_line": 42,
+    "cutoff_report_line": 42,
+    "table": "RRM-derived cutoffs evaluated on the test set"
+   },
+   "achieved": {
+    "rrm_positives": {
+     "count": 230,
+     "of": 460
+    },
+    "achieved_recall": 0.5,
+    "negatives": {
+     "count": 183,
+     "of": 100000,
+     "set": "resampled envelope synthetic (seed 20261026)"
+    },
+    "test_positives": {
+     "count": 27,
+     "of": 58
+    }
+   },
+   "precalc": {
+    "dir": "precomputed-filters/gaussian/rrm50",
+    "files": {
+     "rotations": {
+      "sha256": "8936267a637baac1faecfaba239680240791c39feb9d308281e742e7cc24944d",
+      "npy_sha256": "5622181b332da45c239e652ef0bbd78985c416eb606401e183c87681e5a3a283",
+      "shape": [
+       7920,
+       3,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "translations": {
+      "sha256": "7747c547d09354a37577ea1e81c8a79f116fa53892d69e57779a9a90535cb5e1",
+      "npy_sha256": "cc0824d349460bd61c6ce67ce0fa878ffa121c64e60504958293cf6050c716e6",
+      "shape": [
+       728,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "filtered-sizes": {
+      "sha256": "16b0675314e651241bc8641257f96ce83cc7921c2d5fe74a4f93bff05ffdb203",
+      "npy_sha256": "16aeec70b9aa6d848482557143cd028b3236f18ceb832f4e3b0cb52972ce99ad",
+      "shape": [
+       7920
+      ],
+      "dtype": "<i4"
+     },
+     "filtered-concat": {
+      "sha256": "ae8185558e587cce8dcd3cc0ee33e449f04ca8886c8da1e75d40e5b64d1205c1",
+      "npy_sha256": "4930260c63aec1b7bb53bd7de2cc9564159f9826eb3d6e08e3cea709591b8f10",
+      "shape": [
+       4111232
+      ],
+      "dtype": "<i4"
+     }
+    },
+    "counts": {
+     "rotations": 7920,
+     "translations": 728,
+     "pairs": 4111232
+    },
+    "audit": {
+     "min_rel_margin": 1.2092472232438922e-06,
+     "min_tilt_gap": 0.0006063617420535294
+    }
+   }
+  },
+  "rrm60": {
+   "rrm_target": 60,
+   "parent": null,
+   "filters": [],
+   "accept": ">=",
+   "cutoff": 2.90431,
+   "cutoff_decimal": "2.90431",
+   "raw_cutoff": 2.904318239783102,
+   "cutoff_rule": "parent Gaussian-only RRM-N cutoff of the report, floored to 1e-5",
+   "source": {
+    "report_line": 43,
+    "cutoff_report_line": 43,
+    "table": "RRM-derived cutoffs evaluated on the test set"
+   },
+   "achieved": {
+    "rrm_positives": {
+     "count": 276,
+     "of": 460
+    },
+    "achieved_recall": 0.6,
+    "negatives": {
+     "count": 246,
+     "of": 100000,
+     "set": "resampled envelope synthetic (seed 20261026)"
+    },
+    "test_positives": {
+     "count": 34,
+     "of": 58
+    }
+   },
+   "precalc": {
+    "dir": "precomputed-filters/gaussian/rrm60",
+    "files": {
+     "rotations": {
+      "sha256": "330b0cf01224be066125a3a9ed60fdad7eb06605c439d71c7290632b7f3226d9",
+      "npy_sha256": "b4d9ef4653953c747a18042fb125041d28b6d77ad4286f8378fc661d6896e5c9",
+      "shape": [
+       8824,
+       3,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "translations": {
+      "sha256": "4867ae8e273943418976e6ab50820c8433c24e3bb70c6ebb0b20de44826fc1cc",
+      "npy_sha256": "b58b0f6663eaeee9394b27402e6efabadb195eeeb58b4c5151f12c3c82e6093f",
+      "shape": [
+       1144,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "filtered-sizes": {
+      "sha256": "d2fb5185d0adaf5363a10e71509419571f5f9111b982c36187b6b6d39cbadaa8",
+      "npy_sha256": "07c25f5c0d026b45d7d2f2992112c09f84ac63ef1d27372d02e1f556efda99dd",
+      "shape": [
+       8824
+      ],
+      "dtype": "<i4"
+     },
+     "filtered-concat": {
+      "sha256": "a8064911c458c0373220d94f8fe2d4215860499429cc51071b3f5751deca87ef",
+      "npy_sha256": "f1e2368b5606c872bed38b942cae59ab4876152953d5dbf355a9040cb2ee8415",
+      "shape": [
+       6105920
+      ],
+      "dtype": "<i4"
+     }
+    },
+    "counts": {
+     "rotations": 8824,
+     "translations": 1144,
+     "pairs": 6105920
+    },
+    "audit": {
+     "min_rel_margin": 6.46860873754207e-06,
+     "min_tilt_gap": 0.0006063617420535294
+    }
+   }
+  },
+  "rrm70": {
+   "rrm_target": 70,
+   "parent": null,
+   "filters": [],
+   "accept": ">=",
+   "cutoff": 2.04198,
+   "cutoff_decimal": "2.04198",
+   "raw_cutoff": 2.04198041493334,
+   "cutoff_rule": "parent Gaussian-only RRM-N cutoff of the report, floored to 1e-5",
+   "source": {
+    "report_line": 44,
+    "cutoff_report_line": 44,
+    "table": "RRM-derived cutoffs evaluated on the test set"
+   },
+   "achieved": {
+    "rrm_positives": {
+     "count": 322,
+     "of": 460
+    },
+    "achieved_recall": 0.7,
+    "negatives": {
+     "count": 493,
+     "of": 100000,
+     "set": "resampled envelope synthetic (seed 20261026)"
+    },
+    "test_positives": {
+     "count": 46,
+     "of": 58
+    }
+   },
+   "precalc": {
+    "dir": "precomputed-filters/gaussian/rrm70",
+    "files": {
+     "rotations": {
+      "sha256": "dd3ff026c1122a0b2366cdd04ed9e897e313315e6614a4f9e7527c2240d3d536",
+      "npy_sha256": "264ea27f0b95bef9c4aa3651bcb6d1fcfc4f7c62ea3726f8b47b405f2c57650d",
+      "shape": [
+       11368,
+       3,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "translations": {
+      "sha256": "d28e42788acdc3e75c302c3ea8bc3e7614a0cdad2ff0eafcacab1178fe5ce0f2",
+      "npy_sha256": "ba3ae2dd2f1bb24dcf8ae806f27d9c21f8e7372c36c082e96ed67b264f555f6f",
+      "shape": [
+       1640,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "filtered-sizes": {
+      "sha256": "cad35fa7f3fafcc539ec84fda030a8bc985064981e067980013e52d6526b66fe",
+      "npy_sha256": "0e1d08739d387754f6ed193b678f1647e171568f075aa00ec035a39b24c93fdc",
+      "shape": [
+       11368
+      ],
+      "dtype": "<i4"
+     },
+     "filtered-concat": {
+      "sha256": "d53bbfa5da140b4eb1d92e92e98d9d08014ef4cda951e88149226f6d2b68ec0a",
+      "npy_sha256": "7dd52a181c5741bd8b30cf8f2fef7f7d20d48ad8bbc08a43271500d4d88e2aa1",
+      "shape": [
+       12303744
+      ],
+      "dtype": "<i4"
+     }
+    },
+    "counts": {
+     "rotations": 11368,
+     "translations": 1640,
+     "pairs": 12303744
+    },
+    "audit": {
+     "min_rel_margin": 1.482638397609648e-06,
+     "min_tilt_gap": 0.0006063617420535294
+    }
+   }
+  },
+  "rrm80": {
+   "rrm_target": 80,
+   "parent": null,
+   "filters": [],
+   "accept": ">=",
+   "cutoff": 1.19748,
+   "cutoff_decimal": "1.19748",
+   "raw_cutoff": 1.1974880057674258,
+   "cutoff_rule": "parent Gaussian-only RRM-N cutoff of the report, floored to 1e-5",
+   "source": {
+    "report_line": 45,
+    "cutoff_report_line": 45,
+    "table": "RRM-derived cutoffs evaluated on the test set"
+   },
+   "achieved": {
+    "rrm_positives": {
+     "count": 368,
+     "of": 460
+    },
+    "achieved_recall": 0.8,
+    "negatives": {
+     "count": 182,
+     "of": 18592,
+     "set": "envelope synthetic"
+    },
+    "test_positives": {
+     "count": 52,
+     "of": 58
+    }
+   },
+   "precalc": {
+    "dir": "precomputed-filters/gaussian/rrm80",
+    "files": {
+     "rotations": {
+      "sha256": "925a49d2e560fa0aa840928de31a92fdc8fc21e04deb4d0338bf596ed4608375",
+      "npy_sha256": "bfe9b78e9e08675eaa7e6f401df958f68c6293dc93bcf65d803d916d90b2103c",
+      "shape": [
+       14776,
+       3,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "translations": {
+      "sha256": "d9438a431a3c7e6090d6446d3b0ab5608394c6bff85bcf98ce260405a411b24f",
+      "npy_sha256": "09fe0ac178093795aa5a9cea12ec4478c842640d48e6a19e00291137a62bdce9",
+      "shape": [
+       2484,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "filtered-sizes": {
+      "sha256": "85dfccdad46a6aee1aada3733e8b229fa431b20924e5bd8ece387a405465e5f1",
+      "npy_sha256": "f6edec6da53ae9ab7445df1cb29c36d6f029018d904080d99564284e302507c1",
+      "shape": [
+       14776
+      ],
+      "dtype": "<i4"
+     },
+     "filtered-concat": {
+      "sha256": "951a17d4f08ad401401b5555204e39cd4fcf84c12dab54c6b83bedd9c9cab104",
+      "npy_sha256": "706d33ff7be01ca82f19a51da157d2853bfc854eb2d4c46352a449ff93e4edb5",
+      "shape": [
+       23988416
+      ],
+      "dtype": "<i4"
+     }
+    },
+    "counts": {
+     "rotations": 14776,
+     "translations": 2484,
+     "pairs": 23988416
+    },
+    "audit": {
+     "min_rel_margin": 1.2771707311731717e-06,
+     "min_tilt_gap": 0.0006063617420535294
+    }
+   }
+  },
+  "rrm90": {
+   "rrm_target": 90,
+   "parent": null,
+   "filters": [],
+   "accept": ">=",
+   "cutoff": 0.27592,
+   "cutoff_decimal": "0.27592",
+   "raw_cutoff": 0.27592087772968793,
+   "cutoff_rule": "parent Gaussian-only RRM-N cutoff of the report, floored to 1e-5",
+   "source": {
+    "report_line": 59,
+    "cutoff_report_line": 46,
+    "table": "Added filters at fixed Gaussian-only cutoffs"
+   },
+   "achieved": {
+    "rrm_positives": {
+     "count": 414,
+     "of": 460
+    },
+    "achieved_recall": 0.9,
+    "negatives": {
+     "count": 578,
+     "of": 18592,
+     "set": "envelope synthetic"
+    },
+    "test_positives": {
+     "count": 57,
+     "of": 58
+    }
+   },
+   "precalc": {
+    "dir": "precomputed-filters/gaussian/rrm90",
+    "files": {
+     "rotations": {
+      "sha256": "4e0a7b5c9a5415b120e6b85e7b687635d29117a652609e1406657a87ac567fd5",
+      "npy_sha256": "67ad0ba000c7eed14a29f905436c0dacc9b384983fff0725a7cda5dab7fe283b",
+      "shape": [
+       22928,
+       3,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "translations": {
+      "sha256": "b5a00a7e22fc1465bd45b0242dd9e7b4410e4faa31191dee63ddb350744eefad",
+      "npy_sha256": "06cd098cc9e78b9c6d24594b11b67d86c36184e3c6cc9c91ae19f634a23cb6d3",
+      "shape": [
+       5450,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "filtered-sizes": {
+      "sha256": "59e2ddd46c7b6e9394adc42d474036ae254552ff682b4d31a9bf187215375daa",
+      "npy_sha256": "d4d9af525eb861d623194b5e8e4cf4367ffc77a24819080486683a7b446ded4f",
+      "shape": [
+       22928
+      ],
+      "dtype": "<i4"
+     },
+     "filtered-concat": {
+      "sha256": "5a8e37c26ea407bd2e2aa15672f7739cb25291d253336929de4f657a100419be",
+      "npy_sha256": "058242bdf64ee30a51c98f5815f12b0214cc31494cb3af2b34f14db2eca3fd41",
+      "shape": [
+       80969280
+      ],
+      "dtype": "<i4"
+     }
+    },
+    "counts": {
+     "rotations": 22928,
+     "translations": 5450,
+     "pairs": 80969280
+    },
+    "audit": {
+     "min_rel_margin": 3.776362945906442e-06,
+     "min_tilt_gap": 0.0006063617420535294
+    }
+   }
+  },
+  "rrm90-tilt30": {
+   "rrm_target": 90,
+   "parent": "rrm90",
+   "filters": [
+    "tilt30"
+   ],
+   "accept": ">=",
+   "cutoff": 0.27592,
+   "cutoff_decimal": "0.27592",
+   "raw_cutoff": 0.27592087772968793,
+   "cutoff_rule": "parent Gaussian-only RRM-N cutoff of the report, floored to 1e-5; prefilters on top",
+   "source": {
+    "report_line": 60,
+    "cutoff_report_line": 46,
+    "table": "Added filters at fixed Gaussian-only cutoffs"
+   },
+   "achieved": {
+    "rrm_positives": {
+     "count": 411,
+     "of": 460
+    },
+    "achieved_recall": 0.8934782608695652,
+    "negatives": {
+     "count": 414,
+     "of": 18592,
+     "set": "envelope synthetic"
+    },
+    "test_positives": null
+   },
+   "precalc": {
+    "dir": "precomputed-filters/gaussian/rrm90-tilt30",
+    "files": {
+     "rotations": {
+      "sha256": "ca35d500b67a4e6e8d76a93a46d84560896aad2af06597b8794aaf422a9727c1",
+      "npy_sha256": "ba0b42805abe1ca386234023d55b69d3b9d9e7ee1aad2515cb0f2241dd62fd0f",
+      "shape": [
+       12736,
+       3,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "translations": {
+      "sha256": "b5a00a7e22fc1465bd45b0242dd9e7b4410e4faa31191dee63ddb350744eefad",
+      "npy_sha256": "06cd098cc9e78b9c6d24594b11b67d86c36184e3c6cc9c91ae19f634a23cb6d3",
+      "shape": [
+       5450,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "filtered-sizes": {
+      "sha256": "764395d1a6813d035e63771f650389f4b4435393afe2a251f50dbfa940fa089d",
+      "npy_sha256": "bc6bb8839d7ac35aea2ed970ee1bf42d04287f3dc94d4d249fe2136e7343b697",
+      "shape": [
+       12736
+      ],
+      "dtype": "<i4"
+     },
+     "filtered-concat": {
+      "sha256": "0b6ec6b846b1b34daf0ad387d88bea8fd00ea5ea974cad7c6902b9deb7820748",
+      "npy_sha256": "86bc0ad41d338affbfae7178e58677bd9f69b909a27bc5ce319eeec170b2959f",
+      "shape": [
+       57538752
+      ],
+      "dtype": "<i4"
+     }
+    },
+    "counts": {
+     "rotations": 12736,
+     "translations": 5450,
+     "pairs": 57538752
+    },
+    "audit": {
+     "min_rel_margin": 9.5522819258953e-06,
+     "min_tilt_gap": 0.0006063617420535294
+    }
+   }
+  },
+  "rrm90-disp45": {
+   "rrm_target": 90,
+   "parent": "rrm90",
+   "filters": [
+    "disp45"
+   ],
+   "accept": ">=",
+   "cutoff": 0.27592,
+   "cutoff_decimal": "0.27592",
+   "raw_cutoff": 0.27592087772968793,
+   "cutoff_rule": "parent Gaussian-only RRM-N cutoff of the report, floored to 1e-5; prefilters on top",
+   "source": {
+    "report_line": 61,
+    "cutoff_report_line": 46,
+    "table": "Added filters at fixed Gaussian-only cutoffs"
+   },
+   "achieved": {
+    "rrm_positives": {
+     "count": 413,
+     "of": 460
+    },
+    "achieved_recall": 0.8978260869565218,
+    "negatives": {
+     "count": 533,
+     "of": 18592,
+     "set": "envelope synthetic"
+    },
+    "test_positives": null
+   },
+   "precalc": {
+    "dir": "precomputed-filters/gaussian/rrm90-disp45",
+    "files": {
+     "rotations": {
+      "sha256": "4e0a7b5c9a5415b120e6b85e7b687635d29117a652609e1406657a87ac567fd5",
+      "npy_sha256": "67ad0ba000c7eed14a29f905436c0dacc9b384983fff0725a7cda5dab7fe283b",
+      "shape": [
+       22928,
+       3,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "translations": {
+      "sha256": "1a074fbfdf228c87a92735990f2f4d5326d47aad3093a951445464d89e49196f",
+      "npy_sha256": "589f832475ec7f98fcaf16b34debeb5556917d1092f4bc41c7d3e6dd750786ea",
+      "shape": [
+       4658,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "filtered-sizes": {
+      "sha256": "4d5ee9db8a898508f069120fbc43db3a0728e0e1ce6337dd541fdb85b0123fe2",
+      "npy_sha256": "dd410e96babf0dc16fdb922daf3a38b37927f277d9deaaf8e02c16baaa94f051",
+      "shape": [
+       22928
+      ],
+      "dtype": "<i4"
+     },
+     "filtered-concat": {
+      "sha256": "dc7a9a1aad54dc7ae8b5351005b56560b9c6cf901980bf6e1570ab210bfc36ed",
+      "npy_sha256": "cdb2b9580b170322c4a702de8b80a1ee41c7d311b4d051e2a8888c93c9ae7ffa",
+      "shape": [
+       72710144
+      ],
+      "dtype": "<i4"
+     }
+    },
+    "counts": {
+     "rotations": 22928,
+     "translations": 4658,
+     "pairs": 72710144
+    },
+    "audit": {
+     "min_rel_margin": 4.2230005959931205e-06,
+     "min_tilt_gap": 0.0006063617420535294
+    }
+   }
+  },
+  "rrm90-tilt30-disp45": {
+   "rrm_target": 90,
+   "parent": "rrm90",
+   "filters": [
+    "tilt30",
+    "disp45"
+   ],
+   "accept": ">=",
+   "cutoff": 0.27592,
+   "cutoff_decimal": "0.27592",
+   "raw_cutoff": 0.27592087772968793,
+   "cutoff_rule": "parent Gaussian-only RRM-N cutoff of the report, floored to 1e-5; prefilters on top",
+   "source": {
+    "report_line": 62,
+    "cutoff_report_line": 46,
+    "table": "Added filters at fixed Gaussian-only cutoffs"
+   },
+   "achieved": {
+    "rrm_positives": {
+     "count": 410,
+     "of": 460
+    },
+    "achieved_recall": 0.8913043478260869,
+    "negatives": {
+     "count": 375,
+     "of": 18592,
+     "set": "envelope synthetic"
+    },
+    "test_positives": null
+   },
+   "precalc": {
+    "dir": "precomputed-filters/gaussian/rrm90-tilt30-disp45",
+    "files": {
+     "rotations": {
+      "sha256": "ca35d500b67a4e6e8d76a93a46d84560896aad2af06597b8794aaf422a9727c1",
+      "npy_sha256": "ba0b42805abe1ca386234023d55b69d3b9d9e7ee1aad2515cb0f2241dd62fd0f",
+      "shape": [
+       12736,
+       3,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "translations": {
+      "sha256": "1a074fbfdf228c87a92735990f2f4d5326d47aad3093a951445464d89e49196f",
+      "npy_sha256": "589f832475ec7f98fcaf16b34debeb5556917d1092f4bc41c7d3e6dd750786ea",
+      "shape": [
+       4658,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "filtered-sizes": {
+      "sha256": "0e7aa3cea861dba849ab2f117622d1807070a69e35bd372d99193c234a745567",
+      "npy_sha256": "39153256a1488b9f35e83d80a85b8493c2c7eaf2a1fa3283593cadfdd4125bc7",
+      "shape": [
+       12736
+      ],
+      "dtype": "<i4"
+     },
+     "filtered-concat": {
+      "sha256": "5d1567aed49734ea0fc5490ee190dc82f502c88469362b93344fa317e79d0780",
+      "npy_sha256": "348a82b2f653802ff0345db54697415692d41ed7e478bd80e5c8ba260b2d41c1",
+      "shape": [
+       50635520
+      ],
+      "dtype": "<i4"
+     }
+    },
+    "counts": {
+     "rotations": 12736,
+     "translations": 4658,
+     "pairs": 50635520
+    },
+    "audit": {
+     "min_rel_margin": 9.5522819258953e-06,
+     "min_tilt_gap": 0.0006063617420535294
+    }
+   }
+  },
+  "rrm95": {
+   "rrm_target": 95,
+   "parent": null,
+   "filters": [],
+   "accept": ">=",
+   "cutoff": 0.06141,
+   "cutoff_decimal": "0.06141",
+   "raw_cutoff": 0.06141634850710175,
+   "cutoff_rule": "parent Gaussian-only RRM-N cutoff of the report, floored to 1e-5",
+   "source": {
+    "report_line": 63,
+    "cutoff_report_line": 51,
+    "table": "Added filters at fixed Gaussian-only cutoffs"
+   },
+   "achieved": {
+    "rrm_positives": {
+     "count": 437,
+     "of": 460
+    },
+    "achieved_recall": 0.95,
+    "negatives": {
+     "count": 1305,
+     "of": 18592,
+     "set": "envelope synthetic"
+    },
+    "test_positives": {
+     "count": 58,
+     "of": 58
+    }
+   },
+   "precalc": {
+    "dir": "precomputed-filters/gaussian/rrm95",
+    "files": {
+     "rotations": {
+      "sha256": "f7978e349f291d6378f7a4409bfbcf24547f1e17790c6a49a02b98b5406c480e",
+      "npy_sha256": "52ba465e7a8cd73dcf80335a7a94ac9d4be0234c07260b2e75c46e9b88e8ed74",
+      "shape": [
+       30560,
+       3,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "translations": {
+      "sha256": "6d44d1978278e4c77ff0f3f65a5e8753198a08f328394b3bd9ea291e85203d75",
+      "npy_sha256": "02e85d764f7c26e252233c1a1e9e5f37d55d0c61abc11ac468fa9f504ae974f5",
+      "shape": [
+       8452,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "filtered-sizes": {
+      "sha256": "3704bb1824da4be17bb23cdb1172cb1c4a22b962663e13af8b599f6589b3c7f9",
+      "npy_sha256": "24f55c7bca29c565af9db80aabc03813e1b5a0ba45ee94735f259febccf18553",
+      "shape": [
+       30560
+      ],
+      "dtype": "<i4"
+     },
+     "filtered-concat": {
+      "sha256": "b8eede5e819e04f7f19855cc71d5147fc2e993f75561ecf4c5f8a846738c7a8c",
+      "npy_sha256": "6e868194e58e75341a3f4a898e3d0315a4844800eded57fb3762b64050f3c7e5",
+      "shape": [
+       173472656
+      ],
+      "dtype": "<i4"
+     }
+    },
+    "counts": {
+     "rotations": 30560,
+     "translations": 8452,
+     "pairs": 173472656
+    },
+    "audit": {
+     "min_rel_margin": 1.2862720799589056e-07,
+     "min_tilt_gap": 0.0006063617420535294
+    }
+   }
+  },
+  "rrm95-tilt30": {
+   "rrm_target": 95,
+   "parent": "rrm95",
+   "filters": [
+    "tilt30"
+   ],
+   "accept": ">=",
+   "cutoff": 0.06141,
+   "cutoff_decimal": "0.06141",
+   "raw_cutoff": 0.06141634850710175,
+   "cutoff_rule": "parent Gaussian-only RRM-N cutoff of the report, floored to 1e-5; prefilters on top",
+   "source": {
+    "report_line": 64,
+    "cutoff_report_line": 51,
+    "table": "Added filters at fixed Gaussian-only cutoffs"
+   },
+   "achieved": {
+    "rrm_positives": {
+     "count": 425,
+     "of": 460
+    },
+    "achieved_recall": 0.9239130434782609,
+    "negatives": {
+     "count": 718,
+     "of": 18592,
+     "set": "envelope synthetic"
+    },
+    "test_positives": null
+   },
+   "precalc": {
+    "dir": "precomputed-filters/gaussian/rrm95-tilt30",
+    "files": {
+     "rotations": {
+      "sha256": "ca35d500b67a4e6e8d76a93a46d84560896aad2af06597b8794aaf422a9727c1",
+      "npy_sha256": "ba0b42805abe1ca386234023d55b69d3b9d9e7ee1aad2515cb0f2241dd62fd0f",
+      "shape": [
+       12736,
+       3,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "translations": {
+      "sha256": "6d44d1978278e4c77ff0f3f65a5e8753198a08f328394b3bd9ea291e85203d75",
+      "npy_sha256": "02e85d764f7c26e252233c1a1e9e5f37d55d0c61abc11ac468fa9f504ae974f5",
+      "shape": [
+       8452,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "filtered-sizes": {
+      "sha256": "156962d11de1414c2a407f36c802691bf8a2126f77e9617acc6709069b264de6",
+      "npy_sha256": "b314600c7459ed29e0e0a63cd9e34b677a7251e00e4af4bfe7fd5a6961ac21e3",
+      "shape": [
+       12736
+      ],
+      "dtype": "<i4"
+     },
+     "filtered-concat": {
+      "sha256": "35f5726fa61beb133e637c6064a684c555af36b00da476aff435908f7341898a",
+      "npy_sha256": "b5d3f8476d4e72ecd949fc1aa39b7650c63555e781142dc73a9bca9b0cea8d7e",
+      "shape": [
+       93382960
+      ],
+      "dtype": "<i4"
+     }
+    },
+    "counts": {
+     "rotations": 12736,
+     "translations": 8452,
+     "pairs": 93382960
+    },
+    "audit": {
+     "min_rel_margin": 3.959502221650979e-07,
+     "min_tilt_gap": 0.0006063617420535294
+    }
+   }
+  },
+  "rrm95-disp45": {
+   "rrm_target": 95,
+   "parent": "rrm95",
+   "filters": [
+    "disp45"
+   ],
+   "accept": ">=",
+   "cutoff": 0.06141,
+   "cutoff_decimal": "0.06141",
+   "raw_cutoff": 0.06141634850710175,
+   "cutoff_rule": "parent Gaussian-only RRM-N cutoff of the report, floored to 1e-5; prefilters on top",
+   "source": {
+    "report_line": 65,
+    "cutoff_report_line": 51,
+    "table": "Added filters at fixed Gaussian-only cutoffs"
+   },
+   "achieved": {
+    "rrm_positives": {
+     "count": 432,
+     "of": 460
+    },
+    "achieved_recall": 0.9391304347826087,
+    "negatives": {
+     "count": 972,
+     "of": 18592,
+     "set": "envelope synthetic"
+    },
+    "test_positives": null
+   },
+   "precalc": {
+    "dir": "precomputed-filters/gaussian/rrm95-disp45",
+    "files": {
+     "rotations": {
+      "sha256": "f7978e349f291d6378f7a4409bfbcf24547f1e17790c6a49a02b98b5406c480e",
+      "npy_sha256": "52ba465e7a8cd73dcf80335a7a94ac9d4be0234c07260b2e75c46e9b88e8ed74",
+      "shape": [
+       30560,
+       3,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "translations": {
+      "sha256": "07f3362cc3c69bcc42abe847c12a786a57ab849a76b4e40741091b7ca6d05966",
+      "npy_sha256": "47c7266b9e062ea37a9bcd808bdb5fe6b23a9f93cbc3ff3bdd62c493e93b5189",
+      "shape": [
+       6012,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "filtered-sizes": {
+      "sha256": "6f44d5d3fad361caab1a654a6f8249cf086c7f8287f25c59680197961ada077d",
+      "npy_sha256": "90c700cf8ad3e9b22aefc5ed32927a6c4d75aa479c1c6197bfafb2281f35983a",
+      "shape": [
+       30560
+      ],
+      "dtype": "<i4"
+     },
+     "filtered-concat": {
+      "sha256": "773851f078f84cdd2738126ca09ee1fbd5a7c84544194ca7136c8753203d5e8b",
+      "npy_sha256": "2c1cff699dc403151a11512860ec95725dca4a5c0aa13a2c2f492d2fbf2775eb",
+      "shape": [
+       128908176
+      ],
+      "dtype": "<i4"
+     }
+    },
+    "counts": {
+     "rotations": 30560,
+     "translations": 6012,
+     "pairs": 128908176
+    },
+    "audit": {
+     "min_rel_margin": 1.2862720799589056e-07,
+     "min_tilt_gap": 0.0006063617420535294
+    }
+   }
+  },
+  "rrm95-tilt30-disp45": {
+   "rrm_target": 95,
+   "parent": "rrm95",
+   "filters": [
+    "tilt30",
+    "disp45"
+   ],
+   "accept": ">=",
+   "cutoff": 0.06141,
+   "cutoff_decimal": "0.06141",
+   "raw_cutoff": 0.06141634850710175,
+   "cutoff_rule": "parent Gaussian-only RRM-N cutoff of the report, floored to 1e-5; prefilters on top",
+   "source": {
+    "report_line": 66,
+    "cutoff_report_line": 51,
+    "table": "Added filters at fixed Gaussian-only cutoffs"
+   },
+   "achieved": {
+    "rrm_positives": {
+     "count": 423,
+     "of": 460
+    },
+    "achieved_recall": 0.9195652173913044,
+    "negatives": {
+     "count": 534,
+     "of": 18592,
+     "set": "envelope synthetic"
+    },
+    "test_positives": null
+   },
+   "precalc": {
+    "dir": "precomputed-filters/gaussian/rrm95-tilt30-disp45",
+    "files": {
+     "rotations": {
+      "sha256": "ca35d500b67a4e6e8d76a93a46d84560896aad2af06597b8794aaf422a9727c1",
+      "npy_sha256": "ba0b42805abe1ca386234023d55b69d3b9d9e7ee1aad2515cb0f2241dd62fd0f",
+      "shape": [
+       12736,
+       3,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "translations": {
+      "sha256": "07f3362cc3c69bcc42abe847c12a786a57ab849a76b4e40741091b7ca6d05966",
+      "npy_sha256": "47c7266b9e062ea37a9bcd808bdb5fe6b23a9f93cbc3ff3bdd62c493e93b5189",
+      "shape": [
+       6012,
+       3
+      ],
+      "dtype": "<f8"
+     },
+     "filtered-sizes": {
+      "sha256": "42227742a8bc949b88d7855ed264d83ce8b64cf64bc3977cdee67d16a1879de5",
+      "npy_sha256": "23dda8d1c2857451975be2cf4f5bccce60de1d8dec29f6f82f913d335aa07367",
+      "shape": [
+       12736
+      ],
+      "dtype": "<i4"
+     },
+     "filtered-concat": {
+      "sha256": "6a79093fdefa498948d18ded8fa6a7aecb5c5510aef505544a7e5db4eb64fb0a",
+      "npy_sha256": "2a9b857a8ec3f444b74017d75badc3cfeca8aa18fb323f25fe989720b558139c",
+      "shape": [
+       69059632
+      ],
+      "dtype": "<i4"
+     }
+    },
+    "counts": {
+     "rotations": 12736,
+     "translations": 6012,
+     "pairs": 69059632
+    },
+    "audit": {
+     "min_rel_margin": 3.848717328946982e-06,
+     "min_tilt_gap": 0.0006063617420535294
+    }
+   }
+  }
+ },
+ "golden": {
+  "notes": {
+   "decisions": "accept = score >= cutoff and the applied mask and the name's prefilters",
+   "boundary_points": "phi/theta boundary goldens (phi 45, 44.99999; theta 30, 29.99999) sit at the conditional mean of the other two descriptors given the fixed one, so the score is far above the cutoff and only the prefilter decides",
+   "lattice_decisions": "mask_accept covers the applied mask and the name's prefilters only; no score"
+  },
+  "tolerance_rel": 1e-12,
+  "scores": [
+   {
+    "d": 3.778988652846167,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "score": 5.669108638127693
+   },
+   {
+    "d": 3.5,
+    "phi_deg": 0.0,
+    "theta_deg": 0.0,
+    "score": 1.5350965274735997
+   },
+   {
+    "d": 4.0,
+    "phi_deg": 30.0,
+    "theta_deg": 20.0,
+    "score": 3.7720844966258613
+   },
+   {
+    "d": 4.5,
+    "phi_deg": 45.0,
+    "theta_deg": 30.0,
+    "score": 0.4299308606304265
+   },
+   {
+    "d": 5.5,
+    "phi_deg": 59.0,
+    "theta_deg": 60.0,
+    "score": 1.003684946195364e-05
+   },
+   {
+    "d": 4.213033715048206,
+    "phi_deg": 24.24718615414934,
+    "theta_deg": 3.9380656228423447,
+    "score": 0.8340775434593926,
+    "reference_score": 0.8340775434593833
+   },
+   {
+    "d": 4.180508002090943,
+    "phi_deg": 26.39468016721542,
+    "theta_deg": 7.434697605284257,
+    "score": 1.602629304722744,
+    "reference_score": 1.602629304722735
+   },
+   {
+    "d": 4.22791209048415,
+    "phi_deg": 22.314792483898444,
+    "theta_deg": 29.59373567750601,
+    "score": 1.138694644005175,
+    "reference_score": 1.1386946440051537
+   }
+  ],
+  "decisions": [
+   {
+    "name": "rrm50",
+    "d": 4.066596890537432,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm60",
+    "d": 4.066596890537432,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm70",
+    "d": 4.066596890537432,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm80",
+    "d": 4.066596890537432,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90",
+    "d": 4.066596890537432,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30",
+    "d": 4.066596890537432,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-disp45",
+    "d": 4.066596890537432,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "d": 4.066596890537432,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95",
+    "d": 4.066596890537432,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30",
+    "d": 4.066596890537432,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-disp45",
+    "d": 4.066596890537432,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "d": 4.066596890537432,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm50",
+    "d": 4.066596891070094,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm60",
+    "d": 4.066596891070094,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm70",
+    "d": 4.066596891070094,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm80",
+    "d": 4.066596891070094,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90",
+    "d": 4.066596891070094,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30",
+    "d": 4.066596891070094,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-disp45",
+    "d": 4.066596891070094,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "d": 4.066596891070094,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95",
+    "d": 4.066596891070094,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30",
+    "d": 4.066596891070094,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-disp45",
+    "d": 4.066596891070094,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "d": 4.066596891070094,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm50",
+    "d": 4.099088750847541,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm60",
+    "d": 4.099088750847541,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm70",
+    "d": 4.099088750847541,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm80",
+    "d": 4.099088750847541,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90",
+    "d": 4.099088750847541,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30",
+    "d": 4.099088750847541,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-disp45",
+    "d": 4.099088750847541,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "d": 4.099088750847541,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95",
+    "d": 4.099088750847541,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30",
+    "d": 4.099088750847541,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-disp45",
+    "d": 4.099088750847541,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "d": 4.099088750847541,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm50",
+    "d": 4.099088751326135,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm60",
+    "d": 4.099088751326135,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm70",
+    "d": 4.099088751326135,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm80",
+    "d": 4.099088751326135,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90",
+    "d": 4.099088751326135,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30",
+    "d": 4.099088751326135,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-disp45",
+    "d": 4.099088751326135,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "d": 4.099088751326135,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95",
+    "d": 4.099088751326135,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30",
+    "d": 4.099088751326135,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-disp45",
+    "d": 4.099088751326135,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "d": 4.099088751326135,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm50",
+    "d": 4.1745033735893005,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm60",
+    "d": 4.1745033735893005,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm70",
+    "d": 4.1745033735893005,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm80",
+    "d": 4.1745033735893005,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90",
+    "d": 4.1745033735893005,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30",
+    "d": 4.1745033735893005,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-disp45",
+    "d": 4.1745033735893005,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "d": 4.1745033735893005,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95",
+    "d": 4.1745033735893005,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30",
+    "d": 4.1745033735893005,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-disp45",
+    "d": 4.1745033735893005,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "d": 4.1745033735893005,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm50",
+    "d": 4.174503373976639,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm60",
+    "d": 4.174503373976639,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm70",
+    "d": 4.174503373976639,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm80",
+    "d": 4.174503373976639,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90",
+    "d": 4.174503373976639,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30",
+    "d": 4.174503373976639,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-disp45",
+    "d": 4.174503373976639,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "d": 4.174503373976639,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95",
+    "d": 4.174503373976639,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30",
+    "d": 4.174503373976639,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-disp45",
+    "d": 4.174503373976639,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "d": 4.174503373976639,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm50",
+    "d": 4.267039405327987,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm60",
+    "d": 4.267039405327987,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm70",
+    "d": 4.267039405327987,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm80",
+    "d": 4.267039405327987,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90",
+    "d": 4.267039405327987,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30",
+    "d": 4.267039405327987,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-disp45",
+    "d": 4.267039405327987,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "d": 4.267039405327987,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95",
+    "d": 4.267039405327987,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30",
+    "d": 4.267039405327987,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-disp45",
+    "d": 4.267039405327987,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "d": 4.267039405327987,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm50",
+    "d": 4.267039405641884,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm60",
+    "d": 4.267039405641884,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm70",
+    "d": 4.267039405641884,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm80",
+    "d": 4.267039405641884,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm90",
+    "d": 4.267039405641884,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30",
+    "d": 4.267039405641884,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-disp45",
+    "d": 4.267039405641884,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "d": 4.267039405641884,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95",
+    "d": 4.267039405641884,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30",
+    "d": 4.267039405641884,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-disp45",
+    "d": 4.267039405641884,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "d": 4.267039405641884,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm50",
+    "d": 4.459478706788629,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm60",
+    "d": 4.459478706788629,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm70",
+    "d": 4.459478706788629,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm80",
+    "d": 4.459478706788629,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm90",
+    "d": 4.459478706788629,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30",
+    "d": 4.459478706788629,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-disp45",
+    "d": 4.459478706788629,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "d": 4.459478706788629,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95",
+    "d": 4.459478706788629,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30",
+    "d": 4.459478706788629,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-disp45",
+    "d": 4.459478706788629,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "d": 4.459478706788629,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm50",
+    "d": 4.4594787070137585,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm60",
+    "d": 4.4594787070137585,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm70",
+    "d": 4.4594787070137585,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm80",
+    "d": 4.4594787070137585,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm90",
+    "d": 4.4594787070137585,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm90-tilt30",
+    "d": 4.4594787070137585,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm90-disp45",
+    "d": 4.4594787070137585,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "d": 4.4594787070137585,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm95",
+    "d": 4.4594787070137585,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30",
+    "d": 4.4594787070137585,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-disp45",
+    "d": 4.4594787070137585,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "d": 4.4594787070137585,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm50",
+    "d": 4.6116061871759815,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm60",
+    "d": 4.6116061871759815,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm70",
+    "d": 4.6116061871759815,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm80",
+    "d": 4.6116061871759815,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm90",
+    "d": 4.6116061871759815,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm90-tilt30",
+    "d": 4.6116061871759815,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm90-disp45",
+    "d": 4.6116061871759815,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "d": 4.6116061871759815,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm95",
+    "d": 4.6116061871759815,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30",
+    "d": 4.6116061871759815,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-disp45",
+    "d": 4.6116061871759815,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "d": 4.6116061871759815,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": true
+   },
+   {
+    "name": "rrm50",
+    "d": 4.611606187359977,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm60",
+    "d": 4.611606187359977,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm70",
+    "d": 4.611606187359977,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm80",
+    "d": 4.611606187359977,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm90",
+    "d": 4.611606187359977,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm90-tilt30",
+    "d": 4.611606187359977,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm90-disp45",
+    "d": 4.611606187359977,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "d": 4.611606187359977,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm95",
+    "d": 4.611606187359977,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm95-tilt30",
+    "d": 4.611606187359977,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm95-disp45",
+    "d": 4.611606187359977,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "d": 4.611606187359977,
+    "phi_deg": 19.246627257798725,
+    "theta_deg": 12.439090799908035,
+    "accept": false
+   },
+   {
+    "name": "rrm50",
+    "d": 4.212764149497846,
+    "phi_deg": 45.0,
+    "theta_deg": 22.0907511286836,
+    "accept": false
+   },
+   {
+    "name": "rrm60",
+    "d": 4.212764149497846,
+    "phi_deg": 45.0,
+    "theta_deg": 22.0907511286836,
+    "accept": false
+   },
+   {
+    "name": "rrm70",
+    "d": 4.212764149497846,
+    "phi_deg": 45.0,
+    "theta_deg": 22.0907511286836,
+    "accept": false
+   },
+   {
+    "name": "rrm80",
+    "d": 4.212764149497846,
+    "phi_deg": 45.0,
+    "theta_deg": 22.0907511286836,
+    "accept": false
+   },
+   {
+    "name": "rrm90",
+    "d": 4.212764149497846,
+    "phi_deg": 45.0,
+    "theta_deg": 22.0907511286836,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30",
+    "d": 4.212764149497846,
+    "phi_deg": 45.0,
+    "theta_deg": 22.0907511286836,
+    "accept": true
+   },
+   {
+    "name": "rrm90-disp45",
+    "d": 4.212764149497846,
+    "phi_deg": 45.0,
+    "theta_deg": 22.0907511286836,
+    "accept": false
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "d": 4.212764149497846,
+    "phi_deg": 45.0,
+    "theta_deg": 22.0907511286836,
+    "accept": false
+   },
+   {
+    "name": "rrm95",
+    "d": 4.212764149497846,
+    "phi_deg": 45.0,
+    "theta_deg": 22.0907511286836,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30",
+    "d": 4.212764149497846,
+    "phi_deg": 45.0,
+    "theta_deg": 22.0907511286836,
+    "accept": true
+   },
+   {
+    "name": "rrm95-disp45",
+    "d": 4.212764149497846,
+    "phi_deg": 45.0,
+    "theta_deg": 22.0907511286836,
+    "accept": false
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "d": 4.212764149497846,
+    "phi_deg": 45.0,
+    "theta_deg": 22.0907511286836,
+    "accept": false
+   },
+   {
+    "name": "rrm50",
+    "d": 4.2127639810634046,
+    "phi_deg": 44.99999,
+    "theta_deg": 22.090747380956874,
+    "accept": false
+   },
+   {
+    "name": "rrm60",
+    "d": 4.2127639810634046,
+    "phi_deg": 44.99999,
+    "theta_deg": 22.090747380956874,
+    "accept": false
+   },
+   {
+    "name": "rrm70",
+    "d": 4.2127639810634046,
+    "phi_deg": 44.99999,
+    "theta_deg": 22.090747380956874,
+    "accept": false
+   },
+   {
+    "name": "rrm80",
+    "d": 4.2127639810634046,
+    "phi_deg": 44.99999,
+    "theta_deg": 22.090747380956874,
+    "accept": false
+   },
+   {
+    "name": "rrm90",
+    "d": 4.2127639810634046,
+    "phi_deg": 44.99999,
+    "theta_deg": 22.090747380956874,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30",
+    "d": 4.2127639810634046,
+    "phi_deg": 44.99999,
+    "theta_deg": 22.090747380956874,
+    "accept": true
+   },
+   {
+    "name": "rrm90-disp45",
+    "d": 4.2127639810634046,
+    "phi_deg": 44.99999,
+    "theta_deg": 22.090747380956874,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "d": 4.2127639810634046,
+    "phi_deg": 44.99999,
+    "theta_deg": 22.090747380956874,
+    "accept": true
+   },
+   {
+    "name": "rrm95",
+    "d": 4.2127639810634046,
+    "phi_deg": 44.99999,
+    "theta_deg": 22.090747380956874,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30",
+    "d": 4.2127639810634046,
+    "phi_deg": 44.99999,
+    "theta_deg": 22.090747380956874,
+    "accept": true
+   },
+   {
+    "name": "rrm95-disp45",
+    "d": 4.2127639810634046,
+    "phi_deg": 44.99999,
+    "theta_deg": 22.090747380956874,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "d": 4.2127639810634046,
+    "phi_deg": 44.99999,
+    "theta_deg": 22.090747380956874,
+    "accept": true
+   },
+   {
+    "name": "rrm50",
+    "d": 4.063007538652445,
+    "phi_deg": 27.659742048551106,
+    "theta_deg": 30.0,
+    "accept": false
+   },
+   {
+    "name": "rrm60",
+    "d": 4.063007538652445,
+    "phi_deg": 27.659742048551106,
+    "theta_deg": 30.0,
+    "accept": false
+   },
+   {
+    "name": "rrm70",
+    "d": 4.063007538652445,
+    "phi_deg": 27.659742048551106,
+    "theta_deg": 30.0,
+    "accept": false
+   },
+   {
+    "name": "rrm80",
+    "d": 4.063007538652445,
+    "phi_deg": 27.659742048551106,
+    "theta_deg": 30.0,
+    "accept": true
+   },
+   {
+    "name": "rrm90",
+    "d": 4.063007538652445,
+    "phi_deg": 27.659742048551106,
+    "theta_deg": 30.0,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30",
+    "d": 4.063007538652445,
+    "phi_deg": 27.659742048551106,
+    "theta_deg": 30.0,
+    "accept": false
+   },
+   {
+    "name": "rrm90-disp45",
+    "d": 4.063007538652445,
+    "phi_deg": 27.659742048551106,
+    "theta_deg": 30.0,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "d": 4.063007538652445,
+    "phi_deg": 27.659742048551106,
+    "theta_deg": 30.0,
+    "accept": false
+   },
+   {
+    "name": "rrm95",
+    "d": 4.063007538652445,
+    "phi_deg": 27.659742048551106,
+    "theta_deg": 30.0,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30",
+    "d": 4.063007538652445,
+    "phi_deg": 27.659742048551106,
+    "theta_deg": 30.0,
+    "accept": false
+   },
+   {
+    "name": "rrm95-disp45",
+    "d": 4.063007538652445,
+    "phi_deg": 27.659742048551106,
+    "theta_deg": 30.0,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "d": 4.063007538652445,
+    "phi_deg": 27.659742048551106,
+    "theta_deg": 30.0,
+    "accept": false
+   },
+   {
+    "name": "rrm50",
+    "d": 4.063007376918857,
+    "phi_deg": 27.65973725773151,
+    "theta_deg": 29.99999,
+    "accept": false
+   },
+   {
+    "name": "rrm60",
+    "d": 4.063007376918857,
+    "phi_deg": 27.65973725773151,
+    "theta_deg": 29.99999,
+    "accept": false
+   },
+   {
+    "name": "rrm70",
+    "d": 4.063007376918857,
+    "phi_deg": 27.65973725773151,
+    "theta_deg": 29.99999,
+    "accept": false
+   },
+   {
+    "name": "rrm80",
+    "d": 4.063007376918857,
+    "phi_deg": 27.65973725773151,
+    "theta_deg": 29.99999,
+    "accept": true
+   },
+   {
+    "name": "rrm90",
+    "d": 4.063007376918857,
+    "phi_deg": 27.65973725773151,
+    "theta_deg": 29.99999,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30",
+    "d": 4.063007376918857,
+    "phi_deg": 27.65973725773151,
+    "theta_deg": 29.99999,
+    "accept": true
+   },
+   {
+    "name": "rrm90-disp45",
+    "d": 4.063007376918857,
+    "phi_deg": 27.65973725773151,
+    "theta_deg": 29.99999,
+    "accept": true
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "d": 4.063007376918857,
+    "phi_deg": 27.65973725773151,
+    "theta_deg": 29.99999,
+    "accept": true
+   },
+   {
+    "name": "rrm95",
+    "d": 4.063007376918857,
+    "phi_deg": 27.65973725773151,
+    "theta_deg": 29.99999,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30",
+    "d": 4.063007376918857,
+    "phi_deg": 27.65973725773151,
+    "theta_deg": 29.99999,
+    "accept": true
+   },
+   {
+    "name": "rrm95-disp45",
+    "d": 4.063007376918857,
+    "phi_deg": 27.65973725773151,
+    "theta_deg": 29.99999,
+    "accept": true
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "d": 4.063007376918857,
+    "phi_deg": 27.65973725773151,
+    "theta_deg": 29.99999,
+    "accept": true
+   }
+  ],
+  "lattice_decisions": [
+   {
+    "name": "rrm50",
+    "xyz": [
+     0.75,
+     1.0,
+     1.25
+    ],
+    "mask_accept": true
+   },
+   {
+    "name": "rrm60",
+    "xyz": [
+     0.75,
+     1.0,
+     1.25
+    ],
+    "mask_accept": true
+   },
+   {
+    "name": "rrm70",
+    "xyz": [
+     0.75,
+     1.0,
+     1.25
+    ],
+    "mask_accept": true
+   },
+   {
+    "name": "rrm80",
+    "xyz": [
+     0.75,
+     1.0,
+     1.25
+    ],
+    "mask_accept": true
+   },
+   {
+    "name": "rrm90",
+    "xyz": [
+     0.75,
+     1.0,
+     1.25
+    ],
+    "mask_accept": true
+   },
+   {
+    "name": "rrm90-tilt30",
+    "xyz": [
+     0.75,
+     1.0,
+     1.25
+    ],
+    "mask_accept": true
+   },
+   {
+    "name": "rrm90-disp45",
+    "xyz": [
+     0.75,
+     1.0,
+     1.25
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "xyz": [
+     0.75,
+     1.0,
+     1.25
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm95",
+    "xyz": [
+     0.75,
+     1.0,
+     1.25
+    ],
+    "mask_accept": true
+   },
+   {
+    "name": "rrm95-tilt30",
+    "xyz": [
+     0.75,
+     1.0,
+     1.25
+    ],
+    "mask_accept": true
+   },
+   {
+    "name": "rrm95-disp45",
+    "xyz": [
+     0.75,
+     1.0,
+     1.25
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "xyz": [
+     0.75,
+     1.0,
+     1.25
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm50",
+    "xyz": [
+     0.0,
+     0.0,
+     5.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm60",
+    "xyz": [
+     0.0,
+     0.0,
+     5.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm70",
+    "xyz": [
+     0.0,
+     0.0,
+     5.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm80",
+    "xyz": [
+     0.0,
+     0.0,
+     5.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm90",
+    "xyz": [
+     0.0,
+     0.0,
+     5.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm90-tilt30",
+    "xyz": [
+     0.0,
+     0.0,
+     5.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm90-disp45",
+    "xyz": [
+     0.0,
+     0.0,
+     5.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "xyz": [
+     0.0,
+     0.0,
+     5.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm95",
+    "xyz": [
+     0.0,
+     0.0,
+     5.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm95-tilt30",
+    "xyz": [
+     0.0,
+     0.0,
+     5.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm95-disp45",
+    "xyz": [
+     0.0,
+     0.0,
+     5.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "xyz": [
+     0.0,
+     0.0,
+     5.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm50",
+    "xyz": [
+     0.0,
+     3.0,
+     4.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm60",
+    "xyz": [
+     0.0,
+     3.0,
+     4.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm70",
+    "xyz": [
+     0.0,
+     3.0,
+     4.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm80",
+    "xyz": [
+     0.0,
+     3.0,
+     4.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm90",
+    "xyz": [
+     0.0,
+     3.0,
+     4.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm90-tilt30",
+    "xyz": [
+     0.0,
+     3.0,
+     4.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm90-disp45",
+    "xyz": [
+     0.0,
+     3.0,
+     4.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "xyz": [
+     0.0,
+     3.0,
+     4.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm95",
+    "xyz": [
+     0.0,
+     3.0,
+     4.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm95-tilt30",
+    "xyz": [
+     0.0,
+     3.0,
+     4.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm95-disp45",
+    "xyz": [
+     0.0,
+     3.0,
+     4.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "xyz": [
+     0.0,
+     3.0,
+     4.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm50",
+    "xyz": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm60",
+    "xyz": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm70",
+    "xyz": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm80",
+    "xyz": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm90",
+    "xyz": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm90-tilt30",
+    "xyz": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm90-disp45",
+    "xyz": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "xyz": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm95",
+    "xyz": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm95-tilt30",
+    "xyz": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm95-disp45",
+    "xyz": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "xyz": [
+     3.0,
+     4.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm50",
+    "xyz": [
+     5.0,
+     0.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm60",
+    "xyz": [
+     5.0,
+     0.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm70",
+    "xyz": [
+     5.0,
+     0.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm80",
+    "xyz": [
+     5.0,
+     0.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm90",
+    "xyz": [
+     5.0,
+     0.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm90-tilt30",
+    "xyz": [
+     5.0,
+     0.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm90-disp45",
+    "xyz": [
+     5.0,
+     0.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "xyz": [
+     5.0,
+     0.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm95",
+    "xyz": [
+     5.0,
+     0.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm95-tilt30",
+    "xyz": [
+     5.0,
+     0.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm95-disp45",
+    "xyz": [
+     5.0,
+     0.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "xyz": [
+     5.0,
+     0.0,
+     0.0
+    ],
+    "mask_accept": false
+   },
+   {
+    "name": "rrm50",
+    "xyz": [
+     0.0,
+     0.0,
+     4.75
+    ],
+    "mask_accept": true
+   },
+   {
+    "name": "rrm60",
+    "xyz": [
+     0.0,
+     0.0,
+     4.75
+    ],
+    "mask_accept": true
+   },
+   {
+    "name": "rrm70",
+    "xyz": [
+     0.0,
+     0.0,
+     4.75
+    ],
+    "mask_accept": true
+   },
+   {
+    "name": "rrm80",
+    "xyz": [
+     0.0,
+     0.0,
+     4.75
+    ],
+    "mask_accept": true
+   },
+   {
+    "name": "rrm90",
+    "xyz": [
+     0.0,
+     0.0,
+     4.75
+    ],
+    "mask_accept": true
+   },
+   {
+    "name": "rrm90-tilt30",
+    "xyz": [
+     0.0,
+     0.0,
+     4.75
+    ],
+    "mask_accept": true
+   },
+   {
+    "name": "rrm90-disp45",
+    "xyz": [
+     0.0,
+     0.0,
+     4.75
+    ],
+    "mask_accept": true
+   },
+   {
+    "name": "rrm90-tilt30-disp45",
+    "xyz": [
+     0.0,
+     0.0,
+     4.75
+    ],
+    "mask_accept": true
+   },
+   {
+    "name": "rrm95",
+    "xyz": [
+     0.0,
+     0.0,
+     4.75
+    ],
+    "mask_accept": true
+   },
+   {
+    "name": "rrm95-tilt30",
+    "xyz": [
+     0.0,
+     0.0,
+     4.75
+    ],
+    "mask_accept": true
+   },
+   {
+    "name": "rrm95-disp45",
+    "xyz": [
+     0.0,
+     0.0,
+     4.75
+    ],
+    "mask_accept": true
+   },
+   {
+    "name": "rrm95-tilt30-disp45",
+    "xyz": [
+     0.0,
+     0.0,
+     4.75
+    ],
+    "mask_accept": true
+   }
+  ]
+ },
+ "provenance": {
+  "report": {
+   "path": "/srv/shared/stacking-prediction-plots/envelope-analysis-5-report.md",
+   "sha256": "11f854aa8e4e8a3ade18dcde84394f770bed08dea175796ae20e3f8953722edc",
+   "note": "uncommitted working-tree version; copy vendored in tests"
+  },
+  "cutoff_envelope": {
+   "distance_lt_A": 5.7,
+   "displacement_lt_deg": 60,
+   "positives": 460,
+   "negatives": 18592
+  },
+  "cutoff_rounding": "floor to 1e-5 of repr(raw)",
+  "generator": {
+   "commands": [
+    "python util/gaussian-precalc-all.py",
+    "python util/gaussian-filter-json.py --root . --output alaric/gaussian_stacking_filter.json"
+   ]
+  },
+  "precalc_environment": {
+   "python": "3.12.13",
+   "numpy": "1.26.4",
+   "zstandard": "0.25.0",
+   "libzstd": "1.5.7",
+   "zstd_level": 3
+  }
+ }
+}
