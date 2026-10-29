@@ -2,12 +2,17 @@
 
 This is a contract, not a design. It says what preparic must do and what Alaric must provide during project preparation (stages 1–6), at the level a test oracle needs. Each clause states an observable property, and its **Oracle** line says how to decide whether an implementation meets it. How a clause is met is left open. Where a plan chose a mechanism (a factory, a shared cell, an echo, a marker), this document keeps only the property the mechanism was meant to secure. Appendix A points back to the plans that describe one way of meeting each clause.
 
-**Sources and precedence.** The author's decisions win. They are recorded in three places:
+**Sources and precedence.** The author's decisions win. They are recorded in these places:
 - `open-questions.md`;
-- the "author decisions" list of `state-transitions.md`;
-- the author's clarification of 2026-10-29 on clip and interaction matrix (P4.4, P5.6).
+- the "author decisions" list of `final/state-transitions.md` and the answers in its §11;
+- the author's clarification of 2026-10-29 on clip and interaction matrix (P4.4, P5.6);
+- the author's decision of 2026-10-29 on the displayed structure (P11);
+- the author's decision of 2026-10-29 to reduce the energy-thresholds file to its threshold mapping (P5.7, A12);
+- the author's decision of 2026-10-29 on the energy-filter `cascade` and `min_cascade` parameters and `DATA/score-filter.yaml` (A12, X4);
+- the author's decision of 2026-10-29 that stage 3's default selection uses displacement < 60° instead of tilt < 30° (P3.1);
+- the author's decision of 2026-10-29 that slip angle and displacement angle are one and the same, φ, measured from the protein ring normal (A7, P3.1, P3.2).
 
-After the author's decisions come `contract-boundaries.md` and `state-transitions.md`, and then the mini-plans listed in `INDEX.txt`. `state-transitions.md` is still a draft; it was read here at its 00:56 version of 2026-10-29. Where it proposes something the author has not settled, this document states the property the proposal secures, and §7 lists the choice.
+After the author's decisions come `final/contract-boundaries.md` and `final/state-transitions.md`, both finalized on 2026-10-29, and then the mini-plans listed in `INDEX.txt`. This document's own additions to its sources are still subject to the author's revision. They, and every open choice of §7, are gathered in `contract-open-questions.md`.
 
 **Scope.**
 - **In:** stages 1–6, every crossing between preparic and Alaric during them, and the obligations of the export stage that are already fixed (§6).
@@ -94,8 +99,9 @@ After the author's decisions come `contract-boundaries.md` and `state-transition
 
 The 18 hand-copied 1b7f YAML thresholds are reproduced unchanged.
 
-**G8. Versioned formats.** Every JSON that crosses the boundary, in either direction, carries `schema: 1`. Every consumer raises on any other schema. Alaric bumps the schema on any breaking change.
-*Oracle:* feeding `schema: 2` to each consumer gives a visible error and no partial use.
+**G8. Versioned formats.** Every JSON that crosses the boundary, in either direction, carries `schema: 1`. Every consumer raises on any other schema. Alaric bumps the schema on any breaking change. There are no exceptions (author).
+
+*Oracle:* feeding `schema: 2`, or a file without `schema`, to each consumer gives a visible error and no partial use.
 
 **G9. Nothing is repaired or regenerated silently.**
 - An invalid decision is refused or shown as invalid. It is never corrected.
@@ -147,7 +153,7 @@ A factory that returns a ready transformer is optional. One exists for A1, and o
 - **In:** the RNA PDB.
 - **Fixed:** code and templates. No library is needed.
 - **Out:** a folder with `frag-N-SEQ-refe.pdb` for every fragment. Each has the same atoms, in the same order, as A1's PDB for that fragment. The file names are distinct from A1's.
-- **Same fragments as the fit.** For a given RNA PDB, A2's set of fragment keys equals A1's. Preparic may therefore list the fragments, and open the threshold table in stage 4, before the fit has finished (P4.3, D6).
+- **Same fragments as the fit.** For a given RNA PDB, A2's set of fragment keys equals A1's. Preparic may therefore list the fragments, and open the threshold table in stage 4, before the fit has finished (P4.3; author, D6).
 
 *Oracle:* the fragment key sets are equal, including on a copy of the RNA with a numbering gap. The atom lists match A1's PDBs atom for atom. On 1b7f, for every fragment, the in-place RMSD between the reference PDB and the best-fit PDB, compared atom by atom in template order with no superposition, equals the TSV `rmsd` to within 1e-4 Å. The tolerance covers the 3-decimal PDB coordinates.
 
@@ -185,7 +191,7 @@ A factory that returns a ready transformer is optional. One exists for A1, and o
   - The range index is not part of the result.
   - A ligand that fails reduction gets an `error` and no energy.
   - A receptor that fails reduction fails the run.
-- **Dependencies:** the reduced list of `contract-boundaries.md` §4 (8 files), which Alaric maintains.
+- **Dependencies:** the reduced list of `final/contract-boundaries.md` §4 (8 files), which Alaric maintains.
   - Every attract-jax entry in it also appears in attract-jax's own full list.
   - The step needs no JAX, no scipy and no compiled kernel, and runs on numpy 1.x and 2.x.
 
@@ -208,7 +214,7 @@ One committed JSON at a stable path (`$ALARIC_DIR/gaussian_stacking_filter.json`
   - φ is the angle of v from the protein ring normal.
   - θ is the angle between the two ring normals.
   - Normals come from a Kabsch fit of each ring's atoms onto the reference rings (G→A, U→C, TYR→PHE).
-  - Stage 3's slip angle is measured from the ring plane, so φ = 90° − slip.
+  - Stage 3's slip angle is φ: both are measured from the protein ring normal (author).
 - **envelope:** d < 5.7 Å and φ < 60°.
 - **filters:** `tilt30` means θ < 30° and `disp45` means φ < 45°, both strict.
 - **thresholds:** exactly the twelve names. Each entry has its cutoff (full-precision float), `accept: ">="`, its filters, cutoff rule, target, achieved recall and counts. For each cache file it also has `sha256` (compressed bytes) and `npy_sha256` (decompressed array).
@@ -302,12 +308,36 @@ Export is deferred, but these obligations on Alaric's actions are already fixed.
 - **`energy-filter`** is new. It replaces `score`, `filter` and `score_add`, which are removed. Alaric's score scripts either move to the gridless path, using A5's dependency list, or go.
   - One action handles one fragment against exactly one protein range.
   - The threshold is a number, or comes from the energy-thresholds file (P5.7). A missing cell is an error.
+  - **Parameters the export must write.** The file carries thresholds only, so everything else is an action parameter:
+    - `protein: range-K`: exactly one range per action; one action per true matrix cell.
+    - `threshold: auto` (or a number).
+    - `epsilon: 15`: the ε that A5 scored with. A threshold is valid only for the ε its energy was computed with.
+    - `cascade: auto` and `min_cascade: auto`, which read `DATA/score-filter.yaml` (below).
+    - `fragment`, `sequence` and `exclude`: `auto`, with `exclude` resolving to the project's exclude code (G5, X1).
+
+    The provenance that the old file carried (`source: "bestfit"`, the rounding rule) is fixed by P5.7 and G7, and no action needs it.
   - A pose is kept iff its gridless energy E < T.
   - A fragment that interacts with several ranges is filtered against each in turn (AND). Energies are never summed.
-  - Grid stages may pre-sort poses: a 5-7 grid with margin 1.0, then a 10-12 grid with margin 0.1 (skipped for fewer than 1000 poses), then gridless. The output must still equal all-gridless filtering, whatever the grids, chunking or process count.
+  - **Cascade (author).** `cascade` is a list of grid steps `{plateau_distance, neighbour_distance, max_error}` (Å, Å, energy units), or `[]` for all-gridless. `min_cascade` is an integer. `auto` for either reads `DATA/score-filter.yaml`, which the export writes (X4) and which must be:
+    ```yaml
+    min_cascade: 1000
+    cascade:
+      - {plateau_distance: 5, neighbour_distance: 7, max_error: 1.0}
+      - {plateau_distance: 10, neighbour_distance: 12, max_error: 0.05}
+    ```
+    Semantics, with P the undecided poses (initially the whole input):
+    - before each step, if |P| < `min_cascade`, the cascade is exited;
+    - otherwise the step scores P with its grid, giving g. A pose with g < T − `max_error` is accepted, one with g ≥ T + `max_error` is rejected, and both leave P. The rest stay undecided;
+    - after the last step, or on exit, every pose in P is scored gridless and kept iff E < T.
+
+    The output keeps the input order. |P| counts the whole action's undecided poses, never one chunk's. The output therefore equals all-gridless filtering whenever every grid error is ≤ its step's `max_error`, whatever the chunking or process count.
   - Prerequisite: the fix for the 10-12 bug, where a bead exactly on a grid node mis-scores the identity pose by 0.23.
 
-  *Oracle:* on 1b7f, output is byte-identical to the cascade-free run, chunked and unchunked. An injected-error test shows that poses in the margin band are refined.
+  *Oracle:*
+  - On 1b7f, output is byte-identical to the `cascade: []` run, chunked and unchunked.
+  - Injected errors: a pose whose grid energy lies within `max_error` of T is decided by gridless scoring; a shift to g < T − `max_error` accepts it and a shift to g ≥ T + `max_error` rejects it, without gridless scoring.
+  - A pool smaller than `min_cascade`, and a step whose undecided poses fall below it, both exit the cascade (visible in the action's statistics) and give the all-gridless output.
+  - `auto` with a missing or malformed `DATA/score-filter.yaml` is an error.
 - **`anchor`** with `precomputed_filter_name: gaussian-rrm` accepts exactly the twelve names, validated against A7. The cache identity enters the action's sigil.
 - **`anchor-refe`** takes an explicit `ovrmsd` per action. It accepts a pose iff the ovRMSD of the selected nucleotide's base atoms against `DATA/reference.pdb` is < `ovrmsd`.
 - **`grow`** takes per-pair `crmsd` and `ovrmsd` and accepts with strict `<`.
@@ -341,7 +371,7 @@ Export is deferred, but these obligations on Alaric's actions are already fixed.
   - **default:** otherwise.
 - **Back** from stage k takes every tab to stage k−1.
   - Back never destroys a decision. It sets aside stage k's decision so that a later Continue can restore it, and it therefore needs no confirmation.
-  - The author's matrix reuse on 5→4→5 requires this for the matrix. For the other stages it is D1.
+  - This holds for every stage decision (author, D1). The matrix reuse on 5→4→5 requires it.
   - A decision made for other upstream data is never restored. A table made for another PDB code or range 1 is one example.
 - **Deferred actions** (a debounced edit, a download completion, a delayed upload) belong to the stage they were issued in. One is dropped if, by the time it would be applied:
   - the stage has changed;
@@ -371,9 +401,9 @@ Pending wording:
 | 1 | "uploading structure…" |
 | 2 | none |
 | 3 | "detecting stackings…", "preparing all-atom structure…" |
-| 4 | "computing reference thresholds…" (Copy disabled), "fitting…" |
-| 5 | "scoring…" |
-| 6 | "computing best-fit stacking geometry…", "validating…" |
+| 4 | "computing reference thresholds…" (Copy disabled), "fitting…", "preparing all-atom structure…" (viewer, P11) |
+| 5 | "scoring…", "preparing all-atom structure…" (viewer, P11) |
+| 6 | "computing best-fit stacking geometry…", "validating…", "preparing all-atom structure…" (viewer, P11) |
 
 **P7. Validation.**
 - Every editable decision is validated three times: in the browser inline, in the browser on every read, and in the backend, which raises (shown as an error).
@@ -394,6 +424,18 @@ Pending wording:
 - A class edit never re-runs the all-filter check (A9).
 - A matrix edit re-runs only threshold derivation (P5.7) and the hand-off (P5.8).
 - The fit and everything downstream of it start when stage 3 is entered, never earlier (author). A committed range edit in stage 2 starts no library work.
+
+**P11. What the viewer shows (author).**
+- In stages 1–3 the viewer shows the downloaded structure, on which the ranges are picked.
+- In stages 4, 5 and 6 it shows the all-atom range PDBs exactly as the backend's preparation (G6) wrote them, one per range, and no atom of the downloaded structure. Fragment overlays (P4.2) are drawn on top, in the same frame.
+  - The files reach the browser unchanged: not parsed and rewritten, renumbered, filtered or merged on the way.
+  - A file is matched to its range by range index, never by the chain ids inside it.
+- The displayed PDBs are a result like any other (P5): they are shown only while fresh for this tab's PDB code and ranges. Otherwise the viewer shows "preparing all-atom structure…", never the previous PDBs and never the downloaded structure instead.
+
+*Oracle:*
+- In stages 4–6 the set of displayed atoms (names, residues, coordinates) equals the union of the backend's all-atom range files, and the bytes the browser received equal those files.
+- Held-back preparation after an upstream change shows the pending wording, not the old PDBs.
+- After a backend restart in stage 4 or later, the viewer shows the pending wording until the files have been read again.
 
 ## 5. Preparic, stage by stage
 
@@ -428,13 +470,14 @@ Pending wording:
 ### Stage 3: stackings
 - **P3.1** Preparic shows the detected stackings.
   - The selection is keyed by stacking key, never by row.
-  - The default selection is distance ≤ 5 Å and tilt ≤ 30°.
+  - The default selection is distance ≤ 5 Å and slip (= displacement φ, A7) < 60° (author). The distance test is inclusive and the angle test is strict. There is no tilt condition.
   - Continue into stage 3 merges the default with any earlier selection, by key.
-- **P3.2** Preparic shows stage 3's displacement descriptor as "slip (from plane)", so it is not confused with φ (A7). Stage 3 and stage 6 descriptors may differ by up to 0.7° until D8 is settled.
+- **P3.2** Stage 3's slip angle IS the displacement angle φ of A7: the angle of the centroid displacement from the protein ring normal, so 0° is the zenith and 90° the horizon. Stage 3 and stage 6 descriptors may still differ by up to 0.7° until D8 is settled, because their normals differ (SVD in stage 3, Kabsch in stage 6).
 - **Gate 3→4:**
   - the selection's keys equal those of a fresh stacking table;
   - at least one stacking is selected (author);
-  - the fragment list is fresh: the all-atom preparation and the reference fragments (A2) are complete. Their failures, for example a modified nucleotide, are shown in this stage.
+  - the fragment list is fresh: the all-atom preparation and the reference fragments (A2) are complete. Their failures, for example a modified nucleotide, are shown in this stage;
+  - this tab holds the fresh all-atom range PDBs, so stage 4 opens on the structure it must show (P11).
 
   The fit is not needed (author: the fit waits for stage 3, but stage 4 does not wait for the fit).
 
@@ -445,11 +488,11 @@ Pending wording:
   - per fragment: residues, sequence, conformer and `rmsd`;
   - per pair: down→up and trinucleotide;
   - raw values are never displayed;
-  - hovering a row overlays the reference and best-fit PDBs in the viewer.
+  - hovering a row overlays the reference and best-fit PDBs in the viewer, on top of the all-atom range PDBs (P11).
 - **P4.3** The threshold table, which is the stage 4 decision:
   - **Entering stage 4.** Continue 3→4 puts the table in force:
     - a table set aside by an earlier Back is restored if it is still valid for the PDB code and range 1;
-    - otherwise the table starts as a skeleton: one row per pair and one per base of the current fragments, with every value empty. Whether to prefill it is D5.
+    - otherwise the table starts as a skeleton: one row per pair and one per base of the current fragments, with every value empty. It is never prefilled: Copy is an explicit action (author, D5). The computed values are clearly visible beside the table, so that it is clear what Copy does.
   - **Filling.** The user fills it by Copy, by typing, or both (author).
     - Copy is enabled only while the computed thresholds are fresh.
     - Copy asks before it overwrites typed values.
@@ -476,7 +519,7 @@ Pending wording:
   - **Greying.** Clipped fragments, and any pair that touches one, are greyed in every table.
   - **Cost.** A clip edit re-runs no library step and no scoring. It never touches the interaction matrix, which is set aside whenever the clip can change and is adapted once, on Continue 4→5 (P5.6).
 - **Gate 4→5:**
-  - every unclipped value of the threshold table is filled and valid, and its backend validator is not failing. Whether clipped rows must be filled too is D4. The computed thresholds are not needed;
+  - every value of the threshold table, clipped rows included, is filled and valid, and its backend validator is not failing (author; the reading is to be confirmed, D4). The computed thresholds are not needed;
   - the clip is valid: it fits the fragment count and cuts no selected anchor;
   - the energetics are fresh. In practice this is the only place the user waits for the fit.
 
@@ -534,7 +577,7 @@ Pending wording:
     - Recompute is offered, and nothing is written until the user presses it.
 - **P5.7 Energy thresholds.**
   - For every true, kept matrix cell (fragment, range), the threshold is R(best-fit energy) via A6. Reference energies are information only (author).
-  - The file is `{schema:1, method:"gridless", epsilon, source:"bestfit", rounding, thresholds:{"frag-N-SEQ":{"range-K":"-16.59"}}}`, with true cells only.
+  - The file is `{"schema":1, "frag-N-SEQ":{"range-K":"-16.59"}, …}`: `schema` (G8) plus the threshold mapping at top level, with true cells only and no other key (author). The energy-filter parameters that the file no longer carries are written by the export (A12).
   - A true cell with no best-fit energy: D12.
 - **P5.8 Interaction hand-off.** It covers kept rows only:
   `{clip1, clip2, kept_residues, ranges:[{index, chain, start, end}], runs:[{range, first_fragment, last_fragment, anchors:[{fragment, nucleotide}]}], interactions:{"frag-N-SEQ":[ranges]}}`.
@@ -614,13 +657,14 @@ Pending wording:
 
 The export stage is deferred (author). These obligations are already fixed.
 - **X1. Same parameters.** The export uses the same exclude code and minimum cell fraction as the computations above. It does not set `ALARIC_ANCHOR_MIN_CELL_FRACTION`.
-- **X2. Same RNA file.** `DATA/reference.pdb` is byte-identical to the RNA all-atom PDB that was fitted, and its checksum is recorded.
+- **X2. Same RNA file.** `DATA/reference.pdb` is byte-identical to the RNA all-atom PDB that was fitted and displayed (P11), and its checksum is recorded.
 - **X3. Both anchor modes.** Every selected anchor is exported in both modes, in parallel (author):
   - Gaussian `anchor` actions with `precomputed_filter_name: gaussian-rrm` and the row's filter name;
   - one `anchor-refe` action per unclipped candidate, with an explicit `ovrmsd` from the edited bases value (never `auto`), deduplicated.
 - **X4. Other inputs.**
   - `grow` thresholds come from the edited pairs values of kept pairs.
-  - The energy filter reads P5.7's file.
+  - The energy filter reads P5.7's file. Its other parameters, `epsilon: 15`, `cascade: auto` and `min_cascade: auto` among them, are written into each action as listed in A12.
+  - The export writes `DATA/score-filter.yaml` with exactly A12's default content.
   - The hand-off (P5.8) and the kept fragments travel with the export.
 - **X5. "Proceed anyway".** When the nearest-to-native structure fails anything the export would apply, one checkbox appears next to the red bold text "The nearest-to-native structure doesn't pass the filters. Proceed anyway". This covers:
   - a Gaussian validation that is not green, or a class below RRM-95;
@@ -636,36 +680,39 @@ The export stage is deferred (author). These obligations are already fixed.
 
 ## 7. Decisions needed from the author
 
-Each item names what is open, the options, and the clause it changes. Where a plan made a recommendation, it is given. Decisions the author has already made are not repeated here; they appear as clauses above, marked "(author)". Those recorded in `state-transitions.md` and in the clarification on clip and matrix are now:
+Each item names what is open, the options, and the clause it changes. Where a plan made a recommendation, it is given. Every open item is now gathered, with this document's own proposals, in `contract-open-questions.md`; this list is kept for its IDs. Items the author has answered are marked **Answered**. Other decisions the author has already made are not repeated here; they appear as clauses above, marked "(author)". Those recorded in `final/state-transitions.md` and in the clarification on clip and matrix are now:
 - the fit waits for stage 3 (P10);
 - Continue is closed on an empty stacking table and on an empty selection (gates 2→3 and 3→4);
 - stage 4 is about the threshold table, filled by Copy and/or typing (P4.2, P4.3);
 - the clip is edited in stage 4 only and never beyond a selected anchor (P4.4);
-- on 5→4→5 the matrix is reused, with only its outer ends adapted to the clip (P5.6).
+- on 5→4→5 the matrix is reused, with only its outer ends adapted to the clip (P5.6);
+- from stage 4 on, the viewer shows the backend's all-atom range PDBs, not the downloaded structure (P11).
 
-1. **D1. Back keeps every stage decision** (P4; `state-transitions.md` §10.3, §11.3). The matrix reuse requires this for the matrix. The draft applies it to every stage decision, so Back 4→3 keeps the threshold table, Back 6→5 keeps the class table, and Back 3→2 keeps the ticks. Confirm it for all stages, or limit it to the matrix. Limiting it would throw away the threshold table on every Back 4→3.
-2. **D2. The clip and the anchors** (§1 clip, P4.4, P5.3; `state-transitions.md` §11.4b).
+1. **D1. Back keeps every stage decision** (P4; `final/state-transitions.md` §10.3, §11.3). **Answered:** yes, for every stage (author, §11.3). The matrix reuse requires this for the matrix. The draft applies it to every stage decision, so Back 4→3 keeps the threshold table, Back 6→5 keeps the class table, and Back 3→2 keeps the ticks. Confirm it for all stages, or limit it to the matrix. Limiting it would throw away the threshold table on every Back 4→3.
+2. **D2. The clip and the anchors** (§1 clip, P4.4, P5.3; `final/state-transitions.md` §11.4b).
    - **What "beyond a stacking anchor" means.** Options:
      - **Strict (recommended):** no candidate fragment of any selected anchor may be clipped. Locks then never change with the clip, so the matrix reuse touches only the ends of runs. This matches the draft's "the control stops at the outermost anchor fragments".
      - **By residue:** only the anchor's residue must stay among the kept residues. The anchor's outer candidate may then be clipped: the fragment with the anchor as `second` at the 5' end, or as `first` at the 3' end. That anchor's lock then shrinks to one fragment when the clip changes.
    - **An anchor newly selected inside the kept clip.** The author ruled that clipping beyond an anchor is not allowed, and that the user should first disable the anchor in stage 3. That settles clip edits, but not this reverse case. Options:
      - flag the clip in stage 4 and keep Continue 4→5 closed until the user reduces it (the draft); or
      - have Continue 3→4 clamp the clip to the outermost anchor automatically, at the cost of one more awaited write.
-3. **D3. Filling uncovered rows when the matrix is reused** (P5.6; `state-transitions.md` §11.4a). When a smaller clip uncovers rows at an outer end, which of them become true? Options:
+3. **D3. Filling uncovered rows when the matrix is reused** (P5.6; `final/state-transitions.md` §11.4a). When a smaller clip uncovers rows at an outer end, which of them become true? Options:
    - **(a), recommended:** apply Recompute's growth rule to the new rows only (|E| ≥ 1, stopping at error rows). Do so only if the column's end touched the old clip boundary, that is, if the clip had cut the run. A run that ended before the boundary stays as the user left it. This gives what Recompute would have given at the cut ends, and keeps the user's caps elsewhere.
    - **(b):** the end run simply extends to the new boundary, with every new row true.
    - **(c):** leave the new rows false; the user extends the run by hand.
-4. **D4. Clipped rows and the 4→5 gate** (P4.3, gate 4→5; `state-transitions.md` §11.5). The draft requires only unclipped values to be filled. Should clipped rows be required too? If they are not, reducing the clip later in stage 4 uncovers empty rows, and the gate closes again until they are filled.
-5. **D5. The empty table on entering stage 4** (P4.3; `state-transitions.md` §11.6). Should the table start empty, with Copy one click away, or be prefilled from the computed values when those are already fresh? Prefilling makes the stored default depend on timing: two tabs racing Continue 3→4 could write different defaults.
-6. **D6. Opening stage 4 before the fit** (A2, P4.1; `state-transitions.md` §11.7). The draft takes the fragment keys from the reference fragments (A2), which do not wait for the fit. A2 now must yield the same key set as the fit, so this is safe once A2 meets its clause. Confirm, or require the keys from the fit. With keys from the fit, stage 4 opens only after the fit, which takes minutes.
-7. **D7. Assembly copies and range atoms** (P2.1; this also answers the fact behind `state-transitions.md` §11.9). Found in preparic's code:
+4. **D4. Clipped rows and the 4→5 gate** (P4.3, gate 4→5; `final/state-transitions.md` §11.5). **Answered** "yes"; applied as "clipped rows must be filled too", which is to be confirmed (`contract-open-questions.md` D4). The draft requires only unclipped values to be filled. Should clipped rows be required too? If they are not, reducing the clip later in stage 4 uncovers empty rows, and the gate closes again until they are filled.
+5. **D5. The empty table on entering stage 4** (P4.3; `final/state-transitions.md` §11.6). **Answered:** explicit Copy, with the computed values clearly visible (author). Should the table start empty, with Copy one click away, or be prefilled from the computed values when those are already fresh? Prefilling makes the stored default depend on timing: two tabs racing Continue 3→4 could write different defaults.
+6. **D6. Opening stage 4 before the fit** (A2, P4.1; `final/state-transitions.md` §11.7). **Answered:** fragment keys from A2 are acceptable (author). The draft takes the fragment keys from the reference fragments (A2), which do not wait for the fit. A2 now must yield the same key set as the fit, so this is safe once A2 meets its clause. Confirm, or require the keys from the fit. With keys from the fit, stage 4 opens only after the fit, which takes minutes.
+7. **D7. Assembly copies and range atoms** (P2.1; this also answers the fact behind `final/state-transitions.md` §11.9, where the author kept `biounit` in M2's basis because chains may be duplicated). Found in preparic's code:
    - The backend never receives the biounit. It extracts asymmetric-unit chains by label ids and strips copy suffixes, so `A`, `A-1` and `A-2` give the same atoms.
    - The browser names chains, validates rows and highlights picks against the selected assembly.
 
    So the biounit changes which rows are valid, but not which atoms are used, and a picked symmetry copy is computed at its asymmetric-unit position. Options:
    - (a) Ranges refer to asymmetric-unit chains only. Copy suffixes are refused, and rows are validated against the asymmetric unit. The biounit becomes display-only and no longer invalidates the ranges.
    - (b) The backend applies the assembly operators. The biounit becomes a real input of range extraction, and the ranges stay tied to it.
-8. **D8. Kabsch normals in stage 3** (P3.2; `open-questions.md` stage 6 Q5, never answered). Should stage 3 switch to Kabsch ring normals and φ, so that stages 3 and 6 agree? They differ by up to 0.7° today. If yes, the stage 3 numbers change and the reference rings become a stage 3 input (A10).
+
+   Under P11, a range picked on a copy is shown from stage 4 on at the position the backend extracted. That makes the discrepancy visible, but does not settle D7.
+8. **D8. Kabsch normals in stage 3** (P3.2; `open-questions.md` stage 6 Q5, never answered). Should stage 3 switch to Kabsch ring normals, so that its slip (φ) and tilt agree with stage 6? They differ by up to 0.7° today. If yes, the stage 3 numbers change and the reference rings become a stage 3 input (A10).
 9. **D9. Gaussian class granularity** (P6.3; stage 6 Q1, never answered). Every plan assumes one class per stacking anchor, scored on the worse of its unclipped candidates. The alternative is one class per candidate, that is, per fragment × first/second.
 10. **D10. Which pose stage 5 scores** (P5.1; stage 4 Q3, adopted without confirmation). The plans score the discrete best-fit library pose, which is what docking can sample and what the existing `.score` fixtures use. The alternative is an exact superposition.
 11. **D11. ovRMSD above L_ov = √3 Å** (A11, P6.6, X6). The author ruled that `anchor-refe` thresholds above the limit block the export. Three points remain open:
@@ -682,7 +729,7 @@ Each item names what is open, the options, and the clause it changes. Where a pl
 13. **D13. What triggers "Proceed anyway"** (X5).
     - Energy thresholds are computed only (P5.7), so the best-fit pose always meets them. Is the energetics trigger meant for user-editable energy thresholds, which no plan has? If so, should they be editable like the RMSD thresholds?
     - Do amber states trigger the checkbox like red ones? These are fill < ⅓, a pose that fails, and a threshold inside the 1e-5 boundary zone.
-14. **D14. A persistent result cache** (P2; `state-transitions.md` §11.10). Without one, every backend restart from stage 3 onwards re-runs the fit and the tables: minutes, with an 8 GB library load. Stage 4 stays editable meanwhile, but Continue 4→5 waits. Should preparic's Seamless configuration keep results across restarts?
+14. **D14. A persistent result cache** (P2; `final/state-transitions.md` §11.10). **Answered:** preparic runs with no persistent result cache (author's execution decision, `draft-implementation-plan.md` §1), and a restart is out of scope for state transitions (§11.10; see O6). Without one, every backend restart from stage 3 onwards re-runs the fit and the tables: minutes, with an 8 GB library load. Stage 4 stays editable meanwhile, but Continue 4→5 waits. Should preparic's Seamless configuration keep results across restarts?
 15. **D15. Gaps in the RNA range** (§1; A12 "one fragment numbering"). Alaric numbers fragments from the first residue present and leaves gaps where residues are unobserved. Preparic's plans number from the range's `start`. The two disagree when the range's first residue is unobserved, and the clip, pair and skeleton rules must cope with missing fragment numbers. 1b7f has no gap. Options:
     - (a) Refuse, at the stage 2 gate, an RNA range with any unobserved residue (the simplest fit with "no lenient flags").
     - (b) Support gaps throughout: fragment numbers with holes, clips by fragment number, and a residue mapping taken from the fragments.
@@ -691,12 +738,13 @@ Each item names what is open, the options, and the clause it changes. Where a pl
 16. **Go-ahead items carried over from `open-questions.md`.**
     - Push attract-jax `9453ee6` and `22b23e4`, commit its untracked accuracy data, and bump Alaric's submodule pointer from `12bba50`. A5 cannot run from Alaric's pinned attract-jax until then.
     - Fix the 10-12 grid bug (a bead exactly on a grid node). It is a prerequisite of the energy-filter cascade.
-    - "Skip 10-12 if less than 1000 poses": is that the pose count entering the cascade, or the count left after 5-7? It changes only speed, because the output equals all-gridless either way.
+
+    The former question about "skip 10-12 if less than 1000 poses" is settled by `min_cascade` (A12): the count is checked before every step, against the poses still undecided.
 
 **Not decisions.**
-- `state-transitions.md` §11.4 (clip and matrix) is settled by the author's clarification (P4.4, P5.6). Its two remaining sub-points are D2 and D3.
+- `final/state-transitions.md` §11.4 (clip and matrix) is settled by the author's clarification (P4.4, P5.6). Its two remaining sub-points are D2 and D3.
 - §11.8 (is the whole table editable in stages 4–6?) is answered by the author's own wording in `open-questions.md`: "the editable table remains visible and editable throughout". P4.3 follows it.
-- §11.10–11.13 are facts about Seamless still to be checked: restart detection, withdrawing queued writes, equal-value writes, and polling of read-only Alaric mounts. They affect how P3–P5 and P9 are met, not what they require.
+- §11.10–11.13 have been answered by the author: a restart is out of scope for state transitions; no assumption is made about withdrawing queued writes, and a write of the correct state is always queued; Seamless guarantees that equal-value writes revoke nothing and that read-only Alaric mounts are polled. They affect how P3–P5 and P9 are met, not what they require.
 - The delivery form of each Alaric step (§3.0) is the implementer's choice, not the author's.
 
 ## Appendix A. Where each clause comes from
@@ -706,8 +754,8 @@ Abbreviations:
 | Short | Document |
 |---|---|
 | OQ | `open-questions.md` |
-| CB | `contract-boundaries.md` |
-| ST | `state-transitions.md` |
+| CB | `final/contract-boundaries.md` |
+| ST | `final/state-transitions.md` |
 | S4 | `stage4-best-fit-miniplan.md` |
 | TH | `stage4-thresholds-howto.md` |
 | EN | `energetics-miniplan.md` |
@@ -753,6 +801,7 @@ The third column names one way to meet each clause, using the T-, S- and B-numbe
 | P7, P8 | CB §8.1; ST §1, §9.1 | null as the only empty value; validators T10, T19 |
 | P9 | ST §7, §8 | load overlay; URL rules |
 | P10 | ST §5.3, §10.1; CB T20 | group-B gate; T20 independent of S18 |
+| P11 | author (2026-10-29); CB T25, §8.6.5 | T25 `share_range_pdbs_aa` → S23 `range_pdbs_aa`, echoing S5 and B5 |
 | Stage 1 | ST §4.2, §7.1, §9.1; CB §8.6.1 | S21 `structure_id`; arbiter rule |
 | Stage 2 | CB §8.6.2; ST §4.2; src | T0 `parse_ranges` |
 | Stage 3 | ST §4.2; PA; AG §5 | S7, S8 keyed by stacking key |

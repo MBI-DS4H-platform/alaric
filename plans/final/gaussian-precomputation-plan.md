@@ -5,7 +5,7 @@ Deliverables **A7** (the committed filter specification `alaric/gaussian_stackin
 Precedence of sources:
 1. the author's corrections of 2026-10-29: hard mask d < 5 Å; cutoffs rounded down to five decimals; no cutoff re-derivation;
 2. `plans/oracle-contract.md` §3.7–3.8 and G3/G4/G8/G9;
-3. `plans/contract-boundaries.md` §1, §5.1 and §6;
+3. `plans/final/contract-boundaries.md` §1, §5.1 and §6;
 4. `plans/open-questions.md`;
 5. `plans/draft-implementation-plan.md` §8;
 6. `plans/alaric-gaussian-miniplan.md`, which is outdated wherever it conflicts with the above.
@@ -28,7 +28,7 @@ P and the normalizer are **hard-coded literals** in the module, computed once at
 **Descriptor definitions.** These are written into the JSON as text.
 - v is the RNA ring centroid minus the protein ring centroid, in the protein ring's frame (z is the protein normal).
 - d = |v|.
-- φ = arccos(|v_z|/d), the angle from the protein normal. Stage 3's slip angle is measured from the ring plane, so φ = 90° − slip.
+- φ = arccos(|v_z|/d), the angle from the protein normal. Stage 3's slip angle is the same φ (author decision, 2026-10-29).
 - θ = arccos(min(1, |R₃₃|)), the angle between the two ring normals.
 - Normals come from a Kabsch fit of each ring onto the reference rings (G→A, U→C, TYR→PHE).
 
@@ -124,6 +124,7 @@ Rounding down is monotone, so containment is unchanged.
 - An in-memory run of this algorithm with the legacy model reproduces the legacy pair set exactly: 33,246,528 pairs, 2,880 translations with identical values and order, and Hopf cell order.
 - Rotations agree to 1.75e-15.
 - Legacy keeps 56 zero-size rows that the canonical layout drops (18,104 against 18,048 rows).
+*Author note*: legacy r90 is to be removed from version control in this plan. History rewrite to completely remove it from Git is not necessary.
 
 **Environment and legacy file format.**
 - alaric env: Python 3.12.13, numpy 1.26.4, `zstandard` 0.25.0 (cext, libzstd 1.5.7); the `zstd` CLI is v1.5.7.

@@ -87,8 +87,8 @@ Stable path: `$ALARIC_DIR/gaussian_stacking_filter.json`. `ALARIC_DIR` keeps its
 
 **Descriptor match with stage 3 (`preparic/detect_stacking.py`):**
 - `distance` and `tilt_angle` match d and θ (in degrees).
-- **`slip_angle` is not φ.** It is asin(|n·v|/d), the angle from the ring **plane**, so **φ = 90° − slip_angle**. Then disp<45° ⇔ slip>45°, and envelope φ<60° ⇔ slip>30°.
-- Resolved by `preparic-gaussian-miniplan.md` §2: stage 6 computes φ directly, after a Kabsch fit onto `ring-refe`, as training and `anchor.py` do. Remaining caveat: stage 3's default selection uses `<=`, while the Gaussian filters are strict.
+- **`slip_angle` is φ.** By the author's decision of 2026-10-29, preparic redefines it as acos(|n·v|/d), the angle from the ring **normal** (0° = zenith, 90° = horizon). Then disp<45° ⇔ slip<45°, and envelope φ<60° ⇔ slip<60°.
+- Stage 6 still computes φ directly, after a Kabsch fit onto `ring-refe`, as training and `anchor.py` do (`preparic-gaussian-miniplan.md` §2). Stage 3's normals are SVD normals, so its values differ by up to 0.7°. Remaining caveat: stage 3's default selection (author: distance ≤ 5 Å and slip/displacement φ < 60°) uses `<=` for distance but a strict `<` for slip, like the Gaussian filters.
 
 ## 6. Plugging into Alaric
 No new action. The `anchor` config stays as it is:
@@ -127,5 +127,5 @@ Following f8372ae/685b6d0:
 1. Is the RRM-95 tilt30/both fallback (fixed Gaussian-only cutoff + filter, 92.4 %/92.0 %) acceptable, or should all RRM-90/95 variants use the fixed-cutoff reading?
 2. Should the envelope (d<5.7, φ<60) be applied as a hard mask? It is non-binding for d at all 12 cutoffs (max d 4.94).
 3. Who chooses the threshold per anchor: a preparic default (e.g. `rrm95`) or the user?
-4. (Resolved on the preparic side: φ is computed directly, and stage 3's `slip_angle` is only relabelled.) Should `rrm95-tilt30*` be hidden from the UI, since they are fallbacks below 95 % recall?
+4. (Resolved on the preparic side: φ is computed directly, and stage 3's `slip_angle` is redefined as φ.) Should `rrm95-tilt30*` be hidden from the UI, since they are fallbacks below 95 % recall?
 5. Distribution: Seamless materialisation (recommended), or commit about 350 MB of arrays like the legacy set?

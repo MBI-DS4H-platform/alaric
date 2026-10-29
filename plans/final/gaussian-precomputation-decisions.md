@@ -2,7 +2,7 @@
 
 Date: 2026-10-29. Scope: the Alaric-side precomputation of the 12 Gaussian stacking filters, deliverables A7 (the committed `alaric/gaussian_stacking_filter.json`) and A8 (the generator script and its gitignored caches). The implementation plan is `gaussian-precomputation-plan.md` in this folder.
 
-Read this document together with `../contract-boundaries.md` (CB) and `../draft-implementation-plan.md` (DIP). Where they disagree with it, **this document wins**. It also overrides `../oracle-contract.md` (OC) §3.7–3.8 and `../alaric-gaussian-miniplan.md` (AG) on the same points. Those four documents have not yet been edited to match.
+Read this document together with `contract-boundaries.md` (CB, in this folder) and `../draft-implementation-plan.md` (DIP). Where they disagree with it, **this document wins**. It also overrides `../oracle-contract.md` (OC) §3.7–3.8 and `../alaric-gaussian-miniplan.md` (AG) on the same points. CB was brought in line with it when CB was finalized (2026-10-29); the other three documents have not yet been edited to match.
 
 ## 1. Readiness
 

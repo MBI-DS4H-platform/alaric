@@ -1,5 +1,5 @@
 alaric-energy-score-filter-plan.md
-    Plan for a merged Alaric "energy-filter" action that replaces score+filter, with one threshold per (dinucleotide, protein range) and a 5-7 -> 10-12 -> gridless grid-accuracy cascade backed by cached Seamless grids. It also covers how preparic computes the thresholds JSON from best-fit energies, the rounding rule, and prerequisites in attract-jax.
+    Plan for a merged Alaric "energy-filter" action that replaces score+filter, with one threshold per (dinucleotide, protein range) and a configurable accept/reject/refine grid cascade (default 5-7 -> 10-12 -> gridless, with min_cascade and defaults in DATA/score-filter.yaml) backed by cached Seamless grids. It also covers how preparic computes the thresholds JSON from best-fit energies, the rounding rule, and prerequisites in attract-jax.
 
 alaric-gaussian-miniplan.md
     Plan for a Python generator of the 12 precomputed Gaussian stacking filters (rrm50..rrm95, with tilt30/disp45 variants) that reproduces the report's cutoffs and writes the CSR caches plus the JSON contract (gaussian_stacking_filter.json) that preparic reads. It also covers the RRM-95 fallback, the Seamless factory, shipping and the anchor.py/resolve.py changes.
@@ -13,8 +13,11 @@ anchor-ring-ovrmsd-mode.md
 attract-jax-numpy-scoring.md
     Notes on attract-jax's new gridless, numpy-only scoring path (inputs, outputs, accuracy versus grid scoring, commit and environment status) as the basis for preparic's energetics stage. It also covers how to wrap it in Seamless and lists the gotchas.
 
-contract-boundaries.md
-    The preparic/Alaric boundary during project preparation: shared rules (Alaric delivers sandbox-tested modules or CLI tools with DEPS lists, factories decided case by case, identified-not-staged data, rounding in Alaric), an inventory of all existing and planned preparic Seamless transformers and what each takes from Alaric, the reduced DEPS file for gridless energetics, and the precomputed Gaussian filters plus the all-filter check tool. It also lists where the author's decisions override the mini-plans. A final section covers the frontend/backend boundary: every existing and planned Seamless shared cell (edit vs computed), which transformers it feeds or comes from, backend-only cells, error and staleness signalling, and multi-cell write rules.
+final/contract-boundaries.md
+    Final (2026-10-29). The preparic/Alaric boundary during project preparation: shared rules (Alaric delivers sandbox-tested modules or CLI tools with DEPS lists, factories decided case by case, identified-not-staged data, rounding in Alaric), an inventory of all existing and planned preparic Seamless transformers and what each takes from Alaric, the reduced DEPS file for gridless energetics, and the precomputed Gaussian filters plus the all-filter check tool. It also lists where the author's decisions override the mini-plans. A final section covers the frontend/backend boundary: every existing and planned Seamless shared cell (edit vs computed), which transformers it feeds or comes from, backend-only cells (stage decisions as null-or-marker cells with bases and an active flag), echoes for staleness, error signalling, and the one remaining multi-cell write. Open points are marked Unresolved and point to contract-open-questions.md.
+
+contract-open-questions.md
+    Every question still open after contract-boundaries.md and state-transitions.md were finalized: their unresolved points, the related open questions of open-questions.md, the open decisions of oracle-contract.md and draft-implementation-plan.md, and those two documents' own proposals, each with options and recommendations. It ends with a table of the author's answers that were applied on finalization.
 
 energetics-miniplan.md
     Plan for preparic stage 5: score every dinucleotide against each protein range gridlessly (refe and best-fit sets) through a Seamless transformer, and let the user edit an interaction matrix of one contiguous run per stacking anchor. It covers shared clipping with stage 4, Recompute, storage and reset rules, the interactions.json handoff, and unbound-protein options.
@@ -34,8 +37,8 @@ preparic-architecture.md
 preparic-gaussian-miniplan.md
     Plan for preparic stage 6: compute Gaussian scores of reference and best-fit stackings in the browser (Kabsch ring geometry), pick an RRM class and prefilters per anchor, and let the user edit them in a table. Server-side validation checks whether each best-fit pose cell would be emitted by Alaric's precomputed filter.
 
-state-transitions.md
-    Preparic's state across stages 1-6 in three layers (browser, shared cells, transformers): one linear stage shared by all tabs and derived from marker edit cells with recorded bases, single-write Continue/Back transitions with per-stage gates, what lingers on Back, freshness via echoes, and what happens when inputs change from another tab, a stale tab, a mount file or a restart mid-flight. It proposes changes to contract-boundaries.md section 8 and ends with questions for the author.
+final/state-transitions.md
+    Final (2026-10-29). Preparic's state across stages 1-6 in three layers (browser, shared cells, transformers): one linear stage shared by all tabs and derived from marker edit cells with recorded bases, single-write Continue/Back transitions with per-stage gates, what lingers on Back, freshness via echoes, and what happens when inputs change from another tab, a stale tab, a mount file or a restart mid-flight. Its changes to contract-boundaries.md section 8 are applied there, and it ends with the author's answers to its questions; a backend restart is out of scope.
 
 stage4-best-fit-miniplan.md
     Plan for preparic stage 4: fit every dinucleotide to its best library conformer via Seamless factories, derive the rounded ovRMSD/cRMSD threshold tables, and show them with an editable copy. The user can clip poor end fragments (clip1/clip2) and the results go downstream to energetics.

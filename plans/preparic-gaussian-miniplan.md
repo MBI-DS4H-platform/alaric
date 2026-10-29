@@ -3,7 +3,7 @@
 Plan only; nothing is implemented. Builds on `alaric-gaussian-miniplan.md` (AlaGaussian, the "JSON contract"), `stage4-best-fit-miniplan.md` and `energetics-miniplan.md`. Numbers were checked in scratch with the `alaric` env; line numbers refer to the current `alaric/anchor.py`.
 
 ## 0. Premise and filter set
-**Descriptors are computed in the backend today.** Stage 3's are produced by `detect_stacking.py`, a Seamless transformer. The browser only gets `distance`, `tilt_angle`, `slip_angle` and the centroids, without normals. Stage 6 adds a TS geometry module that computes reference and best-fit descriptors with identical code (§2).
+**Descriptors are computed in the backend today.** Stage 3's are produced by `detect_stacking.py`, a Seamless transformer. The browser only gets `distance`, `tilt_angle`, `slip_angle` (which is φ, from the ring normal) and the centroids, without normals. Stage 6 adds a TS geometry module that computes reference and best-fit descriptors with identical code (§2).
 
 **12 precomputed filters (confirmed):**
 - `rrm50`, `rrm60`, `rrm70`, `rrm80`: Gaussian only. Cutoffs from `envelope-analysis-5-report.md`: 3.3038, 2.9043, 2.0420, 1.1975.
@@ -43,8 +43,7 @@ Best-fit PDBs use chain B, resid 1–2, standard atom names, and the CIF frame. 
 
 **Fix: `src/lib/ring-geometry.ts`.**
 - Kabsch normals via the Horn quaternion method with a 4×4 Jacobi solver; atoms matched by name.
-- d = |c_rna − c_prot|, φ = acos(|v·n_prot|/d) and θ = acos(|n_prot·n_rna|). φ is computed directly, so the `90° − slip` mismatch disappears.
-- Stage 3 follow-up: relabel its column "Slip (from plane)".
+- d = |c_rna − c_prot|, φ = acos(|v·n_prot|/d) and θ = acos(|n_prot·n_rna|). φ is computed directly. Stage 3's `slip_angle` is the same φ (author, 2026-10-29), so no relabel is needed.
 
 ## 3. Gaussian, classes and auto prefilters (`src/lib/gaussian.ts`)
 - **Score:** `score = exp(-0.5·Δᵀ P Δ) / normalizer`. The `golden` vectors are self-tested on load (rel tol 1e-12); a failure disables stage 6.
@@ -121,7 +120,7 @@ Out-of-band mount edits fail the key-set check at read time.
      - the validation-cell states.
    - pytest: loaders, validator, job building, merge, name parity.
    - alaric: refactor parity, and a `cell_fill` cross-check (§7.2).
-7. **Stage 3** relabel. Optionally move `detect_stacking.py` to Kabsch normals.
+7. **Stage 3**: no relabel is needed, since its slip angle is φ. Optionally move `detect_stacking.py` to Kabsch normals.
 
 ## 7. Server-side validation of the class table
 ### 7.1 What is checked
@@ -209,4 +208,4 @@ In the editable table's validation cell (anchor worst case; per-dinucleotide det
 2. **Red classes (below RRM-95):** export with a warning (recommended), block export, or prompt deselection?
 3. **Validation flags:** should 0 % fill, fill < ⅓ and a pose fail stay warnings with one export confirmation (recommended), or should any of them block export?
 4. **Validate all 12:** should validation run for all 12 filters per anchor once (about 20–40 s, re-run only on refit)? Edits would then be instant, and the UI could suggest the strictest filter that still emits the best-fit cell. The alternative is validating only the chosen filter, as currently specified.
-5. **Stage 3 alignment:** should stage 3 also switch to Kabsch normals and displacement, so its numbers match stage 6?
+5. **Stage 3 alignment:** should stage 3 also switch to Kabsch normals, so that its slip (φ) and tilt match stage 6?

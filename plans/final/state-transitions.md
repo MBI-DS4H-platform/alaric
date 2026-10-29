@@ -1,11 +1,13 @@
 # Preparic stage state: browser, cells and transformers
 
-Plan only. This document describes preparic's state over stages 1–6 in three layers:
+Final, 2026-10-29. This document describes preparic's state over stages 1–6 in three layers:
 - the browser: which stage is shown and what the user sees;
 - the shared cells: which are defined and which are empty;
 - the transformers: which run, which wait and which are blocked.
 
-It then defines every stage transition, and what happens when an input changes from elsewhere while a transition is under way. It builds on `contract-boundaries.md` (§8 in particular), uses that document's S-, B- and T-numbers, and proposes changes to it (§9). The export stage is only sketched.
+It then defines every stage transition, and what happens when an input changes from elsewhere while a transition is under way. It builds on `final/contract-boundaries.md` (§8 in particular) and uses that document's S-, B- and T-numbers. The changes it proposed to that document (§9) were applied there when both were finalized. The export stage is only sketched.
+
+Questions that are still open are marked **Unresolved**, with their ID in `contract-open-questions.md`. Until they are answered, the text gives the provisional behaviour. Other plan documents are named by their path under `plans/`.
 
 Baseline:
 - preparic HEAD `5c85f67`;
@@ -18,6 +20,19 @@ Author decisions taken in this session:
 - Continue closes when there is nothing to anchor on;
 - stage 4's main purpose is the cRMSD/ovRMSD threshold table, which the user may copy from the reference values and/or fill in themselves;
 - the clip is changed in stage 4, never beyond a stacking anchor. On 5→4→5 the interaction matrix is reused: the clip it was built for is read from its grid extent, and the first and last runs are filled in or reduced.
+
+The author's answers to §11 (2026-10-29):
+- Back keeps the decision of every stage, by deactivating its marker (§11.3);
+- before stage 5 the threshold table must be complete, clipped rows included (§11.5; the reading is to be confirmed, D4);
+- the table starts as an empty skeleton, and Copy is explicit. S9 must be clearly visible, so that it is clear what Copy does (§11.6);
+- S22 may come from T6's output, so stage 4 opens before the fit (§11.7);
+- the table stays editable in stages 4–6 (§11.8);
+- `biounit` stays in M2's basis, because chain naming depends on the assembly (§11.9);
+- a backend restart is out of scope for state transitions (§11.10);
+- no assumption is made about withdrawing a queued write; a write of the correct state is always queued (§11.11);
+- Seamless guarantees that an equal-value PUT never revokes downstream, and that read-only mounts are polled (§11.12, §11.13).
+
+Also by author decision, stage 3's default selection is distance ≤ 5 Å and slip/displacement φ < 60°.
 
 Short version:
 - **One linear stage, shared by every tab and derived from edit cells.** Stage k is reached when the marker cells of stages 2..k are all active and their recorded bases match the current upstream decisions. There is no stage cell.
@@ -41,14 +56,14 @@ These are the points where an intuitive reading goes wrong.
 6. **Superseded runs are not stopped at once.**
    - A spawned run is killed only after a hold of 30 s, or up to about 5 min.
    - An in-process run continues to completion and holds the process lock, delaying every other in-process transformer (cancellation.md; execution-backends.md *The process lock*).
-7. **A PUT of the value already served is a no-op:** 200, same marker, no `update`. By inference it also triggers no recompute, so repeating a write costs nothing (shares.md *Writing: PUT*).
+7. **A PUT of the value already served is a no-op:** 200, same marker, no `update`. It never revokes or recomputes the downstream cone (a Seamless guarantee, §11.12), so repeating a write costs nothing (shares.md *Writing: PUT*).
 8. **A conditional PUT protects one cell only.**
    - A stale marker gets a 409.
    - A write to a cell nobody else has touched succeeds, even if the writer's view of other cells is out of date.
    - An edit that the app debounces is sent with the marker current at send time. It can therefore overwrite a remote edit without a 409 (shares.md; seamless-client.js).
 9. **Computed updates are paced:** at least 2/3 s apart per share, with intermediate values coalesced. PUT acceptances are announced at once (shares.md *Cell to share*).
 10. **No "snapshot complete" event.** After the `shares` message, every undotted key is read in parallel, in arbitrary order. The dotted key `cif.cif` is never read (shares.md *seamless-client.js*).
-11. **Across a backend restart:**
+11. **Across a backend restart** (out of scope for state transitions, §11.10; recorded for information):
     - an open tab keeps the values it has, adopts the new markers and re-reads nothing;
     - queued writes that carry old markers normally get 409 and are dropped;
     - without a persistent result cache, everything is recomputed (shares.md *Lifecycle*).
@@ -99,7 +114,7 @@ Transformer state never feeds the derived stage, and no Continue gate reads it. 
 |---|---|---|---|
 | 1 | none; always reached | | |
 | 2 | S4 `ranges` | `pdbcode`, `biounit` | rows from the viewer's chains (browser-local) |
-| 3 | S8 `stacking_selection` | range rows (chain, start, end, normalised as by T0) | `{key: bool}` by the default rule (distance ≤ 5, tilt ≤ 30) |
+| 3 | S8 `stacking_selection` | range rows (chain, start, end, normalised as by T0) | `{key: bool}` by the default rule (distance ≤ 5, slip/displacement φ < 60°) |
 | 4 | S11 `threshold_edits` | `pdbcode`, range-1 row | a skeleton: one row per pair and per base from S22 `fragments`, all values empty |
 | 5 | S14 `interaction_matrix` | the selected stacking keys; the clip, as recorded by the grid's extent (the cells it provides) | Recompute |
 | 6 | S18 `gaussian_classes` | the selected stacking keys | the computed default classes |
@@ -134,7 +149,7 @@ Example: a tab that slept during stage 2 wakes up, and its queued `ranges` PUT l
   - It always holds a value: `{clip1, clip2, basis}`, with loader default `{0,0}`.
   - Its basis is `pdbcode` plus the range-1 row, the same as S11's.
   - **It is editable in stage 4 only (author decision)**, so it passes the rule. The matrix that depends on it is inactive whenever the clip can change. The matrix is adapted once, on Continue 4→5 (§4.2), not rewritten on every clip edit.
-  - **It never cuts a selected anchor (author decision).** The stage-4 clip control stops at the outermost anchor fragments. To clip further, the user first disables that anchor in stage 3.
+  - **It never cuts a selected anchor (author decision).** The stage-4 clip control stops at the outermost anchor fragments. To clip further, the user first disables that anchor in stage 3. This is the strict reading of "beyond an anchor"; the reading is **Unresolved** (D2a).
   - Whether it fits (it does not cut an anchor, and clip1 + clip2 < fragments in S22) is a gate and banner condition, not a stage condition.
 - **S1 `pdbcode`, S2 `biounit` and S3 `cif`** are the stage-1 decisions and form the basis of M2.
 
@@ -144,6 +159,7 @@ Example: a tab that slept during stage 2 wakes up, and its queued `ranges` PUT l
 - **Continue into stage k** first deactivates any active M_{>k}, and resets a stale non-marker decision of stage k (S12 when entering 4). It waits for those writes to be accepted, and only then writes M_k.
   - Without that order, an orphan whose basis happens to match could become valid again and skip stage k's gate.
   - In normal flow nothing needs deactivating, so Continue is a single write.
+  - `draft-implementation-plan.md` argues that this order does not close every cross-cell race, and proposes activation tokens and an admission check at commit time (I1, D17).
 
 ## 4. Transitions
 
@@ -195,12 +211,12 @@ Per-ligand `error` entries in S13 do not block Continue: Recompute stops at thos
 - **Writes:**
   - If S12's basis is stale: S12 := `{0,0, basis}`, awaited.
   - Then S11, kept or as a skeleton.
-- **Clip cutting an anchor.** If a selection change in stage 3 put an anchor inside the kept clip, stage 4 opens with the clip flagged as cutting that anchor, and 4→5 stays closed until the clip is reduced. No automatic clamp is applied (§11.4b).
+- **Clip cutting an anchor.** If a selection change in stage 3 put an anchor inside the kept clip, stage 4 opens with the clip flagged as cutting that anchor, and 4→5 stays closed until the clip is reduced. No automatic clamp is applied. **Unresolved** (D2b): flag the clip, as here, or clamp it on Continue 3→4 (§11.4b).
 - **Cascade:** T10 becomes real, and T11 and T23 become real once S10 and S9 are fresh. T20 → T21 runs once S10 is fresh. T15 and T16 run as sentinels.
 
 **4→5**
 - **Gate:**
-  - every unclipped pair and base value in S11 is filled, and T10 is not failed;
+  - every pair and base value in S11 is filled, clipped rows included (§11.5; the reading is to be confirmed, D4), and T10 is not failed;
   - S12 fits S22 and cuts no selected anchor;
   - S13 is fresh.
 
@@ -210,7 +226,7 @@ Per-ligand `error` entries in S13 do not block Continue: Recompute stops at thos
 - **Writes:** S14 := `{basis: selected keys, active, grid}`, in one of two ways.
   - **Kept and adapted.** If an inactive S14 with matching selected keys exists, it is reactivated and adapted to the current clip:
     - the clip it was built for is read from its grid extent;
-    - only the first and last runs are affected: they are filled in where the new clip uncovered rows, and reduced where it covers more;
+    - only the first and last runs are affected: they are filled in where the new clip uncovered rows, and reduced where it covers more. How uncovered rows are filled is **Unresolved** (D3, §11.4a);
     - every other run is unchanged.
   - **Recompute** otherwise.
 - **Cascade:** T15 → B14; T16 → S15.
@@ -242,11 +258,11 @@ Back from stage k writes one cell: M_k with `active: false`, everything else unc
 1. **Transformers.** An inactive marker reads as null, so its consumers run as sentinels while it is inactive and come back from cache on return. Example: T10, T11 and T23 for S11. The clip stays active and stays consumed throughout, but every consumer of the clip also needs an active marker or a gated input.
 2. **Wrong data.** The basis catches a kept value that was made for another structure or another range 1, even when the fragment keys coincide (same RNA numbering under a different PDB code). Such a value is replaced by the default, never restored.
 3. **Computed drift while away.** A kept value can come back to changed computed values. Examples: a new fit after a restart with new code; energetics after a protein-range change; classes after a fit change. The plans already handle each case as "kept, differing rows marked" (S4:71, EN:89, S6:94), and the read checks catch shape changes. A restored value is shown with those marks, and the gates re-check it.
-4. **Gate.** A restored S11 must still pass the 4→5 gate. If the clip has changed meanwhile, newly unclipped rows may be empty and must be filled.
+4. **Gate.** A restored S11 must still pass the 4→5 gate. Clipped rows must be filled too (§11.5), so a clip change never uncovers an empty row.
 5. **Revert.** If the user restores an earlier `pdbcode` or range rows before going forward, the kept decisions match again and are restored together with every cached result.
 6. **Export** reads decisions only at the export stage, after every gate has held.
 
-The alternative (A), clearing the marker to null, is simpler. It would throw the threshold table away on every Back 4→3, and the matrix or the classes on Back from 5 or 6 (§10.3).
+The alternative (A), clearing the marker to null, was rejected (author, §11.3). It would throw the threshold table away on every Back 4→3, and the matrix or the classes on Back from 5 or 6 (§10.3).
 
 ### 4.4 Edits within a stage
 | Cell | Editable in | Write policy | Recomputes |
@@ -306,7 +322,7 @@ Steady state means after all computation has finished.
 S9, S10 and S13 are often still computing at stage 4. Stage 4 does not wait for them (§4.2).
 
 ### 5.3 Transformers
-**Group B** is T5, T7, T8, T9, T12, T13×k, T14 and T18: everything downstream of the fit. By author decision it waits for stage 3: T5 depends on S8 being active.
+**Group B** is T5, T7, T8, T9, T12, T13×k, T14 and T18: everything downstream of the fit. By author decision it waits for stage 3: T5 depends on S8 being active. `draft-implementation-plan.md` proposes gating it on the valid stage-3 prefix instead, so that a stale but active S8 (§7.2a) does not restart the fit (I6).
 
 | Transformer(s) | 1 | 2 | 3 | 4 | 5 | 6 |
 |---|---|---|---|---|---|---|
@@ -328,7 +344,7 @@ T13 instances are added and removed with S5 already at stage 2 (contract-boundar
 | 1 | PDB code, biounit, viewer | "uploading structure…" | download error (browser-local); S21 ≠ S1 |
 | 2 | ranges table, viewer | none (S5 is not shown) | T0, T1 |
 | 3 | stacking table and selection | "detecting stackings…", "preparing all-atom structure…" | + T3, T4, T6, T24 |
-| 4 | threshold table (editable, reference values alongside, "differs from computed" marks), Copy, clip, best-fit overlays | "computing reference thresholds…" (Copy disabled), "fitting…" | + T5–T11 |
+| 4 | threshold table (editable, with S9's computed values clearly visible alongside so that it is clear what Copy does (§11.6), "differs from computed" marks), Copy, clip, best-fit overlays | "computing reference thresholds…" (Copy disabled), "fitting…" | + T5–T11 |
 | 5 | energetics, matrix, energy thresholds, threshold table, clip (read-only) | "scoring…" | + T12–T16 |
 | 6 | classes, validation, refe panel, threshold table, clip (read-only) | "validating…" | + T17–T23 |
 
@@ -353,7 +369,9 @@ Example: S13's fragment keys stay the same when a protein range is edited. If th
 
 - **Comparisons use this tab's local values, pending writes included.** A tab that has just written therefore sees its dependents go stale at once, before any `update` arrives.
 - **A revert brings no `update`.** When the inputs return to values whose result was already delivered, no `update` follows (§1.7). The old value matches again and is fresh.
-- **Echoes cannot see code or library changes.** Those change computed values for unchanged decisions. Within one backend process only edit cells change, so code and library changes come with a restart (§8).
+- **Echoes cannot see code or library changes.** Those change computed values for unchanged decisions.
+  - The read-only Alaric mounts B15 and B16 are polled while the backend runs (§11.13), so the Gaussian model can change in a running process. S16's `filter_set_version` echo covers that.
+  - Other code and library changes come with a restart (§8), which is out of scope (§11.10).
 
 ## 7. Exogenous changes mid-flight
 For every input, the question is whether it can change from elsewhere while something is under way, and what happens then.
@@ -365,9 +383,9 @@ For every input, the question is whether it can change from elsewhere while some
 | Deferred writes in a live tab (download → S1/S3; debounced S4, S12, S18; idle CIF flush) | their own cells | Dropped by the §4.1 rule if the stage changed or the cell changed remotely meanwhile. |
 | URL `?pdb=`, `?continue=1` | S1/S3; the stage | Applied only when the derived stage is 1, and `?pdb=` only when S1 is empty. Otherwise a link opened in a new tab would reset the shared project. |
 | Mount files edited by hand (`authority="file"`) | any mounted edit cell, at any time | Same as a stale-tab write. Malformed content is invalid, so the stage falls back. The loader repairs content only at startup. |
-| Read-only Alaric mounts (B15, B16) | S16 | The `filter_set_version` echo changes, and stage 6 shows that the model changed. |
-| Backend restart | computed cells, which are absent until recomputed; markers reset | §8 |
-| Code or library update (implies a restart) | computed values for unchanged decisions | §8; invisible to echoes |
+| Read-only Alaric mounts (B15, B16), polled while the backend runs (§11.13) | S16 | The `filter_set_version` echo changes, and stage 6 shows that the model changed. |
+| Backend restart | computed cells, which are absent until recomputed; markers reset | out of scope (§11.10); §8 records the facts |
+| Code or library update (implies a restart) | computed values for unchanged decisions | out of scope (§11.10); invisible to echoes |
 | Seamless itself | transient runs on mixed inputs; held superseded runs; paced updates; a cache hit completing one turn late | No effect on the stage. Echoes mark the transient values stale. |
 
 ### 7.1 Races between actions
@@ -391,6 +409,7 @@ For every input, the question is whether it can change from elsewhere while some
 4. Resolution, either way:
    - The users review the ranges and Continue 2→3. That deactivates the orphan S11 first, then writes M3 merged by key. Continue 3→4 then restores S11 if range 1 did not change, and writes a skeleton if it did.
    - Or someone restores the old ranges. Then everything becomes valid again, the cached results return, and stage 4 reappears.
+5. **Mitigation (author, §11.11).** The app makes no assumption about whether a write already handed to `seamless-client.js` can be withdrawn. A tab that wakes with an outdated write queued tries to withdraw it. Whatever the outcome, it then queues a write of the correct state, the value it has just read, so that a stale write that lands anyway is overwritten.
 
 **(b) Back 4→3 by A while B clicks Continue 4→5.**
 1. S11 becomes inactive, and S14 is written with basis = the selection.
@@ -415,17 +434,17 @@ For every input, the question is whether it can change from elsewhere while some
 - Deferred writes are held, and §4.1 applies to them on reconnect.
 - On reconnect the client re-reads every share, and loading continues from step 3.
 
-**Backend restart:**
+**Backend restart** (out of scope for state transitions, §11.10; recorded for information):
 - Edit cells, S3 included, reload from `deployment-mounts/`. The derived stage is unchanged, and nothing needs a browser.
 - Computed cells are absent until recomputed.
   - From stage 3 on, the gate is open, so group B restarts at once.
-  - Without a persistent result cache that means minutes of library loading. Meanwhile stage 4 stays editable, but Continue 4→5 and later are closed.
-  - With a persistent cache, results return one turn later as cache hits.
+  - Preparic runs without a persistent result cache (author's execution decision, 2026-10-29), so that means minutes of library loading. Meanwhile stage 4 stays editable, but Continue 4→5 and later are closed.
 - **An open tab must re-sync.** It keeps its old computed values, whose echoes still match, so they would pass as fresh even after a code update (§1.11). A tab that detects a restart therefore reloads, or discards its computed values and re-reads everything. Its queued writes are refused (409), and their users are told.
 
-## 9. Proposed changes
+## 9. Changes to `contract-boundaries.md`
 
-### 9.1 To `contract-boundaries.md`
+### 9.1 Applied to `final/contract-boundaries.md`
+These changes were proposed here and applied to that document when both were finalized on 2026-10-29. They are kept as the record of why.
 1. **Markers (§8.1, §8.2).**
    - S4, S8, S11, S14 and S18 become `null | {basis, active, …}`. Their loaders write null.
    - `[]` stops being an empty value; a genuinely empty result is then never mistaken for "undecided".
@@ -439,7 +458,7 @@ For every input, the question is whether it can change from elsewhere while some
 5. **Stage 4 (§8.1 "On entering a stage…", OQ:8).**
    - Entering stage 4 creates the threshold table as a skeleton.
    - Values come from Copy and/or typing.
-   - Before stage 5 the table must be **complete** (every unclipped value filled), not necessarily copied.
+   - Before stage 5 the table must be **complete** (every value filled, clipped rows included; D4), not necessarily copied.
    - T10 validates S11 against S22 instead of S9, so it no longer waits for the fit.
    - S9 still feeds Copy, the "differs from computed" marks, T23, and the export's raw-value comparison.
 6. **§8.5, resets.**
@@ -467,39 +486,42 @@ For every input, the question is whether it can change from elsewhere while some
 - **Stale stackings.** The `staleStackingRevision` marker barrier misses `always_visible` toggles. → Echo.
 - **`?pdb=`** overrides a shared project. → Applied at stage 1 only.
 
-## 10. Open points
+## 10. Settled and open points
 1. **Gate for group B: decided (author), wait for stage 3.** The fit starts on entering stage 3, not on every committed range-1 change in stage 2.
    - It avoids speculative 8 GB library loads; superseded spawned fits live 30 s to about 5 min (§1.6).
    - The fit overlaps stage 3 and the threshold editing in stage 4.
 2. **Zero stackings or zero selected anchors: decided (author), both close Continue.**
-3. **Back semantics: (B), the `active` flag.** The author's matrix reuse across 5→4→5 requires (B) for M5. This document applies it to every marker; confirmation is pending (§11.3).
+3. **Back semantics: decided (author), (B), the `active` flag, for every marker (§11.3).** The matrix reuse across 5→4→5 requires (B) for M5.
    - (A), null, would throw away the threshold table on every Back 4→3.
 4. **Clip and matrix: decided (author).**
    - The clip is edited in stage 4 only, never beyond a selected anchor.
    - The kept matrix is adapted on Continue 4→5 from the clip recorded in its grid extent: the first and last runs are filled in or reduced.
+   - **Unresolved:** how uncovered rows are filled (D3), and an anchor newly selected inside the kept clip (D2b).
 5. **Export (deferred).**
    - The trigger is an edit cell, `export_request`, carrying the basis: every decision value plus the "proceed anyway" checkboxes.
    - The export runs only if that basis still matches when it executes, and its result echoes it.
    - An edit made while the export runs then leaves a stale export, never a mixed one.
-6. **Seamless points to confirm.**
-   - (a) An equal-checksum PUT does not revoke downstream (§1.7).
-   - (b) Whether preparic's result cache survives a restart (§8).
-   - (c) Whether the app can withdraw a write that is queued or retrying in `seamless-client.js`. If it can, §7.2a cannot happen.
-   - (d) How the app learns of a restart, given that the client silently adopts lower markers.
+6. **Seamless points: answered (author).**
+   - (a) An equal-checksum PUT does not revoke downstream (§1.7): guaranteed by Seamless.
+   - (b) The result cache may or may not survive a restart, depending on the Seamless configuration; probably it will not. Preparic runs with none (§8).
+   - (c) No assumption is made about withdrawing a write that is queued or retrying in `seamless-client.js`. The app tries, and always queues a write of the correct state (§7.2a).
+   - (d) Restart detection: out of scope for state transitions (§11.10).
 
-## 11. Questions for the author
+## 11. Questions for the author, with answers
 1. ~~Gate for group B~~: answered, wait for stage 3.
 2. ~~Empty selections~~: answered, both 2→3 and 3→4 are closed.
-3. **Back semantics (§10.3).** The matrix reuse implies deactivate-and-keep for M5. Should it apply uniformly to every marker, including S4, S8, S11 and S18?
+3. **Back semantics (§10.3).** The matrix reuse implies deactivate-and-keep for M5. Should it apply uniformly to every marker, including S4, S8, S11 and S18? [Author: yes]
 4. ~~Clip and matrix~~: answered. The clip is edited in stage 4 only, never beyond an anchor, and the matrix is adapted on 5→4→5.
-   - (a) **Filling in uncovered rows.** When the new clip uncovers rows, do the first and last runs simply extend to the new boundary? Or are the new rows decided by Recompute's energy rule (|E| ≥ 1, stopping at error rows), applied to those rows only?
-   - (b) **An anchor selected inside a kept clip.** Suppose a user selects, in stage 3, a stacking whose fragment lies inside the kept clip. §4.2 then opens stage 4 with the clip flagged and 4→5 closed until the clip is reduced. Would you prefer Continue 3→4 to clamp the clip to the outermost anchor automatically (one more awaited write before S11)?
-5. **Stage 4 gate.** Is "every unclipped threshold filled (copied and/or typed)" the right condition for 4→5, replacing OQ:8's "copied before stage 5"? Should rows of clipped fragments be required too?
-6. **Stage 4 skeleton.** On entering stage 4, should the table start empty, with Copy as one click, or be prefilled from S9 when S9 happens to be fresh? Prefilling makes the default depend on timing: two tabs racing Continue could write different defaults.
-7. **S22 `fragments`.** Is it acceptable to take the fragment keys from T6's output, which is not gated, so that stage 4 opens before the fit? Or must the key rule come from the fit (`best-fits.tsv`)?
-8. **Thresholds editable in stages 5–6 (OQ:8 "throughout").** I read this as the whole table staying editable in stages 4–6. Correct?
-9. **`biounit` in M2's basis.** Does the chain naming of the ranges depend on the biological assembly? If not, `biounit` can leave the basis and become pure display.
-10. **Restart detection and cache (§10.6b, d).** Does `seamless-client.js` expose a hook for "the server restarted", or should the app infer it? Is the result cache persistent in preparic's configuration?
-11. **Withdrawing queued writes (§10.6c).** Can a write handed to `seamless-client.js` be cancelled before it is retried?
+   - (a) **Filling in uncovered rows.** When the new clip uncovers rows, do the first and last runs simply extend to the new boundary? Or are the new rows decided by Recompute's energy rule (|E| ≥ 1, stopping at error rows), applied to those rows only? **Unresolved** (D3).
+   - (b) **An anchor selected inside a kept clip.** Suppose a user selects, in stage 3, a stacking whose fragment lies inside the kept clip. §4.2 then opens stage 4 with the clip flagged and 4→5 closed until the clip is reduced. Would you prefer Continue 3→4 to clamp the clip to the outermost anchor automatically (one more awaited write before S11)? **Unresolved** (D2b).
+5. **Stage 4 gate.** Is "every unclipped threshold filled (copied and/or typed)" the right condition for 4→5, replacing OQ:8's "copied before stage 5"? Should rows of clipped fragments be required too? [Author: yes] Applied as: every value, clipped rows included; to be confirmed (D4).
+6. **Stage 4 skeleton.** On entering stage 4, should the table start empty, with Copy as one click, or be prefilled from S9 when S9 happens to be fresh? Prefilling makes the default depend on timing: two tabs racing Continue could write different defaults. [Author: explicit copy. S9 must however be clearly visible in the browser, so that it is clear what Copy does]
+7. **S22 `fragments`.** Is it acceptable to take the fragment keys from T6's output, which is not gated, so that stage 4 opens before the fit? Or must the key rule come from the fit (`best-fits.tsv`)? [Author: It is acceptable]
+8. **Thresholds editable in stages 5–6 (OQ:8 "throughout").** I read this as the whole table staying editable in stages 4–6. Correct? [Author: yes]
+9. **`biounit` in M2's basis.** Does the chain naming of the ranges depend on the biological assembly? If not, `biounit` can leave the basis and become pure display. [Author: it definitely does, because chains may be duplicated] Which atoms a range picked on a copy refers to is still **Unresolved** (D7).
+10. **Restart detection and cache (§10.6b, d).** Does `seamless-client.js` expose a hook for "the server restarted", or should the app infer it? Is the result cache persistent in preparic's configuration? [Author: A server restart is out of scope for state transitions. The cache may or may not survive depending on the Seamless config; probably, it will not]
+11. **Withdrawing queued writes (§10.6c).** Can a write handed to `seamless-client.js` be cancelled before it is retried? [Author: make no assumptions here. Regardless if a cancel attempt succeeds/is supported or not, queue a write of the correct state for good measure]
 12. **Equal-value PUTs (§10.6a).** Is it guaranteed that re-writing the current value never revokes the downstream cone?
+[Author: Yes, Seamless guarantees this.]
 13. **Read-only Alaric mounts.** Are B15 and B16 polled while the backend runs? If not, `filter_set_version` can only change across a restart, and the S16 row of §7 goes.
+[Author: Yes, Seamless guarantees this].
