@@ -42,7 +42,7 @@ Every prefilter variant uses exactly its parent's cutoff, with the prefilters ad
 - Achieved recall and positive/negative counts are copied from the report. The variants' counts come from its table "Added filters at fixed Gaussian-only cutoffs". The plan verified that the five-decimal rounding (§3.3) changes no positive or negative count.
 - The rounding does add a few cache pairs, at most 4,800 (rrm95), out of 69–173 M pairs per affected filter. Kept rotation and translation counts do not change.
 
-### 3.3 Cutoffs have five decimals (author); rounded down (Claude's choice, not yet confirmed)
+### 3.3 Cutoffs have five decimals, rounded down (author)
 The JSON and the generator use five-decimal cutoffs. The full-precision report value is kept as `raw_cutoff` in provenance. The rounding happens in one place in Alaric's code.
 
 | Name | Report value (full precision) | Cutoff (five decimals) |
@@ -60,7 +60,7 @@ The values are rounded **down**, to the largest multiple of 1e-5 that is ≤ the
 - Rounding down keeps every positive the raw cutoff accepted.
 - This mirrors the strictly-above rule used for RMSD and energy thresholds, where acceptance is the strict `<`.
 
-The author has not yet confirmed rounding down rather than to nearest. If the author chooses to-nearest, change only this table and the rounding function.
+The author confirmed rounding down on 2026-10-29.
 
 Rounding preserves the order of the cutoffs, so the filter hierarchy (CB §5.2, OC A7 "Containment") is unchanged.
 
@@ -105,7 +105,7 @@ Rounding preserves the order of the cutoffs, so the filter hierarchy (CB §5.2, 
   - "Test model vectors at relative 1e-12": unchanged for the score. The accept/reject golden pairs sit either side of the **five-decimal** cutoffs.
   - The rest of the A8 paragraph is unchanged: Hopf grid, lattice, algebraic masks, bounded memory, int32 indices, reproducible serialization, compressed versus decompressed identity.
 - **§11, W9 table, "A7/A8 offline generation/provenance checks":** unchanged in kind. The cutoff check is now "the JSON equals the report rounded down", not a re-derivation.
-- **§12, decisions:** no new author decision, apart from confirming the rounding direction (§3.3).
+- **§12, decisions:** no new author decision is needed. The rounding direction (§3.3) is confirmed.
 
 ## 6. Other documents still to correct (not edited)
 - **`oracle-contract.md` §3.7 (A7):**
