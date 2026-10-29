@@ -1,5 +1,9 @@
 # Alaric: Gaussian stacking filter, Python precalculation (mini-plan)
 
+> **Author decisions, 2026-10-29:** legacy-filter compatibility (r90, r95) is a non-goal; the twelve-filter cache directory is `precomputed-filters/gaussian/`. Legacy preservation requirements below are historical and superseded by [final/gaussian-precomputation-decisions.md](final/gaussian-precomputation-decisions.md).
+
+> **Historical.** Superseded by `final/gaussian-precomputation-plan.md` wherever they conflict. Corrections: hard mask is d < 5 Å (d² < 25) and φ < 60°; d < 5.7 Å is provenance only; cutoffs are the report values rounded down to five decimals (`cutoff`) with `raw_cutoff` kept; variant cutoffs are never re-derived (the §2 variant rows and counts, 0.229/0.270/0.164/0.029, and the §3 fallback are a misreading and void); the vendored descriptors and `test_cutoffs` re-derivation are dropped; the Seamless factory and materialiser (§7) are replaced by the offline generator.
+
 Plan only; nothing is implemented. Inputs: `gaussian-filter-sources.md`, `envelope-analysis-5-report.md`, branch `gaussian-filter-precalculation`, `alaric/anchor.py`. The numbers below were re-checked in scratch with the alaric env (Py 3.12, numpy 1.26).
 
 ## 1. What exists, and what is precalculated
@@ -10,13 +14,14 @@ Plan only; nothing is implemented. Inputs: `gaussian-filter-sources.md`, `envelo
   - θ (tilt/planar) = acos(|n_prot·n_rna|) = acos(|R₃₃|).
 - **Grid (as in the branch):** the Hopf rotation grid, 6×16×16×64 = 98,304 cells at cell midpoints. Translation lattice x, y, z ∈ [−5, 5] in 0.25 Å steps (origin dropped). Rotations are kept by the profile bound on θ, translations by the profile bound on (d, φ), and pairs by the full score, giving the CSR layout (`filtered-sizes`, `filtered-concat`).
 - **New: geometry masks**, all strict `<`, evaluated exactly on the lattice:
-  - envelope d < 5.7 (d² < 32.49) and φ < 60° (3z² > x²+y²);
+  - mask d < 5 (d² < 25) and φ < 60° [corrected; was 5.7, d² < 32.49] (3z² > x²+y²);
   - displacement < 45° (z² > x²+y²). Ties really occur on the 0.25 lattice, e.g. (0.75, 1.0, 1.25), so `arccos` must not be used for this test;
   - tilt < 30° on rotations (4R₃₃² > 3).
-  - The ±5 Å box is sufficient: at every selected cutoff, max d of the kept translations is 4.94 Å and max |coord| is 4.5.
+  - The ±5 Å box is sufficient: at every selected cutoff, max d of the kept translations is 4.861 Å [corrected; 4.94 belonged to the void 0.029 cutoff] and max |coord| is 4.5.
 - **Offline vs runtime.** The cache depends only on (model, threshold, masks, grid constants), never on the project. The 12 caches are therefore **precalculated offline, deterministically**. Per project, the runtime only selects a threshold name, and the existing anchor code applies the cache. Preparic computes stage-3 scores client-side (§5).
 
 ## 2. Authoritative source
+*Superseded: the table below uses full-precision cutoffs and re-derived variant cutoffs/counts. Applied cutoffs are the rounded-down five-decimal values (rrm50 3.30384, rrm60 2.90431, rrm70 2.04198, rrm80 1.19748, rrm90 0.27592, rrm95 0.06141), and each variant uses its parent's cutoff. Ignore the variant rows (0.2288…, 0.2700…, 0.1644…, 0.0293…) and the 'fallback' rows.*
 **Recommendation: the report.** Its cutoffs are in the units of `gaussian_model.json` (the recovered model, which reproduces every CSV score to ≤1e-13). That JSON is the model.
 - From the branch, take only the **algorithm** (grid, profile prefilter, CSR format).
 - The branch's model (μ = 3.871, …) and its r90/r95/r99 cutoffs are superseded. Keep them only as a frozen `legacy` entry, so that `precomputed-filters/gaussian/*` and the `tests/1b7f-gaussian-anchor*` fixtures stay valid.
@@ -40,6 +45,7 @@ Plan only; nothing is implemented. Inputs: `gaussian-filter-sources.md`, `envelo
 The **RRM-50/60/70/80 cutoffs are Gaussian-only** (the user's amendment) and have no prefilter variants, which makes 4 + 2×4 = **12 filters**. They follow the same rule (`required` = 230/276/322/368), and their values equal the report's "RRM-derived cutoffs evaluated on the test set" table exactly. The report prints 17 significant digits, e.g. 3.3038440180955031, which is the same double. That table's X for 50–70 uses 100,000 resampled negatives (seed 20261026), so the negative counts above (on the 18,592 envelope set) differ from it. RRM-80 (182) matches.
 
 ## 3. RRM-95 unreachable cells (**flag to user**)
+*Void: the author ruled this a misreading. Variants keep the parent's cutoff with the prefilter added on top; recall falls below N by definition. No fallback exists.*
 After tilt<30, only 432 positives remain (428 with both filters), and 437 are required.
 - **Clamp to the lowest-scoring positive:** cutoff = 5.0e-6. The Gaussian then does nothing, and the cache grows to 241 M pairs. Rejected.
 - **Error:** this leaves 2 of the 8 thresholds undefined. Rejected.
@@ -62,16 +68,16 @@ After tilt<30, only 432 positives remain (428 with both filters), and 437 are re
 The legacy r90 run from this port matched the shipped arrays (4.3 s): translations and A are exact, and rotations agree to 1.7e-15. That pins the algorithm.
 
 ## 5. Data file and preparic interface (stable contract)
-Stable path: `$ALARIC_DIR/gaussian_stacking_filter.json`. `ALARIC_DIR` keeps its existing meaning, the `alaric/` package subfolder (INSTALLATION.md). Relative to the repo root (`$ALARIC_DIR/..`, which is what preparic derives), the path is `alaric/gaussian_stacking_filter.json`. The arrays live at `<repo root>/precomputed-filters/gaussian-rrm/<name>/`. Plain JSON, `schema: 1`, `version: "2026.1"`:
+Stable path: `$ALARIC_DIR/gaussian_stacking_filter.json`. `ALARIC_DIR` keeps its existing meaning, the `alaric/` package subfolder (INSTALLATION.md). Relative to the repo root (`$ALARIC_DIR/..`, which is what preparic derives), the path is `alaric/gaussian_stacking_filter.json`. The arrays live at `<repo root>/precomputed-filters/gaussian/<name>/`. Plain JSON, `schema: 1`, `version: "2026.1"`:
 - `model`: `descriptor_order` `["distance_A","displacement_rad","tilt_rad"]`, the definitions as text (§1), `mean`, `covariance`, `precision` (Σ⁻¹, precomputed), and `normalizer` = 0.17639457343866755. Also `formula`: `score = exp(-0.5*Δ·P·Δ)/normalizer`, `Δ = x − mean`, angles in radians, plus the source SHA-256 of `gaussian_model.json`.
-- `envelope`: `{distance_lt_A: 5.7, displacement_lt_deg: 60}`.
+- `mask`: d < 5 Å, φ < 60° [corrected; was `envelope: {distance_lt_A: 5.7, …}`; 5.7 is provenance only].
 - `filters`: `{tilt30: {descriptor: tilt, lt_deg: 30}, disp45: {descriptor: displacement, lt_deg: 45}}`.
 - `thresholds`: 12 entries:
   - `rrm50`, `rrm60`, `rrm70`, `rrm80` (Gaussian-only);
   - `rrm90`, `rrm90-tilt30`, `rrm90-disp45`, `rrm90-tilt30-disp45`;
   - the same four for `rrm95`.
 
-  Name grammar: `rrm<N>[-tilt30][-disp45]`. Filter suffixes are valid only for N ∈ {90, 95}. Each has `cutoff` (repr float), `accept: ">="`, `filters`, `cutoff_rule`, `rrm_target`, `achieved_recall`, the pos/neg counts, and `precalc`. For each of the four files, `precalc` holds `sha256` of the `.npy.zst` bytes on disk (what preparic verifies) and `npy_sha256` of the decompressed array (stable across zstd versions).
+  Name grammar: `rrm<N>[-tilt30][-disp45]`. Filter suffixes are valid only for N ∈ {90, 95}. Each has `cutoff` (rounded down to five decimals) and `raw_cutoff` (report value, repr float) [corrected], `accept: ">="`, `filters`, `cutoff_rule`, `rrm_target`, `achieved_recall`, the pos/neg counts, and `precalc`. For each of the four files, `precalc` holds `sha256` of the `.npy.zst` bytes on disk (what preparic verifies) and `npy_sha256` of the decompressed array (stable across zstd versions).
 
   Preparic mounts this JSON read-only in its backend `Context`, and needs only plain JSON for that. Its `preparic` env never imports alaric. No ring data goes in the JSON: preparic reads `ring-refe/`.
 - `legacy`: the branch model, r90/r95/r99, and the identity of the shipped dirs.
@@ -106,17 +112,18 @@ Changes needed:
 - **Relation to the stacking anchors:** each anchor action stacks one nucleotide on one protein residue. The threshold sets how tolerant the stack geometry is. Preparic picks the name per anchor (§8, Q3).
 
 ## 7. Seamless and shipping
+*Superseded: no Seamless factory or materialiser. An Alaric generator writes gitignored caches; see the final plan.*
 Following f8372ae/685b6d0:
 - `util/gaussian_precalc_seamless_support.py`: `input_paths()` returns the module, CLI and JSON.
 - `util/seamlessify_gaussian_precalc.py`: a Transformer factory. It pins the inputs with `files_to_checksums` and takes `name` as a str argument; the result is the 4-array directory.
 - `util/gaussian-precalc-SEAMLESS.sh NAME --output DIR`.
-- **Ship:** the JSON (with checksums) goes in git. The arrays do **not** go in git. Total is about 814 M pairs, or about 350 MB zst for all 12, scaled from the legacy ratio of 35 MB per 82.6 M pairs. RRM-50..80 add 46.5 M pairs (about 20 MB, +6 %), and each generates in seconds. `alaric-gaussian-materialize [NAME…]` fills `precomputed-filters/gaussian-rrm/<name>/` from the Seamless cache, or recomputes (seconds to minutes, single core), and verifies the checksums.
+- **Ship:** the JSON (with checksums) goes in git. The arrays do **not** go in git. Total is about 814 M pairs, or about 350 MB zst for all 12, scaled from the legacy ratio of 35 MB per 82.6 M pairs. RRM-50..80 add 46.5 M pairs (about 20 MB, +6 %), and each generates in seconds. `alaric-gaussian-materialize [NAME…]` fills `precomputed-filters/gaussian/<name>/` from the Seamless cache, or recomputes (seconds to minutes, single core), and verifies the checksums.
 - It copies the exact cached `.zst` buffers, so `sha256` holds. A recompute is checked by `npy_sha256` and then re-pinned.
 - Preparic and the Alaric install share one machine and read the files in place. Nothing is staged, and remote workers are out of scope.
 
 ## 8. Tests and steps
 1. `alaric/gaussian_filter.py`, with `tests/gaussian/test_model.py`: the golden vectors, and agreement with the shipped legacy r90/r95/r99 (exact translations/A/B, rotations to 1e-12).
-2. Vendor the envelope descriptors (460 pos + 18,592 neg, with source SHA-256) as `tests/gaussian/envelope-descriptors.csv.zst`. `test_cutoffs.py` reproduces all 12 cutoffs in §2 bit-for-bit, including RRM-50..80 against the report's test-set table. It also checks the report's second table and the pos/neg counts on the 18,592 envelope set (RRM-80: 182).
+2. [Superseded: the final plan vendors the 6 KB report and the model, not the descriptors; no re-derivation.] Vendor the envelope descriptors (460 pos + 18,592 neg, with source SHA-256) as `tests/gaussian/envelope-descriptors.csv.zst`. `test_cutoffs.py` reproduces all 12 cutoffs in §2 bit-for-bit, including RRM-50..80 against the report's test-set table. It also checks the report's second table and the pos/neg counts on the 18,592 envelope set (RRM-80: 182).
 3. Generate `alaric/gaussian_stacking_filter.json` with the CLI. Commit the generator command in its `provenance`.
 4. Generate the 12 caches, and test the CSR invariants and the masks. A brute-force check of 10⁵ random (rotation, translation) membership samples against `score`.
 5. Seamless support, factory and `.sh`, with `tests/test_seamlessify_gaussian_precalc.py`.
@@ -125,7 +132,7 @@ Following f8372ae/685b6d0:
 
 ## 9. Open questions
 1. Is the RRM-95 tilt30/both fallback (fixed Gaussian-only cutoff + filter, 92.4 %/92.0 %) acceptable, or should all RRM-90/95 variants use the fixed-cutoff reading?
-2. Should the envelope (d<5.7, φ<60) be applied as a hard mask? It is non-binding for d at all 12 cutoffs (max d 4.94).
+2. Resolved: the mask d < 5, φ < 60° is applied. It is non-binding for d at all 12 cutoffs (max d 4.861).
 3. Who chooses the threshold per anchor: a preparic default (e.g. `rrm95`) or the user?
 4. (Resolved on the preparic side: φ is computed directly, and stage 3's `slip_angle` is redefined as φ.) Should `rrm95-tilt30*` be hidden from the UI, since they are fallbacks below 95 % recall?
 5. Distribution: Seamless materialisation (recommended), or commit about 350 MB of arrays like the legacy set?

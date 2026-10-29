@@ -4,6 +4,17 @@ Date: 2026-10-29. Scope: the Alaric-side precomputation of the 12 Gaussian stack
 
 Read this document together with `contract-boundaries.md` (CB, in this folder) and `../draft-implementation-plan.md` (DIP). Where they disagree with it, **this document wins**. It also overrides `../oracle-contract.md` (OC) §3.7–3.8 and `../alaric-gaussian-miniplan.md` (AG) on the same points. CB was brought in line with it when CB was finalized (2026-10-29); the other three documents have not yet been edited to match.
 
+**Additional author decisions, 2026-10-29:** compatibility with legacy filters
+(r90, r95) is a non-goal. A7/A8 require no legacy model/JSON entry, generation,
+verification or reproduction support; existing legacy measurements are
+historical evidence only. The installed twelve-filter cache directory is
+`precomputed-filters/gaussian/`, confirming the rename from `gaussian-rrm/`.
+
+**Handoff acceptance, 2026-10-29:** the author rules the A7/A8 audit successful.
+The prerequisite is accepted for W0; the audit's operator-guide observation is
+a documentation follow-up, not an acceptance blocker. The separately owned
+prefilter-thresholding issue remains outside this audit.
+
 ## 1. Readiness
 
 The precomputation can be implemented now. None of DIP's open decisions D1–D17 blocks it:
@@ -13,7 +24,7 @@ The precomputation can be implemented now. None of DIP's open decisions D1–D17
 The source data is on disk:
 - `/srv/shared/stacking-prediction-plots/recover-gaussian/gaussian_model.json` (the model);
 - `/srv/shared/stacking-prediction-plots/envelope-analysis-5-report.md` (the cutoffs);
-- `precomputed-filters/gaussian/{r90,r95,r99}` (the legacy set).
+- The former `precomputed-filters/gaussian/{r90,r95,r99}` set is historical and is not an installation prerequisite.
 
 ## 2. The filter set (unchanged)
 
@@ -65,7 +76,7 @@ The author confirmed rounding down on 2026-10-29.
 Rounding preserves the order of the cutoffs, so the filter hierarchy (CB §5.2, OC A7 "Containment") is unchanged.
 
 ### 3.4 Scope of the implementation plan (Claude)
-- **In scope:** A7 and A8. That means the numpy model, the Hopf rotations and the lattice, the exact masks, the generator and a wrapper that builds all 12 filters, deterministic serialization, the JSON with its checksums, golden vectors and legacy entry, the `.gitignore` entry, a reusable checksum-verification helper and the A7/A8 oracle tests.
+- **In scope:** A7 and A8. That means the numpy model, the Hopf rotations and the lattice, the exact masks, the generator and a wrapper that builds all 12 filters, deterministic serialization, the JSON with its checksums and golden vectors, the `.gitignore` entry, a reusable checksum-verification helper and the A7/A8 oracle tests. Legacy-filter compatibility is a non-goal (author decision above).
 - **Out of scope (follow-ups):**
   - the `anchor_precalc.py` pure-move refactor;
   - A9 (the all-filter check, T21);

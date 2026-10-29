@@ -1,5 +1,7 @@
 # Stage 6 mini-plan: Gaussian stacking filter in preparic
 
+> **Author decision, 2026-10-29:** installed Gaussian caches are under `precomputed-filters/gaussian/`, confirming the directory rename from `gaussian-rrm/`. Legacy-filter compatibility (r90, r95) is a non-goal; see [final/gaussian-precomputation-decisions.md](final/gaussian-precomputation-decisions.md).
+
 Plan only; nothing is implemented. Builds on `alaric-gaussian-miniplan.md` (AlaGaussian, the "JSON contract"), `stage4-best-fit-miniplan.md` and `energetics-miniplan.md`. Numbers were checked in scratch with the `alaric` env; line numbers refer to the current `alaric/anchor.py`.
 
 ## 0. Premise and filter set
@@ -9,7 +11,7 @@ Plan only; nothing is implemented. Builds on `alaric-gaussian-miniplan.md` (AlaG
 - `rrm50`, `rrm60`, `rrm70`, `rrm80`: Gaussian only. Cutoffs from `envelope-analysis-5-report.md`: 3.3038, 2.9043, 2.0420, 1.1975.
 - `rrm90` and `rrm95`, each × {none, `-tilt30`, `-disp45`, `-tilt30-disp45`}.
 
-Alaric's JSON must list all 12. Preparic reads the filters from the local install, `$ALARIC_DIR/../precomputed-filters/gaussian-rrm/<name>/`, pinned by the JSON's `precalc` checksums. How Alaric produces them is AlaGaussian's concern.
+Alaric's JSON must list all 12. Preparic reads the filters from the local install, `$ALARIC_DIR/../precomputed-filters/gaussian/<name>/`, pinned by the JSON's `precalc` checksums. How Alaric produces them is AlaGaussian's concern.
 
 ## 1. Data flow
 | Cell (backend) | Content | Share |
@@ -161,7 +163,7 @@ The logic is private and partly inline in the loop of `_process_conformer_precal
     - `proteins` (folder of range PDBs);
     - `filter_name`, plus `filter_identity`, the JSON `precalc` checksums of that filter;
     - `fraglib_identities` and `exclude_pdb_code` (stage 4's cells).
-  - The worker reads `precomputed-filters/gaussian-rrm/<name>/` locally and verifies the SHA-256s before use. This is the fraglib identity pattern; nothing is staged.
+  - The worker reads `precomputed-filters/gaussian/<name>/` locally and verifies the SHA-256s before use. This is the fraglib identity pattern; nothing is staged.
 
 ### 7.3 Preparic wiring
 - `_gaussian_validation_jobs(gaussian_classes, stackings, stacking_selection, best_fits, best_fit_clip, range_specs)` (Python) emits **12 job lists, one per filter name**. Each job is `{key, fragment, nucleotide, range, protein_resid}`.

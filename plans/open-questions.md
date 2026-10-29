@@ -9,7 +9,7 @@ Questions here that bear on the contract documents and are still open are gather
 1. In the editable threshold table, should clipped rows stay editable or be locked? [Editable, so edits survive if a clip is undone] [Author: I confirm]
 2. Must the computed thresholds be copied into the editable table before moving on to stage 5? [No; require it only at the export stage] [Author: No, they must be copied before stage 5, but the editable table remains visible and editable throughout]
 3. The plan adopted these recommendations without your explicit confirmation:
-   - **Pose to score:** use the poses the fitter already writes, i.e. the closest pose the docking grid can reach, rather than an exact superposition. [Open: D10]
+   - **Pose to score:** use the poses the fitter already writes, i.e. the closest pose the docking grid can reach, rather than an exact superposition. [Author: follow recommendation (D10)]
    - **Residue numbering:** keep the best-fit PDBs' template numbering (chain B, residues 1–2) and renumber in preparic only if needed for display. [Author: never renumber at all]
    - **Template loading:** add an optional templates argument to Alaric's `Reference`. [Author: defer this]
 
@@ -31,18 +31,18 @@ Questions here that bear on the contract documents and are still open are gather
 ## Alaric Gaussian port ([alaric-gaussian-miniplan.md](alaric-gaussian-miniplan.md))
 
 1. At RRM-95, the tilt<30 and both-filters cutoffs can't be reached (432 and 428 positives against 437 needed). Is the fallback acceptable: keep the RRM-95 Gaussian-only cutoff and add the prefilter, giving 92.4% and 92.0% recall? The alternative is the fixed-cutoff reading for all variants. [Author: you misread /srv/shared/stacking-prediction-plots/envelope-analysis-5-report.md. The thresholds are to be unchanged, the prefilter is to be added on top, by definition dropping recall under 90 or 95. This is described at the very end]
-2. Apply the envelope (distance < 5.7 Å, displacement < 60°) as a hard mask? It doesn't restrict distance at any of the cutoffs. PrepaGaussian asks the same question. [Author: Yes, at the precomputation stage]
+2. Apply the envelope (distance < 5.7 Å, displacement < 60°) as a hard mask? It doesn't restrict distance at any of the cutoffs. PrepaGaussian asks the same question. [Author: Yes, at the precomputation stage] [Superseded 2026-10-29: the applied hard mask is d < 5 Å and φ < 60°; d < 5.7 Å is provenance only. See final/gaussian-precomputation-plan.md.]
 3. Should the precomputed arrays (about 350 MB compressed for 12 filters) be generated on demand through Seamless or committed to git like the legacy r90–r99 set? [On demand] [Author: neither. Precomputed arrays must be built by an Alaric generator script, and the folder must be added to .gitignore]
 
 ## Stage 6: Gaussian stacking filter ([preparic-gaussian-miniplan.md](preparic-gaussian-miniplan.md))
 
-1. One class per stacking anchor, or one per anchor action (each fragment and first/second nucleotide)? [Per stacking anchor] [Open: D9]
+1. One class per stacking anchor, or one per anchor action (each fragment and first/second nucleotide)? [Per stacking anchor] [Author: follow recommendation (D9)]
 2. Anchors scoring worse than RRM-95 (class 95, shown red): export with a warning, block the export, or prompt deselection in stage 3? [Export with a warning][Author: In the export page, there will be a checkbox next to a red bold text "The nearest-to-native structure doesn't pass the filters. Proceed anyway" . This checkbox must also appear if the energetics or cRMSD or ovRMSD thresholds are not met. This can be computed on the frontend ]
 3. Server validation results of 0% fill, fill below ⅓, or a failed pose: warnings with a single export confirmation, or should any of them block the export? [Warnings] [Author: see above]
 4. Validate every anchor against all 12 filters at once? That takes about 20–40 s and re-runs only when the fit changes, but edits become instant and the UI can suggest the strictest filter that still emits the best-fit cell. The alternative is validating only the chosen filter, at about 2–6 s per edit. [Author: Alaric must provide a tool to check a small list of anchor poses against all filters, knowing their hierarchy to allow early cutoff. It should run within a few seconfs]
-5. Should stage 3 switch to the `ring-refe` ring orientation so its numbers match stage 6? The two currently differ by up to about 0.7° in tilt. [Open: D8]
+5. Should stage 3 switch to the `ring-refe` ring orientation so its numbers match stage 6? The two currently differ by up to about 0.7° in tilt. [Author: use Kabsch normals (D8)]
 6. *(My suggestion)* Stage 3 descriptors are actually computed in the backend (`detect_stacking.py`, a Seamless transformer), not in the browser. Should stage 6 run that same transformer on the best-fit conformers, keeping only the Gaussian in the browser, rather than adding a new TypeScript descriptor module? Doing so would also settle question 5.
-[Author: I accept your suggestion]
+[Author: I accept your suggestion] [Superseded 2026-10-29 (O5 in contract-open-questions.md): the Gaussian scores and classes are computed in the backend too; the browser computes no Gaussian.]
 
 ## Cross-cutting
 
@@ -55,7 +55,7 @@ Questions here that bear on the contract documents and are still open are gather
 
 ## Actions awaiting your go-ahead
 
-[Open: D16]
+[Author: go ahead, and add to the implementation plan (D16)]
 
 - Push the attract-jax commits that contain the numpy gridless path and the accuracy analysis (`22b23e4`), and bump Alaric's submodule pointer, which is still at `12bba50`. The per-pose data `docs/numpy-grid-free-2048*` is untracked.
 - Fix the 10-12 grid bug in attract-jax: the identity pose scores 0.23 too high because a bead sits exactly on a grid point. The spin-off plan lists this as a prerequisite.

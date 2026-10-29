@@ -1,9 +1,9 @@
 # Alaric Gaussian filter precomputation: implementation plan
 
-Deliverables **A7** (the committed filter specification `alaric/gaussian_stacking_filter.json`) and **A8** (an offline generator plus gitignored CSR caches under `<repo root>/precomputed-filters/gaussian-rrm/<name>/`). This document is self-contained. Sources are cited only for provenance.
+Deliverables **A7** (the committed filter specification `alaric/gaussian_stacking_filter.json`) and **A8** (an offline generator plus gitignored CSR caches under `<repo root>/precomputed-filters/gaussian/<name>/`). This document is self-contained. Sources are cited only for provenance.
 
 Precedence of sources:
-1. the author's corrections of 2026-10-29: hard mask d < 5 Å; cutoffs rounded down to five decimals; no cutoff re-derivation;
+1. the author's decisions of 2026-10-29: hard mask d < 5 Å; cutoffs rounded down to five decimals; no cutoff re-derivation; legacy-filter compatibility (r90, r95) is a non-goal; the cache directory is `precomputed-filters/gaussian/`;
 2. `plans/oracle-contract.md` §3.7–3.8 and G3/G4/G8/G9;
 3. `plans/final/contract-boundaries.md` §1, §5.1 and §6;
 4. `plans/open-questions.md`;
@@ -124,7 +124,11 @@ Rounding down is monotone, so containment is unchanged.
 - An in-memory run of this algorithm with the legacy model reproduces the legacy pair set exactly: 33,246,528 pairs, 2,880 translations with identical values and order, and Hopf cell order.
 - Rotations agree to 1.75e-15.
 - Legacy keeps 56 zero-size rows that the canonical layout drops (18,104 against 18,048 rows).
-*Author note*: legacy r90 is to be removed from version control in this plan. History rewrite to completely remove it from Git is not necessary.
+*Author decision, 2026-10-29:* compatibility with legacy filters (r90, r95) is
+a non-goal. The measurements above remain historical evidence; no legacy
+model, JSON entry, generator mode, verifier or reproduction test is required.
+Removal of legacy r90 from version control was already authorized; history
+rewrite is unnecessary.
 
 **Environment and legacy file format.**
 - alaric env: Python 3.12.13, numpy 1.26.4, `zstandard` 0.25.0 (cext, libzstd 1.5.7); the `zstd` CLI is v1.5.7.
@@ -165,13 +169,13 @@ Rounding down is monotone, so containment is unchanged.
      2. Otherwise, if `X.npy.zst` exists and its bytes hash to `sha256`, it is OK.
      3. Otherwise, stream-decompress it and hash. If the result equals `npy_sha256`, it is OK with status `recompressed`; this is how another zstd version's output is accepted.
      4. Anything else, including a missing file, raises `GaussianCacheInstallationError`.
-   - The error message names the file, both digests and the command, for example `python <root>/util/gaussian-precalc.py rrm95 --output <root>/precomputed-filters/gaussian-rrm/rrm95` (or `util/gaussian-precalc-all.py`). Nothing is regenerated silently (G9).
+   - The error message names the file, both digests and the command, for example `python <root>/util/gaussian-precalc.py rrm95 --output <root>/precomputed-filters/gaussian/rrm95` (or `util/gaussian-precalc-all.py`). Nothing is regenerated silently (G9).
    - The helper returns the resolved paths, so the caller loads exactly the verified files.
    - It uses only the standard library plus `zstandard`, imported lazily for the fallback, so A9 can attach it in either environment.
    - Downstream identities (A9, the anchor sigil) should use `npy_sha256`, so that recompression never changes a cache key.
 5. **Bootstrap order.** The spec constants live in the module, so caches do not depend on the JSON and there is no cycle.
    1. `gaussian-precalc-all.py` builds the 12 caches. Each folder gets a gitignored `manifest.json` with: schema 1, name, cutoff, per-file sha256/npy_sha256/shape/dtype, counts, the audit values, and the environment (python, numpy, zstandard, libzstd, level). Its digests come from re-reading the published files with the helper.
-   2. `util/gaussian-filter-json.py` assembles the JSON from the module constants, the report table, computed golden vectors, the legacy digests and the 12 manifests.
+   2. `util/gaussian-filter-json.py` assembles the JSON from the module constants, the report table, computed golden vectors and the 12 manifests.
    3. Commit the JSON.
 
    Regeneration on another machine:
@@ -215,14 +219,11 @@ The JSON is written with `json.dumps(indent=1, ensure_ascii=True)`, fixed key or
        cutoff_rule:"parent Gaussian-only RRM-N cutoff of the report, floored to 1e-5; prefilters on top",
        source:{report_line:65, table:"Added filters at fixed Gaussian-only cutoffs"},
        achieved:{rrm_positives:{count:432,of:460}, achieved_recall:0.93913…, negatives:{count:972,of:18592,set:"envelope synthetic"}, test_positives:null},
-       precalc:{dir:"precomputed-filters/gaussian-rrm/rrm95-disp45",
+       precalc:{dir:"precomputed-filters/gaussian/rrm95-disp45",
                 files:{rotations:{sha256,npy_sha256,shape,dtype}, translations:…, "filtered-sizes":…, "filtered-concat":…},
                 counts:{rotations,translations,pairs}, audit:{min_rel_margin, min_tilt_gap}}}, …12 entries},
  golden:{tolerance_rel:1e-12, scores:[{d,phi_deg,theta_deg,score}], decisions:[{name,d,phi_deg,theta_deg,accept}],
          lattice_decisions:[{name, xyz, accept}]},
- legacy:{model:{mean,covariance,normalizer_formula}, scale:"unnormalized exp(-q/2) >= density*norm",
-         thresholds:{r90:1.30,r95:0.88,r99:0.38}, dir:"precomputed-filters/gaussian/{r90,r95,r99}",
-         files:{…sha256,npy_sha256}, format:"fortran_order True, <i8, zstd CLI + XXH64", reproduced:"r90 pair set"},
  provenance:{report:{path,sha256,note:"uncommitted working-tree version; copy vendored in tests"},
              cutoff_envelope:{distance_lt_A:5.7, displacement_lt_deg:60, positives:460, negatives:18592},
              cutoff_rounding:"floor to 1e-5 of repr(raw)", generator:{commands}, precalc_environment:{…}}}
@@ -247,7 +248,7 @@ The JSON is written with `json.dumps(indent=1, ensure_ascii=True)`, fixed key or
 ## 5. Work steps
 
 **S1. Model module `alaric/gaussian_filter.py`.** It uses only numpy, math, decimal and json, has flat imports and is numpy 1.x/2.x neutral, so A9 can attach it in the preparic environment.
-- Constants: model literals, the legacy model, the CUTOFFS table (raw value, report line, table), names, the mask and the filters.
+- Constants: model literals, the CUTOFFS table (raw value, report line, table), names, the mask and the filters.
 - Functions:
   - `score(d, phi_rad, theta_rad, model=MODEL)` with the explicit q;
   - `descriptors(R, t)`;
@@ -262,18 +263,15 @@ The JSON is written with `json.dumps(indent=1, ensure_ascii=True)`, fixed key or
 - Functions:
   - `score_table(model)`;
   - `accept_pairs(spec_entry)`, which returns sizes, the kept cells and translations, a concat block iterator, and the audit;
-  - `canonicalize_csr(arrays)`, which drops zero rows and unused translations and remaps indices (used for legacy);
   - `write_cache(dir, …)` through `npy_io.save_npy`, publish by rename, then the manifest.
-- The legacy mode compares unnormalized exp(−q/2) ≥ density × norm, with no masks.
 - *Exit:*
-  - `test_gaussian_legacy.py`: generated r90 equals canonicalized shipped r90, with equal cells, rotations ≤ 1e-12, translations, sizes and concat exact;
   - `test_gaussian_generator.py`: rrm50 is built twice in-process with identical arrays and bytes, and the audit thresholds hold.
 
 **S3. Verification helper and CLIs.**
-- `alaric/gaussian_cache.py`: `verify_file`, `verify_filter_cache(spec, name, root)`, `verify_legacy`, and `GaussianCacheInstallationError`.
+- `alaric/gaussian_cache.py`: `verify_file`, `verify_filter_cache(spec, name, root)`, and `GaussianCacheInstallationError`.
 - `util/gaussian-precalc.py NAME --output DIR [--check]`.
 - `util/gaussian-precalc-all.py [--root R] [--check] [--decompress]`. `--decompress` installs `.npy` instead of `.npy.zst`.
-- `.gitignore`: add `precomputed-filters/gaussian-rrm/`.
+- `.gitignore`: add `precomputed-filters/gaussian/`.
 - *Exit:* `test_gaussian_verify.py` uses temporary directories and rrm50 to check:
   - the `.npy` form passes;
   - the `.zst` form passes;
@@ -322,7 +320,7 @@ These counts replace the miniplan's variant counts, which were computed for the 
 - Per filter: ~1–3 s compute, ~2 s zstd for rrm95, and ~1 s re-hash.
 - All 12 take ~1–3 min on one core.
 - Peak RSS is ~1.5 GB.
-- The legacy r90 test takes ~5 s with the table method. Brute force over all 6.8e9 pairs took 350 s, so the test must not use it.
+- Historical legacy r90 measurements: ~5 s with the table method, versus 350 s by brute force over all 6.8e9 pairs. Legacy reproduction is no longer an acceptance requirement.
 
 ## 7. Test matrix
 
@@ -341,7 +339,7 @@ Cache-dependent tests are marked `gaussian_caches`. They skip with the install c
 | 9 | CSR invariants: dtypes int32/float64, C order, len(sizes) == R, Σ sizes == len(concat), 0 ≤ concat < M, rows strictly ascending, sizes > 0, cells distinct and ascending, translations on the 0.25 lattice inside the mask; loads through `anchor._validate_precalculated_arrays`, `_build_cell_lookup`, `_lattice_geometry` | A8 CSR invariants, runtime compatibility |
 | 10 | Membership: 10⁵ uniform (cell, lattice point) pairs, 10⁵ drawn from members, and 10⁵ near the cutoff (score within ×2); CSR membership == model predicate via `score(descriptors(R, t))` | A8 random membership |
 | 11 | Containment on caches: for every edge A ⊂ B, cells, translations and per-row sets satisfy A ⊆ B | A7/A8 containment lattice |
-| 12 | Legacy r90 reproduction (row 1 of S2's exit) | A8 legacy |
+| 12 | Retired: legacy r90 reproduction | Legacy compatibility is a non-goal (author, 2026-10-29) |
 | 13 | Verify helper failure modes (S3 exit); error text names the generator command | A8/A9 installation check, G9 |
 | 14 | Audit thresholds hold in the manifests; build twice gives identical `npy_sha256` | G3 determinism |
 
@@ -351,11 +349,11 @@ Cache-dependent tests are marked `gaussian_caches`. They skip with the install c
   - `alaric/gaussian_filter.py`, `alaric/gaussian_precalc.py`, `alaric/gaussian_cache.py`;
   - `alaric/gaussian_stacking_filter.json` (generated, committed);
   - `util/gaussian-precalc.py`, `util/gaussian-precalc-all.py`, `util/gaussian-filter-json.py`;
-  - `tests/test_gaussian_{model,masks,generator,legacy,verify,spec_json,caches}.py`;
+  - `tests/test_gaussian_{model,masks,generator,verify,spec_json,caches}.py`;
   - `tests/gaussian-data/envelope-analysis-5-report.md`;
   - `documents/gaussian-filter.md`.
 - **Modified:** `.gitignore`.
-- **Read, not modified:** `alaric/npy_io.py`, `alaric/anchor.py`, `precomputed-filters/gaussian/r90`.
+- **Read, not modified:** `alaric/npy_io.py`, `alaric/anchor.py`. Legacy filter files are not prerequisites.
 
 ## 9. Follow-ups (out of scope)
 
