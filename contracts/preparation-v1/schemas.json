@@ -1,0 +1,4414 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:alaric:w0:contracts:1",
+  "$defs": {
+    "range_row": {
+      "type": "object",
+      "properties": {
+        "chain": {
+          "type": "string",
+          "minLength": 1
+        },
+        "start": {
+          "type": "integer"
+        },
+        "end": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "chain",
+        "start",
+        "end"
+      ],
+      "additionalProperties": false
+    },
+    "project_basis": {
+      "type": "object",
+      "properties": {
+        "pdbcode": {
+          "type": "string",
+          "minLength": 1
+        },
+        "biounit": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "pdbcode",
+        "biounit"
+      ],
+      "additionalProperties": false
+    },
+    "rna_basis": {
+      "type": "object",
+      "properties": {
+        "pdbcode": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rna": {
+          "type": "object",
+          "properties": {
+            "chain": {
+              "type": "string",
+              "minLength": 1
+            },
+            "start": {
+              "type": "integer"
+            },
+            "end": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "chain",
+            "start",
+            "end"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "pdbcode",
+        "rna"
+      ],
+      "additionalProperties": false
+    },
+    "fit_echo": {
+      "type": "object",
+      "properties": {
+        "pdb_code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rna": {
+          "type": "object",
+          "properties": {
+            "chain": {
+              "type": "string",
+              "minLength": 1
+            },
+            "start": {
+              "type": "integer"
+            },
+            "end": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "chain",
+            "start",
+            "end"
+          ],
+          "additionalProperties": false
+        },
+        "resids": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "chain": {
+                "type": "string",
+                "minLength": 1
+              },
+              "resid": {
+                "type": "integer"
+              },
+              "insertion_code": {
+                "type": "string"
+              },
+              "base": {
+                "enum": [
+                  "A",
+                  "C",
+                  "G",
+                  "U"
+                ]
+              }
+            },
+            "required": [
+              "chain",
+              "resid",
+              "insertion_code",
+              "base"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "pdb_code",
+        "rna",
+        "resids"
+      ],
+      "additionalProperties": false
+    },
+    "energy_echo": {
+      "type": "object",
+      "properties": {
+        "best_fits": {
+          "type": "object",
+          "properties": {
+            "pdb_code": {
+              "type": "string",
+              "minLength": 1
+            },
+            "rna": {
+              "type": "object",
+              "properties": {
+                "chain": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "start": {
+                  "type": "integer"
+                },
+                "end": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "chain",
+                "start",
+                "end"
+              ],
+              "additionalProperties": false
+            },
+            "resids": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "chain": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "resid": {
+                    "type": "integer"
+                  },
+                  "insertion_code": {
+                    "type": "string"
+                  },
+                  "base": {
+                    "enum": [
+                      "A",
+                      "C",
+                      "G",
+                      "U"
+                    ]
+                  }
+                },
+                "required": [
+                  "chain",
+                  "resid",
+                  "insertion_code",
+                  "base"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "pdb_code",
+            "rna",
+            "resids"
+          ],
+          "additionalProperties": false
+        },
+        "protein_ranges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "chain": {
+                "type": "string",
+                "minLength": 1
+              },
+              "start": {
+                "type": "integer"
+              },
+              "end": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "chain",
+              "start",
+              "end"
+            ],
+            "additionalProperties": false
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "best_fits",
+        "protein_ranges"
+      ],
+      "additionalProperties": false
+    },
+    "score_echo": {
+      "type": "object",
+      "properties": {
+        "bestfit_stackings": {
+          "type": "object",
+          "properties": {
+            "best_fits": {
+              "type": "object",
+              "properties": {
+                "pdb_code": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "rna": {
+                  "type": "object",
+                  "properties": {
+                    "chain": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "start": {
+                      "type": "integer"
+                    },
+                    "end": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "chain",
+                    "start",
+                    "end"
+                  ],
+                  "additionalProperties": false
+                },
+                "resids": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "chain": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "resid": {
+                        "type": "integer"
+                      },
+                      "insertion_code": {
+                        "type": "string"
+                      },
+                      "base": {
+                        "enum": [
+                          "A",
+                          "C",
+                          "G",
+                          "U"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "chain",
+                      "resid",
+                      "insertion_code",
+                      "base"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "pdb_code",
+                "rna",
+                "resids"
+              ],
+              "additionalProperties": false
+            },
+            "protein_ranges": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "chain": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "start": {
+                    "type": "integer"
+                  },
+                  "end": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "chain",
+                  "start",
+                  "end"
+                ],
+                "additionalProperties": false
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "best_fits",
+            "protein_ranges"
+          ],
+          "additionalProperties": false
+        },
+        "selected_keys": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "clip": {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "basis": {
+              "type": "object",
+              "properties": {
+                "pdbcode": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "rna": {
+                  "type": "object",
+                  "properties": {
+                    "chain": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "start": {
+                      "type": "integer"
+                    },
+                    "end": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "chain",
+                    "start",
+                    "end"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "pdbcode",
+                "rna"
+              ],
+              "additionalProperties": false
+            },
+            "clip1": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "clip2": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "schema",
+            "basis",
+            "clip1",
+            "clip2"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "bestfit_stackings",
+        "selected_keys",
+        "clip"
+      ],
+      "additionalProperties": false
+    },
+    "S4": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "basis": {
+              "type": "object",
+              "properties": {
+                "pdbcode": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "biounit": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "pdbcode",
+                "biounit"
+              ],
+              "additionalProperties": false
+            },
+            "active": {
+              "type": "boolean"
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "chain": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "start": {
+                    "type": "integer"
+                  },
+                  "end": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "chain",
+                  "start",
+                  "end"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "schema",
+            "basis",
+            "active",
+            "rows"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "S5": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "pdbcode": {
+              "type": "string",
+              "minLength": 1
+            },
+            "biounit": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "chain": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "start": {
+                    "type": "integer"
+                  },
+                  "end": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "chain",
+                  "start",
+                  "end"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "schema",
+            "pdbcode",
+            "biounit",
+            "rows"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "S7": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "echo": {
+              "type": "object",
+              "properties": {
+                "structure_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "pdbcode": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "biounit": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "rows": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "chain": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "start": {
+                        "type": "integer"
+                      },
+                      "end": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "chain",
+                      "start",
+                      "end"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "uniqueItems": true
+                }
+              },
+              "required": [
+                "structure_id",
+                "pdbcode",
+                "biounit",
+                "rows"
+              ],
+              "additionalProperties": false
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "range": {
+                    "type": "string",
+                    "pattern": "^range-[1-9][0-9]*(?![\\s\\S])"
+                  },
+                  "protein_resid": {
+                    "type": "integer"
+                  },
+                  "descriptor": {
+                    "type": "object",
+                    "properties": {
+                      "d": {
+                        "type": "number"
+                      },
+                      "phi_deg": {
+                        "type": "number"
+                      },
+                      "theta_deg": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "d",
+                      "phi_deg",
+                      "theta_deg"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "candidates": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "fragment": {
+                          "type": "string",
+                          "pattern": "^frag-[1-9][0-9]*-[ACGU]{2}(?![\\s\\S])"
+                        },
+                        "nucleotide": {
+                          "enum": [
+                            1,
+                            2
+                          ]
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "fragment",
+                        "nucleotide"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1
+                  }
+                },
+                "required": [
+                  "key",
+                  "range",
+                  "protein_resid",
+                  "descriptor",
+                  "candidates"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "schema",
+            "echo",
+            "rows"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "S8": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "basis": {
+              "type": "object",
+              "properties": {
+                "pdbcode": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "biounit": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "rows": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "chain": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "start": {
+                        "type": "integer"
+                      },
+                      "end": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "chain",
+                      "start",
+                      "end"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "uniqueItems": true
+                }
+              },
+              "required": [
+                "pdbcode",
+                "biounit",
+                "rows"
+              ],
+              "additionalProperties": false
+            },
+            "active": {
+              "type": "boolean"
+            },
+            "selected": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "boolean"
+              }
+            }
+          },
+          "required": [
+            "schema",
+            "basis",
+            "active",
+            "selected"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "S9": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "echo": {
+              "type": "object",
+              "properties": {
+                "pdb_code": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "rna": {
+                  "type": "object",
+                  "properties": {
+                    "chain": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "start": {
+                      "type": "integer"
+                    },
+                    "end": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "chain",
+                    "start",
+                    "end"
+                  ],
+                  "additionalProperties": false
+                },
+                "resids": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "chain": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "resid": {
+                        "type": "integer"
+                      },
+                      "insertion_code": {
+                        "type": "string"
+                      },
+                      "base": {
+                        "enum": [
+                          "A",
+                          "C",
+                          "G",
+                          "U"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "chain",
+                      "resid",
+                      "insertion_code",
+                      "base"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "pdb_code",
+                "rna",
+                "resids"
+              ],
+              "additionalProperties": false
+            },
+            "pairs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "down": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "up": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "sequence": {
+                    "type": "string",
+                    "pattern": "^[ACGU]{3}(?![\\s\\S])"
+                  },
+                  "ovrmsd": {
+                    "type": "string",
+                    "pattern": "^([1-9][0-9]*(\\.[0-9]{1,2})?|0\\.([1-9][0-9]?|0[1-9]))(?![\\s\\S])"
+                  },
+                  "crmsd": {
+                    "type": "string",
+                    "pattern": "^([1-9][0-9]*(\\.[0-9]{1,2})?|0\\.([1-9][0-9]?|0[1-9]))(?![\\s\\S])"
+                  },
+                  "ovrmsd_raw": {
+                    "type": "number"
+                  },
+                  "crmsd_raw": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "down",
+                  "up",
+                  "sequence",
+                  "ovrmsd",
+                  "crmsd",
+                  "ovrmsd_raw",
+                  "crmsd_raw"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "bases": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "fragment": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "sequence": {
+                    "type": "string",
+                    "pattern": "^[ACGU]{2}(?![\\s\\S])"
+                  },
+                  "nuc1_ovrmsd": {
+                    "type": "string",
+                    "pattern": "^([1-9][0-9]*(\\.[0-9]{1,2})?|0\\.([1-9][0-9]?|0[1-9]))(?![\\s\\S])"
+                  },
+                  "nuc2_ovrmsd": {
+                    "type": "string",
+                    "pattern": "^([1-9][0-9]*(\\.[0-9]{1,2})?|0\\.([1-9][0-9]?|0[1-9]))(?![\\s\\S])"
+                  },
+                  "nuc1_ovrmsd_raw": {
+                    "type": "number"
+                  },
+                  "nuc2_ovrmsd_raw": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "fragment",
+                  "sequence",
+                  "nuc1_ovrmsd",
+                  "nuc2_ovrmsd",
+                  "nuc1_ovrmsd_raw",
+                  "nuc2_ovrmsd_raw"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "schema",
+            "echo",
+            "pairs",
+            "bases"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "S10": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "echo": {
+              "type": "object",
+              "properties": {
+                "pdb_code": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "rna": {
+                  "type": "object",
+                  "properties": {
+                    "chain": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "start": {
+                      "type": "integer"
+                    },
+                    "end": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "chain",
+                    "start",
+                    "end"
+                  ],
+                  "additionalProperties": false
+                },
+                "resids": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "chain": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "resid": {
+                        "type": "integer"
+                      },
+                      "insertion_code": {
+                        "type": "string"
+                      },
+                      "base": {
+                        "enum": [
+                          "A",
+                          "C",
+                          "G",
+                          "U"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "chain",
+                      "resid",
+                      "insertion_code",
+                      "base"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "pdb_code",
+                "rna",
+                "resids"
+              ],
+              "additionalProperties": false
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "pattern": "^frag-[1-9][0-9]*-[ACGU]{2}(?![\\s\\S])"
+                  },
+                  "fragment": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "sequence": {
+                    "type": "string",
+                    "pattern": "^[ACGU]{2}(?![\\s\\S])"
+                  },
+                  "conformer": {
+                    "type": "integer"
+                  },
+                  "rotamer": {
+                    "type": "integer"
+                  },
+                  "grid": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "minItems": 3,
+                    "maxItems": 3
+                  },
+                  "pdb": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "key",
+                  "fragment",
+                  "sequence",
+                  "conformer",
+                  "rotamer",
+                  "grid",
+                  "pdb"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "schema",
+            "echo",
+            "rows"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "S11": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "basis": {
+              "type": "object",
+              "properties": {
+                "pdbcode": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "rna": {
+                  "type": "object",
+                  "properties": {
+                    "chain": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "start": {
+                      "type": "integer"
+                    },
+                    "end": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "chain",
+                    "start",
+                    "end"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "pdbcode",
+                "rna"
+              ],
+              "additionalProperties": false
+            },
+            "active": {
+              "type": "boolean"
+            },
+            "pairs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "down": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "up": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "sequence": {
+                    "type": "string",
+                    "pattern": "^[ACGU]{3}(?![\\s\\S])"
+                  },
+                  "ovrmsd": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^([1-9][0-9]*(\\.[0-9]{1,2})?|0\\.([1-9][0-9]?|0[1-9]))(?![\\s\\S])"
+                      }
+                    ]
+                  },
+                  "crmsd": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^([1-9][0-9]*(\\.[0-9]{1,2})?|0\\.([1-9][0-9]?|0[1-9]))(?![\\s\\S])"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "down",
+                  "up",
+                  "sequence",
+                  "ovrmsd",
+                  "crmsd"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "bases": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "fragment": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "sequence": {
+                    "type": "string",
+                    "pattern": "^[ACGU]{2}(?![\\s\\S])"
+                  },
+                  "nuc1_ovrmsd": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^([1-9][0-9]*(\\.[0-9]{1,2})?|0\\.([1-9][0-9]?|0[1-9]))(?![\\s\\S])"
+                      }
+                    ]
+                  },
+                  "nuc2_ovrmsd": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^([1-9][0-9]*(\\.[0-9]{1,2})?|0\\.([1-9][0-9]?|0[1-9]))(?![\\s\\S])"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "fragment",
+                  "sequence",
+                  "nuc1_ovrmsd",
+                  "nuc2_ovrmsd"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "schema",
+            "basis",
+            "active",
+            "pairs",
+            "bases"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "S12": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "basis": {
+              "type": "null"
+            },
+            "clip1": {
+              "const": 0
+            },
+            "clip2": {
+              "const": 0
+            }
+          },
+          "required": [
+            "schema",
+            "basis",
+            "clip1",
+            "clip2"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "basis": {
+              "type": "object",
+              "properties": {
+                "pdbcode": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "rna": {
+                  "type": "object",
+                  "properties": {
+                    "chain": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "start": {
+                      "type": "integer"
+                    },
+                    "end": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "chain",
+                    "start",
+                    "end"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "pdbcode",
+                "rna"
+              ],
+              "additionalProperties": false
+            },
+            "clip1": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "clip2": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "schema",
+            "basis",
+            "clip1",
+            "clip2"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "S13": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "echo": {
+              "type": "object",
+              "properties": {
+                "best_fits": {
+                  "type": "object",
+                  "properties": {
+                    "pdb_code": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "rna": {
+                      "type": "object",
+                      "properties": {
+                        "chain": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "start": {
+                          "type": "integer"
+                        },
+                        "end": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "chain",
+                        "start",
+                        "end"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "resids": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "chain": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "resid": {
+                            "type": "integer"
+                          },
+                          "insertion_code": {
+                            "type": "string"
+                          },
+                          "base": {
+                            "enum": [
+                              "A",
+                              "C",
+                              "G",
+                              "U"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "chain",
+                          "resid",
+                          "insertion_code",
+                          "base"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "pdb_code",
+                    "rna",
+                    "resids"
+                  ],
+                  "additionalProperties": false
+                },
+                "protein_ranges": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "chain": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "start": {
+                        "type": "integer"
+                      },
+                      "end": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "chain",
+                      "start",
+                      "end"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "uniqueItems": true
+                }
+              },
+              "required": [
+                "best_fits",
+                "protein_ranges"
+              ],
+              "additionalProperties": false
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "fragment": {
+                    "type": "string",
+                    "pattern": "^frag-[1-9][0-9]*-[ACGU]{2}(?![\\s\\S])"
+                  },
+                  "range": {
+                    "type": "string",
+                    "pattern": "^range-[1-9][0-9]*(?![\\s\\S])"
+                  },
+                  "refe": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  },
+                  "bestfit": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  },
+                  "error": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "fragment",
+                  "range",
+                  "refe",
+                  "bestfit",
+                  "error"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "schema",
+            "echo",
+            "rows"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "S14": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "basis": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "active": {
+              "type": "boolean"
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^frag-[1-9][0-9]*-[ACGU]{2}(?![\\s\\S])"
+              },
+              "uniqueItems": true
+            },
+            "ranges": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^range-[1-9][0-9]*(?![\\s\\S])"
+              },
+              "uniqueItems": true
+            },
+            "grid": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "required": [
+            "schema",
+            "basis",
+            "active",
+            "rows",
+            "ranges",
+            "grid"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "S15": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "echo": {
+              "type": "object",
+              "properties": {
+                "best_fits": {
+                  "type": "object",
+                  "properties": {
+                    "pdb_code": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "rna": {
+                      "type": "object",
+                      "properties": {
+                        "chain": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "start": {
+                          "type": "integer"
+                        },
+                        "end": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "chain",
+                        "start",
+                        "end"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "resids": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "chain": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "resid": {
+                            "type": "integer"
+                          },
+                          "insertion_code": {
+                            "type": "string"
+                          },
+                          "base": {
+                            "enum": [
+                              "A",
+                              "C",
+                              "G",
+                              "U"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "chain",
+                          "resid",
+                          "insertion_code",
+                          "base"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "pdb_code",
+                    "rna",
+                    "resids"
+                  ],
+                  "additionalProperties": false
+                },
+                "protein_ranges": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "chain": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "start": {
+                        "type": "integer"
+                      },
+                      "end": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "chain",
+                      "start",
+                      "end"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "uniqueItems": true
+                }
+              },
+              "required": [
+                "best_fits",
+                "protein_ranges"
+              ],
+              "additionalProperties": false
+            },
+            "values": {
+              "type": "object",
+              "patternProperties": {
+                "^frag-[1-9][0-9]*-[ACGU]{2}(?![\\s\\S])": {
+                  "type": "object",
+                  "patternProperties": {
+                    "^range-[1-9][0-9]*(?![\\s\\S])": {
+                      "type": "string",
+                      "pattern": "^-?(0|[1-9][0-9]*)\\.[0-9]{2}(?![\\s\\S])"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "echo",
+            "values"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "S17": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "echo": {
+              "type": "object",
+              "properties": {
+                "best_fits": {
+                  "type": "object",
+                  "properties": {
+                    "pdb_code": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "rna": {
+                      "type": "object",
+                      "properties": {
+                        "chain": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "start": {
+                          "type": "integer"
+                        },
+                        "end": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "chain",
+                        "start",
+                        "end"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "resids": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "chain": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "resid": {
+                            "type": "integer"
+                          },
+                          "insertion_code": {
+                            "type": "string"
+                          },
+                          "base": {
+                            "enum": [
+                              "A",
+                              "C",
+                              "G",
+                              "U"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "chain",
+                          "resid",
+                          "insertion_code",
+                          "base"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "pdb_code",
+                    "rna",
+                    "resids"
+                  ],
+                  "additionalProperties": false
+                },
+                "protein_ranges": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "chain": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "start": {
+                        "type": "integer"
+                      },
+                      "end": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "chain",
+                      "start",
+                      "end"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "uniqueItems": true
+                }
+              },
+              "required": [
+                "best_fits",
+                "protein_ranges"
+              ],
+              "additionalProperties": false
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "range": {
+                    "type": "string",
+                    "pattern": "^range-[1-9][0-9]*(?![\\s\\S])"
+                  },
+                  "protein_resid": {
+                    "type": "integer"
+                  },
+                  "descriptor": {
+                    "type": "object",
+                    "properties": {
+                      "d": {
+                        "type": "number"
+                      },
+                      "phi_deg": {
+                        "type": "number"
+                      },
+                      "theta_deg": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "d",
+                      "phi_deg",
+                      "theta_deg"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "candidates": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "fragment": {
+                          "type": "string",
+                          "pattern": "^frag-[1-9][0-9]*-[ACGU]{2}(?![\\s\\S])"
+                        },
+                        "nucleotide": {
+                          "enum": [
+                            1,
+                            2
+                          ]
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "fragment",
+                        "nucleotide"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1
+                  }
+                },
+                "required": [
+                  "key",
+                  "range",
+                  "protein_resid",
+                  "descriptor",
+                  "candidates"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "schema",
+            "echo",
+            "rows"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "S18": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "basis": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            },
+            "active": {
+              "type": "boolean"
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "rrm": {
+                        "enum": [
+                          50,
+                          60,
+                          70,
+                          80
+                        ]
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "rrm"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "rrm": {
+                        "enum": [
+                          90,
+                          95
+                        ]
+                      },
+                      "tilt30": {
+                        "type": "boolean"
+                      },
+                      "disp45": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "rrm",
+                      "tilt30",
+                      "disp45"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          },
+          "required": [
+            "schema",
+            "basis",
+            "active",
+            "rows"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "S21": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "structure_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "schema",
+            "structure_id"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "S22": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "echo": {
+              "type": "object",
+              "properties": {
+                "pdbcode": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "rna": {
+                  "type": "object",
+                  "properties": {
+                    "chain": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "start": {
+                      "type": "integer"
+                    },
+                    "end": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "chain",
+                    "start",
+                    "end"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "pdbcode",
+                "rna"
+              ],
+              "additionalProperties": false
+            },
+            "residues": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "chain": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "resid": {
+                    "type": "integer"
+                  },
+                  "insertion_code": {
+                    "type": "string"
+                  },
+                  "base": {
+                    "enum": [
+                      "A",
+                      "C",
+                      "G",
+                      "U"
+                    ]
+                  }
+                },
+                "required": [
+                  "chain",
+                  "resid",
+                  "insertion_code",
+                  "base"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 2
+            },
+            "fragments": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "number": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "key": {
+                    "type": "string",
+                    "pattern": "^frag-[1-9][0-9]*-[ACGU]{2}(?![\\s\\S])"
+                  },
+                  "sequence": {
+                    "type": "string",
+                    "pattern": "^[ACGU]{2}(?![\\s\\S])"
+                  },
+                  "residues": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "chain": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "resid": {
+                          "type": "integer"
+                        },
+                        "insertion_code": {
+                          "type": "string"
+                        },
+                        "base": {
+                          "enum": [
+                            "A",
+                            "C",
+                            "G",
+                            "U"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "chain",
+                        "resid",
+                        "insertion_code",
+                        "base"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 2,
+                    "maxItems": 2
+                  }
+                },
+                "required": [
+                  "number",
+                  "key",
+                  "sequence",
+                  "residues"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1
+            },
+            "adjacent_pairs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "down": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "up": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "sequence": {
+                    "type": "string",
+                    "pattern": "^[ACGU]{3}(?![\\s\\S])"
+                  }
+                },
+                "required": [
+                  "down",
+                  "up",
+                  "sequence"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "candidates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "fragment": {
+                    "type": "string",
+                    "pattern": "^frag-[1-9][0-9]*-[ACGU]{2}(?![\\s\\S])"
+                  },
+                  "nucleotide": {
+                    "enum": [
+                      1,
+                      2
+                    ]
+                  }
+                },
+                "required": [
+                  "key",
+                  "fragment",
+                  "nucleotide"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "schema",
+            "echo",
+            "residues",
+            "fragments",
+            "adjacent_pairs",
+            "candidates"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "S23": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "pdb_code": {
+              "type": "string",
+              "minLength": 1
+            },
+            "range_specs": {
+              "$ref": "#/$defs/S5"
+            },
+            "pdbs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "range": {
+                    "type": "string",
+                    "pattern": "^range-[1-9][0-9]*(?![\\s\\S])"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "pdb": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "range",
+                  "name",
+                  "pdb"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "schema",
+            "pdb_code",
+            "range_specs",
+            "pdbs"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "S24": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "basis": {
+              "type": "object",
+              "properties": {
+                "pdbcode": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "rna": {
+                  "type": "object",
+                  "properties": {
+                    "chain": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "start": {
+                      "type": "integer"
+                    },
+                    "end": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "chain",
+                    "start",
+                    "end"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "pdbcode",
+                "rna"
+              ],
+              "additionalProperties": false
+            },
+            "ranges": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "row": {
+                    "type": "object",
+                    "properties": {
+                      "chain": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "start": {
+                        "type": "integer"
+                      },
+                      "end": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "chain",
+                      "start",
+                      "end"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "values": {
+                    "type": "object",
+                    "patternProperties": {
+                      "^frag-[1-9][0-9]*-[ACGU]{2}(?![\\s\\S])": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^-?(0|[1-9][0-9]*)\\.[0-9]{2}(?![\\s\\S])"
+                          }
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "row",
+                  "values"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "schema",
+            "basis",
+            "ranges"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "S25": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "echo": {
+              "type": "object",
+              "properties": {
+                "bestfit_stackings": {
+                  "type": "object",
+                  "properties": {
+                    "best_fits": {
+                      "type": "object",
+                      "properties": {
+                        "pdb_code": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "rna": {
+                          "type": "object",
+                          "properties": {
+                            "chain": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "start": {
+                              "type": "integer"
+                            },
+                            "end": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "chain",
+                            "start",
+                            "end"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "resids": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "chain": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "resid": {
+                                "type": "integer"
+                              },
+                              "insertion_code": {
+                                "type": "string"
+                              },
+                              "base": {
+                                "enum": [
+                                  "A",
+                                  "C",
+                                  "G",
+                                  "U"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "chain",
+                              "resid",
+                              "insertion_code",
+                              "base"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "pdb_code",
+                        "rna",
+                        "resids"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "protein_ranges": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "chain": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "start": {
+                            "type": "integer"
+                          },
+                          "end": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "chain",
+                          "start",
+                          "end"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "uniqueItems": true
+                    }
+                  },
+                  "required": [
+                    "best_fits",
+                    "protein_ranges"
+                  ],
+                  "additionalProperties": false
+                },
+                "selected_keys": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "uniqueItems": true
+                },
+                "clip": {
+                  "type": "object",
+                  "properties": {
+                    "schema": {
+                      "const": 1
+                    },
+                    "basis": {
+                      "type": "object",
+                      "properties": {
+                        "pdbcode": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "rna": {
+                          "type": "object",
+                          "properties": {
+                            "chain": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "start": {
+                              "type": "integer"
+                            },
+                            "end": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "chain",
+                            "start",
+                            "end"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "pdbcode",
+                        "rna"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "clip1": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "clip2": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "basis",
+                    "clip1",
+                    "clip2"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "bestfit_stackings",
+                "selected_keys",
+                "clip"
+              ],
+              "additionalProperties": false
+            },
+            "filter_set_version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "legal_filter_names": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "rrm50",
+                  "rrm60",
+                  "rrm70",
+                  "rrm80",
+                  "rrm90",
+                  "rrm90-tilt30",
+                  "rrm90-disp45",
+                  "rrm90-tilt30-disp45",
+                  "rrm95",
+                  "rrm95-tilt30",
+                  "rrm95-disp45",
+                  "rrm95-tilt30-disp45"
+                ]
+              },
+              "minItems": 12,
+              "maxItems": 12,
+              "uniqueItems": true
+            },
+            "candidates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "fragment": {
+                    "type": "string",
+                    "pattern": "^frag-[1-9][0-9]*-[ACGU]{2}(?![\\s\\S])"
+                  },
+                  "nucleotide": {
+                    "enum": [
+                      1,
+                      2
+                    ]
+                  },
+                  "score": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "key",
+                  "fragment",
+                  "nucleotide",
+                  "score"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "references": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "score": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "key",
+                  "score"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "classes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "class_score": {
+                    "type": "number"
+                  },
+                  "rrm": {
+                    "enum": [
+                      50,
+                      60,
+                      70,
+                      80,
+                      90,
+                      95
+                    ]
+                  },
+                  "auto_prefilters": {
+                    "type": "object",
+                    "properties": {
+                      "tilt30": {
+                        "type": "boolean"
+                      },
+                      "disp45": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "tilt30",
+                      "disp45"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "filter_name": {
+                    "enum": [
+                      "rrm50",
+                      "rrm60",
+                      "rrm70",
+                      "rrm80",
+                      "rrm90",
+                      "rrm90-tilt30",
+                      "rrm90-disp45",
+                      "rrm90-tilt30-disp45",
+                      "rrm95",
+                      "rrm95-tilt30",
+                      "rrm95-disp45",
+                      "rrm95-tilt30-disp45"
+                    ]
+                  },
+                  "reference_score": {
+                    "type": "number"
+                  },
+                  "below_rrm95": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "key",
+                  "class_score",
+                  "rrm",
+                  "auto_prefilters",
+                  "filter_name",
+                  "reference_score",
+                  "below_rrm95"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "schema",
+            "echo",
+            "filter_set_version",
+            "legal_filter_names",
+            "candidates",
+            "references",
+            "classes"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "B17": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "best_fit_keys": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^frag-[1-9][0-9]*-[ACGU]{2}(?![\\s\\S])"
+          },
+          "uniqueItems": true
+        },
+        "jobs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "fragment": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "nucleotide": {
+                "enum": [
+                  1,
+                  2
+                ]
+              },
+              "sequence": {
+                "type": "string",
+                "pattern": "^[ACGU]{2}(?![\\s\\S])"
+              },
+              "conformer": {
+                "type": "integer"
+              },
+              "rotamer": {
+                "type": "integer"
+              },
+              "grid": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "range": {
+                "type": "string",
+                "pattern": "^range-[1-9][0-9]*(?![\\s\\S])"
+              },
+              "protein_resid": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "key",
+              "fragment",
+              "nucleotide",
+              "sequence",
+              "conformer",
+              "rotamer",
+              "grid",
+              "range",
+              "protein_resid"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "schema",
+        "best_fit_keys",
+        "jobs"
+      ],
+      "additionalProperties": false
+    },
+    "B18": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "filter_set_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "min_cell_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "jobs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "fragment": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "nucleotide": {
+                "enum": [
+                  1,
+                  2
+                ]
+              },
+              "error": {
+                "type": "string",
+                "minLength": 1
+              },
+              "filters": {
+                "type": "object",
+                "properties": {
+                  "rrm50": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "emitted": {
+                            "const": false
+                          },
+                          "implied_by": {
+                            "enum": [
+                              "rrm50",
+                              "rrm60",
+                              "rrm70",
+                              "rrm80",
+                              "rrm90",
+                              "rrm90-tilt30",
+                              "rrm90-disp45",
+                              "rrm90-tilt30-disp45",
+                              "rrm95",
+                              "rrm95-tilt30",
+                              "rrm95-disp45",
+                              "rrm95-tilt30-disp45"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "emitted",
+                          "implied_by"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "count": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "capacity": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "fill": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "emitted": {
+                            "type": "boolean"
+                          },
+                          "pose_pass": {
+                            "type": "boolean"
+                          },
+                          "score": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "count",
+                          "capacity",
+                          "fill",
+                          "emitted",
+                          "pose_pass",
+                          "score"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "rrm60": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "emitted": {
+                            "const": false
+                          },
+                          "implied_by": {
+                            "enum": [
+                              "rrm50",
+                              "rrm60",
+                              "rrm70",
+                              "rrm80",
+                              "rrm90",
+                              "rrm90-tilt30",
+                              "rrm90-disp45",
+                              "rrm90-tilt30-disp45",
+                              "rrm95",
+                              "rrm95-tilt30",
+                              "rrm95-disp45",
+                              "rrm95-tilt30-disp45"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "emitted",
+                          "implied_by"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "count": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "capacity": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "fill": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "emitted": {
+                            "type": "boolean"
+                          },
+                          "pose_pass": {
+                            "type": "boolean"
+                          },
+                          "score": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "count",
+                          "capacity",
+                          "fill",
+                          "emitted",
+                          "pose_pass",
+                          "score"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "rrm70": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "emitted": {
+                            "const": false
+                          },
+                          "implied_by": {
+                            "enum": [
+                              "rrm50",
+                              "rrm60",
+                              "rrm70",
+                              "rrm80",
+                              "rrm90",
+                              "rrm90-tilt30",
+                              "rrm90-disp45",
+                              "rrm90-tilt30-disp45",
+                              "rrm95",
+                              "rrm95-tilt30",
+                              "rrm95-disp45",
+                              "rrm95-tilt30-disp45"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "emitted",
+                          "implied_by"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "count": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "capacity": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "fill": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "emitted": {
+                            "type": "boolean"
+                          },
+                          "pose_pass": {
+                            "type": "boolean"
+                          },
+                          "score": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "count",
+                          "capacity",
+                          "fill",
+                          "emitted",
+                          "pose_pass",
+                          "score"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "rrm80": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "emitted": {
+                            "const": false
+                          },
+                          "implied_by": {
+                            "enum": [
+                              "rrm50",
+                              "rrm60",
+                              "rrm70",
+                              "rrm80",
+                              "rrm90",
+                              "rrm90-tilt30",
+                              "rrm90-disp45",
+                              "rrm90-tilt30-disp45",
+                              "rrm95",
+                              "rrm95-tilt30",
+                              "rrm95-disp45",
+                              "rrm95-tilt30-disp45"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "emitted",
+                          "implied_by"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "count": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "capacity": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "fill": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "emitted": {
+                            "type": "boolean"
+                          },
+                          "pose_pass": {
+                            "type": "boolean"
+                          },
+                          "score": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "count",
+                          "capacity",
+                          "fill",
+                          "emitted",
+                          "pose_pass",
+                          "score"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "rrm90": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "emitted": {
+                            "const": false
+                          },
+                          "implied_by": {
+                            "enum": [
+                              "rrm50",
+                              "rrm60",
+                              "rrm70",
+                              "rrm80",
+                              "rrm90",
+                              "rrm90-tilt30",
+                              "rrm90-disp45",
+                              "rrm90-tilt30-disp45",
+                              "rrm95",
+                              "rrm95-tilt30",
+                              "rrm95-disp45",
+                              "rrm95-tilt30-disp45"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "emitted",
+                          "implied_by"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "count": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "capacity": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "fill": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "emitted": {
+                            "type": "boolean"
+                          },
+                          "pose_pass": {
+                            "type": "boolean"
+                          },
+                          "score": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "count",
+                          "capacity",
+                          "fill",
+                          "emitted",
+                          "pose_pass",
+                          "score"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "rrm90-tilt30": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "emitted": {
+                            "const": false
+                          },
+                          "implied_by": {
+                            "enum": [
+                              "rrm50",
+                              "rrm60",
+                              "rrm70",
+                              "rrm80",
+                              "rrm90",
+                              "rrm90-tilt30",
+                              "rrm90-disp45",
+                              "rrm90-tilt30-disp45",
+                              "rrm95",
+                              "rrm95-tilt30",
+                              "rrm95-disp45",
+                              "rrm95-tilt30-disp45"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "emitted",
+                          "implied_by"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "count": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "capacity": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "fill": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "emitted": {
+                            "type": "boolean"
+                          },
+                          "pose_pass": {
+                            "type": "boolean"
+                          },
+                          "score": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "count",
+                          "capacity",
+                          "fill",
+                          "emitted",
+                          "pose_pass",
+                          "score"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "rrm90-disp45": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "emitted": {
+                            "const": false
+                          },
+                          "implied_by": {
+                            "enum": [
+                              "rrm50",
+                              "rrm60",
+                              "rrm70",
+                              "rrm80",
+                              "rrm90",
+                              "rrm90-tilt30",
+                              "rrm90-disp45",
+                              "rrm90-tilt30-disp45",
+                              "rrm95",
+                              "rrm95-tilt30",
+                              "rrm95-disp45",
+                              "rrm95-tilt30-disp45"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "emitted",
+                          "implied_by"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "count": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "capacity": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "fill": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "emitted": {
+                            "type": "boolean"
+                          },
+                          "pose_pass": {
+                            "type": "boolean"
+                          },
+                          "score": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "count",
+                          "capacity",
+                          "fill",
+                          "emitted",
+                          "pose_pass",
+                          "score"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "rrm90-tilt30-disp45": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "emitted": {
+                            "const": false
+                          },
+                          "implied_by": {
+                            "enum": [
+                              "rrm50",
+                              "rrm60",
+                              "rrm70",
+                              "rrm80",
+                              "rrm90",
+                              "rrm90-tilt30",
+                              "rrm90-disp45",
+                              "rrm90-tilt30-disp45",
+                              "rrm95",
+                              "rrm95-tilt30",
+                              "rrm95-disp45",
+                              "rrm95-tilt30-disp45"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "emitted",
+                          "implied_by"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "count": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "capacity": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "fill": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "emitted": {
+                            "type": "boolean"
+                          },
+                          "pose_pass": {
+                            "type": "boolean"
+                          },
+                          "score": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "count",
+                          "capacity",
+                          "fill",
+                          "emitted",
+                          "pose_pass",
+                          "score"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "rrm95": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "emitted": {
+                            "const": false
+                          },
+                          "implied_by": {
+                            "enum": [
+                              "rrm50",
+                              "rrm60",
+                              "rrm70",
+                              "rrm80",
+                              "rrm90",
+                              "rrm90-tilt30",
+                              "rrm90-disp45",
+                              "rrm90-tilt30-disp45",
+                              "rrm95",
+                              "rrm95-tilt30",
+                              "rrm95-disp45",
+                              "rrm95-tilt30-disp45"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "emitted",
+                          "implied_by"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "count": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "capacity": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "fill": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "emitted": {
+                            "type": "boolean"
+                          },
+                          "pose_pass": {
+                            "type": "boolean"
+                          },
+                          "score": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "count",
+                          "capacity",
+                          "fill",
+                          "emitted",
+                          "pose_pass",
+                          "score"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "rrm95-tilt30": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "emitted": {
+                            "const": false
+                          },
+                          "implied_by": {
+                            "enum": [
+                              "rrm50",
+                              "rrm60",
+                              "rrm70",
+                              "rrm80",
+                              "rrm90",
+                              "rrm90-tilt30",
+                              "rrm90-disp45",
+                              "rrm90-tilt30-disp45",
+                              "rrm95",
+                              "rrm95-tilt30",
+                              "rrm95-disp45",
+                              "rrm95-tilt30-disp45"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "emitted",
+                          "implied_by"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "count": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "capacity": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "fill": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "emitted": {
+                            "type": "boolean"
+                          },
+                          "pose_pass": {
+                            "type": "boolean"
+                          },
+                          "score": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "count",
+                          "capacity",
+                          "fill",
+                          "emitted",
+                          "pose_pass",
+                          "score"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "rrm95-disp45": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "emitted": {
+                            "const": false
+                          },
+                          "implied_by": {
+                            "enum": [
+                              "rrm50",
+                              "rrm60",
+                              "rrm70",
+                              "rrm80",
+                              "rrm90",
+                              "rrm90-tilt30",
+                              "rrm90-disp45",
+                              "rrm90-tilt30-disp45",
+                              "rrm95",
+                              "rrm95-tilt30",
+                              "rrm95-disp45",
+                              "rrm95-tilt30-disp45"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "emitted",
+                          "implied_by"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "count": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "capacity": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "fill": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "emitted": {
+                            "type": "boolean"
+                          },
+                          "pose_pass": {
+                            "type": "boolean"
+                          },
+                          "score": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "count",
+                          "capacity",
+                          "fill",
+                          "emitted",
+                          "pose_pass",
+                          "score"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "rrm95-tilt30-disp45": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "emitted": {
+                            "const": false
+                          },
+                          "implied_by": {
+                            "enum": [
+                              "rrm50",
+                              "rrm60",
+                              "rrm70",
+                              "rrm80",
+                              "rrm90",
+                              "rrm90-tilt30",
+                              "rrm90-disp45",
+                              "rrm90-tilt30-disp45",
+                              "rrm95",
+                              "rrm95-tilt30",
+                              "rrm95-disp45",
+                              "rrm95-tilt30-disp45"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "emitted",
+                          "implied_by"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "count": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "capacity": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "fill": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "emitted": {
+                            "type": "boolean"
+                          },
+                          "pose_pass": {
+                            "type": "boolean"
+                          },
+                          "score": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "count",
+                          "capacity",
+                          "fill",
+                          "emitted",
+                          "pose_pass",
+                          "score"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "key",
+              "fragment",
+              "nucleotide",
+              "filters"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "schema",
+        "filter_set_version",
+        "min_cell_fraction",
+        "jobs"
+      ],
+      "additionalProperties": false
+    },
+    "energy-thresholds": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": 1
+        }
+      },
+      "required": [
+        "schema"
+      ],
+      "additionalProperties": false,
+      "patternProperties": {
+        "^frag-[1-9][0-9]*-[ACGU]{2}(?![\\s\\S])": {
+          "type": "object",
+          "patternProperties": {
+            "^range-[1-9][0-9]*(?![\\s\\S])": {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)\\.[0-9]{2}(?![\\s\\S])"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "interactions": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "clip1": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "clip2": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kept_residues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "chain": {
+                "type": "string",
+                "minLength": 1
+              },
+              "resid": {
+                "type": "integer"
+              },
+              "insertion_code": {
+                "type": "string"
+              },
+              "base": {
+                "enum": [
+                  "A",
+                  "C",
+                  "G",
+                  "U"
+                ]
+              }
+            },
+            "required": [
+              "chain",
+              "resid",
+              "insertion_code",
+              "base"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "ranges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "chain": {
+                "type": "string",
+                "minLength": 1
+              },
+              "start": {
+                "type": "integer"
+              },
+              "end": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "index",
+              "chain",
+              "start",
+              "end"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "runs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "range": {
+                "type": "string",
+                "pattern": "^range-[1-9][0-9]*(?![\\s\\S])"
+              },
+              "first_fragment": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "last_fragment": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "anchors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "fragment": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "nucleotide": {
+                      "enum": [
+                        1,
+                        2
+                      ]
+                    }
+                  },
+                  "required": [
+                    "fragment",
+                    "nucleotide"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "range",
+              "first_fragment",
+              "last_fragment",
+              "anchors"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "interactions": {
+          "type": "object",
+          "patternProperties": {
+            "^frag-[1-9][0-9]*-[ACGU]{2}(?![\\s\\S])": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^range-[1-9][0-9]*(?![\\s\\S])"
+              },
+              "uniqueItems": true
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "schema",
+        "clip1",
+        "clip2",
+        "kept_residues",
+        "ranges",
+        "runs",
+        "interactions"
+      ],
+      "additionalProperties": false
+    },
+    "S19": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "echo": {
+              "type": "object",
+              "properties": {
+                "classes": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "rrm": {
+                            "enum": [
+                              50,
+                              60,
+                              70,
+                              80
+                            ]
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "rrm"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "rrm": {
+                            "enum": [
+                              90,
+                              95
+                            ]
+                          },
+                          "tilt30": {
+                            "type": "boolean"
+                          },
+                          "disp45": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "rrm",
+                          "tilt30",
+                          "disp45"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                },
+                "clip": {
+                  "type": "object",
+                  "properties": {
+                    "schema": {
+                      "const": 1
+                    },
+                    "basis": {
+                      "type": "object",
+                      "properties": {
+                        "pdbcode": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "rna": {
+                          "type": "object",
+                          "properties": {
+                            "chain": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "start": {
+                              "type": "integer"
+                            },
+                            "end": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "chain",
+                            "start",
+                            "end"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "pdbcode",
+                        "rna"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "clip1": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "clip2": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "basis",
+                    "clip1",
+                    "clip2"
+                  ],
+                  "additionalProperties": false
+                },
+                "selected_keys": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "uniqueItems": true
+                },
+                "best_fits": {
+                  "type": "object",
+                  "properties": {
+                    "pdb_code": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "rna": {
+                      "type": "object",
+                      "properties": {
+                        "chain": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "start": {
+                          "type": "integer"
+                        },
+                        "end": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "chain",
+                        "start",
+                        "end"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "resids": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "chain": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "resid": {
+                            "type": "integer"
+                          },
+                          "insertion_code": {
+                            "type": "string"
+                          },
+                          "base": {
+                            "enum": [
+                              "A",
+                              "C",
+                              "G",
+                              "U"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "chain",
+                          "resid",
+                          "insertion_code",
+                          "base"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "pdb_code",
+                    "rna",
+                    "resids"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "classes",
+                "clip",
+                "selected_keys",
+                "best_fits"
+              ],
+              "additionalProperties": false
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "state": {
+                    "enum": [
+                      "green",
+                      "amber",
+                      "red",
+                      "blocked"
+                    ]
+                  },
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "key",
+                  "state",
+                  "messages"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "schema",
+            "echo",
+            "rows"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "S20": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": 1
+            },
+            "echo": {
+              "type": "object",
+              "properties": {
+                "bases": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "fragment": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "sequence": {
+                        "type": "string",
+                        "pattern": "^[ACGU]{2}(?![\\s\\S])"
+                      },
+                      "nuc1_ovrmsd": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^([1-9][0-9]*(\\.[0-9]{1,2})?|0\\.([1-9][0-9]?|0[1-9]))(?![\\s\\S])"
+                          }
+                        ]
+                      },
+                      "nuc2_ovrmsd": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^([1-9][0-9]*(\\.[0-9]{1,2})?|0\\.([1-9][0-9]?|0[1-9]))(?![\\s\\S])"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "fragment",
+                      "sequence",
+                      "nuc1_ovrmsd",
+                      "nuc2_ovrmsd"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "clip": {
+                  "type": "object",
+                  "properties": {
+                    "schema": {
+                      "const": 1
+                    },
+                    "basis": {
+                      "type": "object",
+                      "properties": {
+                        "pdbcode": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "rna": {
+                          "type": "object",
+                          "properties": {
+                            "chain": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "start": {
+                              "type": "integer"
+                            },
+                            "end": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "chain",
+                            "start",
+                            "end"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "pdbcode",
+                        "rna"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "clip1": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "clip2": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "basis",
+                    "clip1",
+                    "clip2"
+                  ],
+                  "additionalProperties": false
+                },
+                "selected_keys": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "uniqueItems": true
+                },
+                "best_fits": {
+                  "type": "object",
+                  "properties": {
+                    "pdb_code": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "rna": {
+                      "type": "object",
+                      "properties": {
+                        "chain": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "start": {
+                          "type": "integer"
+                        },
+                        "end": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "chain",
+                        "start",
+                        "end"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "resids": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "chain": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "resid": {
+                            "type": "integer"
+                          },
+                          "insertion_code": {
+                            "type": "string"
+                          },
+                          "base": {
+                            "enum": [
+                              "A",
+                              "C",
+                              "G",
+                              "U"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "chain",
+                          "resid",
+                          "insertion_code",
+                          "base"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "pdb_code",
+                    "rna",
+                    "resids"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "bases",
+                "clip",
+                "selected_keys",
+                "best_fits"
+              ],
+              "additionalProperties": false
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "state": {
+                    "enum": [
+                      "green",
+                      "amber",
+                      "red",
+                      "blocked"
+                    ]
+                  },
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "key",
+                  "state",
+                  "messages"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "schema",
+            "echo",
+            "rows"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

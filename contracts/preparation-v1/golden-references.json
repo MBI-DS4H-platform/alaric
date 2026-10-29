@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "source": "alaric/gaussian_stacking_filter.json",
+  "source_sha256": "c8b518cd4dfef2b655196e2611686c3eaaf979c5462341c7c7b7ddcf5ec5b2b3",
+  "filter_set_version": "2026.1",
+  "spec_digest": "bf1e90c08d7ef65eb78ef13b424162059389d92411c9406d0e2376a1bf358a7a",
+  "pointers": {
+    "tolerance_rel": "/golden/tolerance_rel",
+    "scores": "/golden/scores",
+    "decisions": "/golden/decisions",
+    "lattice_decisions": "/golden/lattice_decisions"
+  },
+  "counts": {
+    "scores": 8,
+    "decisions": 192,
+    "lattice_decisions": 72
+  },
+  "backend_obligations": {
+    "relative_score_tolerance": 1e-12,
+    "future_T28_A9_1b7f_tolerance": 1e-06,
+    "classification": [
+      "worst unclipped candidate score",
+      "smallest reached RRM cutoff; below95 red fallback",
+      "strict tilt30 and disp45 across all unclipped candidates",
+      "mask d<5 phi<60; equality excluded",
+      "score equality reaches cutoff"
+    ],
+    "rounding_source": "plans/final/contract-boundaries.md §1; future A4/A6 goldens",
+    "rounding_examples": [
+      {
+        "raw": "-16.5913",
+        "rounded": "-16.59"
+      },
+      {
+        "raw": "-16.59",
+        "rounded": "-16.58"
+      },
+      {
+        "raw": "0.123",
+        "rounded": "0.13"
+      }
+    ]
+  }
+}
