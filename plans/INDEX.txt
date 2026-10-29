@@ -1,0 +1,47 @@
+alaric-energy-score-filter-plan.md
+    Plan for a merged Alaric "energy-filter" action that replaces score+filter, with one threshold per (dinucleotide, protein range) and a 5-7 -> 10-12 -> gridless grid-accuracy cascade backed by cached Seamless grids. It also covers how preparic computes the thresholds JSON from best-fit energies, the rounding rule, and prerequisites in attract-jax.
+
+alaric-gaussian-miniplan.md
+    Plan for a Python generator of the 12 precomputed Gaussian stacking filters (rrm50..rrm95, with tilt30/disp45 variants) that reproduces the report's cutoffs and writes the CSR caches plus the JSON contract (gaussian_stacking_filter.json) that preparic reads. It also covers the RRM-95 fallback, the Seamless factory, shipping and the anchor.py/resolve.py changes.
+
+alaric-project-layout.md
+    Description of an Alaric project directory as a frontend sees it: DATA inputs, action dirs, the sigil/CACHE lifecycle, the action types, the downstream chain tools, and where the Seamless best-fit step fits. It still carries one claim, that the best-fit tables feed the DATA thresholds, which open-questions.md says to correct.
+
+anchor-ring-ovrmsd-mode.md
+    Investigation of Alaric's "anchor-refe" action, which keeps anchor poses whose unaligned base-atom RMSD to the reference nucleotide is below a per-(fragment, nucleotide) ovrmsd threshold. It covers what is computed, how thresholds are derived from the best-fit bases table, grids, tests and limits such as MAX_OVERLAP_RMSD.
+
+attract-jax-numpy-scoring.md
+    Notes on attract-jax's new gridless, numpy-only scoring path (inputs, outputs, accuracy versus grid scoring, commit and environment status) as the basis for preparic's energetics stage. It also covers how to wrap it in Seamless and lists the gotchas.
+
+contract-boundaries.md
+    The preparic/Alaric boundary during project preparation: shared rules (Alaric delivers sandbox-tested modules or CLI tools with DEPS lists, factories decided case by case, identified-not-staged data, rounding in Alaric), an inventory of all existing and planned preparic Seamless transformers and what each takes from Alaric, the reduced DEPS file for gridless energetics, and the precomputed Gaussian filters plus the all-filter check tool. It also lists where the author's decisions override the mini-plans. A final section covers the frontend/backend boundary: every existing and planned Seamless shared cell (edit vs computed), which transformers it feeds or comes from, backend-only cells, error and staleness signalling, and multi-cell write rules.
+
+energetics-miniplan.md
+    Plan for preparic stage 5: score every dinucleotide against each protein range gridlessly (refe and best-fit sets) through a Seamless transformer, and let the user edit an interaction matrix of one contiguous run per stacking anchor. It covers shared clipping with stage 4, Recompute, storage and reset rules, the interactions.json handoff, and unbound-protein options.
+
+gaussian-filter-sources.md
+    Survey of the source material for the Gaussian stacking filter: the plots, recovered model and RRM cutoffs in stacking-prediction-plots, and the Julia code and old r90/r95/r99 arrays on the gaussian-filter-precalculation branch. It records how the two relate, including differing model parameters and thresholds.
+
+open-questions.md
+    Collected open questions from the planning session across all stages and spin-offs, each with the assistant's recommendation and the author's decisions. It ends with cross-cutting items and actions awaiting a go-ahead, such as pushing the attract-jax commits.
+
+oracle-contract.md
+    Oracle-level contract for preparation stages 1-6: what preparic must do and what Alaric must provide, as observable clauses each with a check that decides it, independent of mechanism (factory, module or CLI; shared cells). It covers global rules (determinism, one exclude code, the strictly-above rounding, schemas), each Alaric step and dataset, preparic's shared-project and per-stage behaviour, the export obligations already fixed, and ends with the decisions still open for the author.
+
+preparic-architecture.md
+    Summary of preparic as it stands: a Svelte/Mol* frontend over a Seamless Context backend, with stages 1-3 working (PDB code, ranges, stacking selection), launch scripts, and what is not implemented (Alaric invocation, deployment, auth, remote execution).
+
+preparic-gaussian-miniplan.md
+    Plan for preparic stage 6: compute Gaussian scores of reference and best-fit stackings in the browser (Kabsch ring geometry), pick an RRM class and prefilters per anchor, and let the user edit them in a table. Server-side validation checks whether each best-fit pose cell would be emitted by Alaric's precomputed filter.
+
+state-transitions.md
+    Preparic's state across stages 1-6 in three layers (browser, shared cells, transformers): one linear stage shared by all tabs and derived from marker edit cells with recorded bases, single-write Continue/Back transitions with per-stage gates, what lingers on Back, freshness via echoes, and what happens when inputs change from another tab, a stale tab, a mount file or a restart mid-flight. It proposes changes to contract-boundaries.md section 8 and ends with questions for the author.
+
+stage4-best-fit-miniplan.md
+    Plan for preparic stage 4: fit every dinucleotide to its best library conformer via Seamless factories, derive the rounded ovRMSD/cRMSD threshold tables, and show them with an editable copy. The user can clip poor end fragments (clip1/clip2) and the results go downstream to energetics.
+
+stage4-thresholds-howto.md
+    Explanation of how Alaric's ovRMSD/cRMSD thresholds are derived: the best-fit, pairs and bases command chain on tests/1b7f, the meaning of each table, and the verified rule (table value rounded up to 0.01, no maximum). It also covers Seamless status, clipping as a pure subset, and gotchas.
+
+test-anchor-miniplan.md
+    Plan for offering Alaric's "anchor-refe" ovRMSD mode in preparic as an alternative to the Gaussian filter, reusing stage 4's bases thresholds and editable table, with a separate anchor_modes cell. It covers the strict-greater rounding fix, cheap server-side threshold validation, and what the export stage must emit.
