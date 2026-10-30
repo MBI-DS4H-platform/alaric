@@ -11,7 +11,7 @@ import sys
 
 import numpy as np
 
-ALARIC_DIR = Path(__file__).with_name("alaric")
+ALARIC_DIR = Path(__file__).resolve().parent.parent / "alaric"
 if str(ALARIC_DIR) not in sys.path:
     sys.path.insert(0, str(ALARIC_DIR))
 

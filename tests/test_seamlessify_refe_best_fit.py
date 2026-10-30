@@ -84,10 +84,14 @@ def test_factory_returns_unexecuted_transformer_with_pins_and_context_binding(
     )
     monkeypatch.chdir(tmp_path)
     before = set(tmp_path.iterdir())
-    fitter_arguments = ("--exclude-pdb-code", "1b7f", "--grid-spacing", "1.25")
+    fitter_arguments = (
+        "--grid-spacing",
+        repr(3**0.5 / 3),
+        "--rotamer-precision",
+        "0.5",
+    )
 
     transformer = factory.seamlessify_refe_best_fit(
-        PDB,
         fitter_arguments,
         fraglib_config=config,
         conda_environment="best-fit-worker",
@@ -96,7 +100,9 @@ def test_factory_returns_unexecuted_transformer_with_pins_and_context_binding(
     assert isinstance(transformer, BashTransformer)
     assert transformer.language == "bash"
     code = transformer.code.content.decode()
-    assert "--exclude-pdb-code 1b7f --grid-spacing 1.25" in code
+    assert f"--grid-spacing {repr(3**0.5 / 3)} --rotamer-precision 0.5" in code
+    assert "--no-header" not in code
+    assert "--ignore-" not in code
     assert transformer.environment.get_conda_env() == "best-fit-worker"
     assert transformer.celltypes[META_PIN] == "bytes"
     assert transformer.args[META_PIN].checksum == Checksum("b" * 64)
@@ -105,17 +111,29 @@ def test_factory_returns_unexecuted_transformer_with_pins_and_context_binding(
     assert transformer.celltypes["AA-ppdb.npy"] == "bytes"
     assert transformer.args["AA-ppdb.npy"].checksum == Checksum("a" * 64)
     assert transformer.celltypes.fraglib_identities == "str"
-    identity_pin = transformer.args.fraglib_identities.value
-    assert isinstance(identity_pin, str)
-    identities = json.loads(identity_pin)
-    assert identities["fraglen"] == 2
-    assert len(identities["sha256"]) == 36
+    for name in ("rna_pdb", "exclude_pdb_code", "fraglib_identities"):
+        assert transformer.args[name].checksum is None
+    identity_pin = json.dumps(
+        {"schema": 1, "fraglen": 2, "sha256": {"conformers/example.npy": "a" * 64}},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    transformer.args.rna_pdb.value = PDB.read_bytes()
+    transformer.args.exclude_pdb_code.value = "1b7f"
+    transformer.args.fraglib_identities.value = identity_pin
+    assert transformer.args.rna_pdb.value == PDB.read_bytes()
+    assert transformer.args.exclude_pdb_code.value == "1b7f"
+    assert transformer.args.fraglib_identities.value == identity_pin
 
     filelist, options = calls[0]
     assert str(config) in filelist
-    assert str(PDB) in filelist
     assert str(ROOT / "util" / "refe-best-fit.py") in filelist
     assert str(ROOT / "util" / "refe_best_fit_seamless_support.py") in filelist
+    from util.refe_best_fit_seamless_support import input_paths
+
+    expected_files = {str(path.resolve()) for path in input_paths()}
+    assert set(filelist) == expected_files | {str(config.resolve())}
+    assert str(PDB.resolve()) not in filelist
     assert options == {
         "directories": {},
         "max_upload_files": None,
@@ -145,7 +163,6 @@ def test_factory_rejects_managed_pdb_output_argument(tmp_path, monkeypatch):
     config.write_text("fraglen: 2\n")
     with pytest.raises(ValueError, match="--pdb-output is managed internally"):
         factory.seamlessify_refe_best_fit(
-            PDB,
             ("--pdb-output=/tmp/managed",),
             fraglib_config=config,
         )

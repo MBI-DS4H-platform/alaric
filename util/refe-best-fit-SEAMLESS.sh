@@ -12,9 +12,10 @@ Wrapper options (before RNA.pdb):
   --conda ENV            Run the bash transformation in this conda environment
   -h, --help             Show this help
 
-Fitter options include --exclude-pdb-code CODE, --grid-spacing FLOAT,
---rotamer-precision FLOAT, --ignore-unknown, --ignore-missing,
---ignore-reordered and --no-header. --pdb-output is managed by the wrapper.
+Required fitter input: --exclude-pdb-code CODE. The only optional fitter
+argument is --rotamer-precision 0.5.
+Grid spacing is fixed at sqrt(3)/3. --no-header and ignore flags are forbidden;
+--pdb-output is managed by the wrapper.
 
 Requires Seamless (including --metafile support), SEAMLESS_CACHE or a configured
 Seamless cluster, Python 3.12+, numpy<2, scipy, ruamel.yaml, biopython and the fragment
@@ -53,14 +54,6 @@ done
 scriptdir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # Keep the caller's working directory for Seamless configuration discovery.
 output=$(python -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "$output")
-inputs_text=$(python -B "$scriptdir/refe_best_fit_seamless_support.py" inputs)
-mapfile -t inputs <<< "$inputs_text"
-input_args=()
-for input in "${inputs[@]}"; do input_args+=(-i "$input"); done
-fraglib_identities=$(python -B "$scriptdir/refe_best_fit_seamless_support.py" identities)
-seamless-run -y -W -ms "${environment[@]}" \
-    "${input_args[@]}" --metafile "$config" \
-    --var "fraglib_identities=$fraglib_identities" \
-    --metavar "fraglib_config=$(basename -- "$config")" \
-    --capture "best-fit-output:$output" \
-    python -B "$scriptdir/refe_best_fit_seamless_support.py" run "$pdb" "$@"
+exec python -B "$scriptdir/refe-best-fit-SEAMLESS.py" \
+    --output "$output" --fraglib-config "$config" \
+    "${environment[@]}" "$pdb" "$@"

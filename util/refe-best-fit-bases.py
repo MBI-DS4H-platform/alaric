@@ -14,7 +14,7 @@ import sys
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-ALARIC_DIR = Path(__file__).with_name("alaric")
+ALARIC_DIR = Path(__file__).resolve().parent.parent / "alaric"
 if str(ALARIC_DIR) not in sys.path:
     sys.path.insert(0, str(ALARIC_DIR))
 
@@ -74,6 +74,11 @@ def build_parser() -> argparse.ArgumentParser:
             "PDB code whose origin conformers were excluded/replaced when "
             "producing the TSV. Must match refe-best-fit.py."
         ),
+    )
+    parser.add_argument(
+        "--templates-dir",
+        type=Path,
+        help="Directory with the declared A/C/G/U ParsedPDB templates.",
     )
     parser.add_argument(
         "--grid-spacing",

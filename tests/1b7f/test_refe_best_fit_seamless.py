@@ -73,16 +73,29 @@ def test_factory_matches_goldens_with_caller_owned_configuration(
     from seamless_workflow import Context
     monkeypatch.syspath_prepend(str(ROOT / "util"))
     from seamlessify_refe_best_fit import seamlessify_refe_best_fit
+    from util.refe_best_fit_seamless_support import identities
+    import json
+
+    identity_json = json.dumps(
+        identities(ROOT / "fraglib"), sort_keys=True, separators=(",", ":")
+    )
+
+    def connected_fit(*, fraglib_config=None, conda_environment=None):
+        fit = seamlessify_refe_best_fit(
+            ("--rotamer-precision", "0.5"),
+            fraglib_config=fraglib_config,
+            conda_environment=conda_environment,
+        )
+        fit.args.rna_pdb.value = (HERE / "pdbs" / "rna.pdb").read_bytes()
+        fit.args.exclude_pdb_code.value = "1b7f"
+        fit.args.fraglib_identities.value = identity_json
+        return fit
 
     # Spell out the default so this workflow has a different identity from the
     # CLI cases and must exercise computation through Context on a cold cache.
-    arguments = ("--exclude-pdb-code", "1b7f", "--rotamer-precision", "0.5")
     output = tmp_path / "factory output"
     with Context() as context:
-        context.step = seamlessify_refe_best_fit(
-            HERE / "pdbs" / "rna.pdb",
-            arguments,
-        )
+        context.step = connected_fit()
         context.compute(timeout=300)
         result = context.step.result.value
         write_to_directory(
@@ -102,9 +115,7 @@ def test_factory_matches_goldens_with_caller_owned_configuration(
     unusable_hints.write_text("not a usable library configuration\n")
     replay_output = tmp_path / "factory cached output"
     with Context() as context:
-        context.step = seamlessify_refe_best_fit(
-            HERE / "pdbs" / "rna.pdb",
-            arguments,
+        context.step = connected_fit(
             fraglib_config=unusable_hints,
             conda_environment="deliberately-absent-cache-probe",
         )

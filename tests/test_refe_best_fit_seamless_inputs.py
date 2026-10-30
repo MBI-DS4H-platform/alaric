@@ -30,7 +30,13 @@ def test_input_declarations_are_original_files_without_preparation_writes(tmp_pa
     root = Path(__file__).resolve().parents[1]
     manifest = SUPPORT["identities"](root / "fraglib")
     assert len(manifest["sha256"]) == 36
-    assert len(inputs) == 28
+    deps = root / "util" / "refe-best-fit.DEPS"
+    declared = {
+        deps.resolve(),
+        *((deps.parent / line).resolve() for line in deps.read_text().splitlines()),
+    }
+    assert {path.resolve() for path in inputs} == declared
     assert all(path.is_file() for path in inputs)
     assert any(path.name == "library.py" and path.parent.name == "alaric" for path in inputs)
+    assert not any(path == root / "tests" / "1b7f" / "pdbs" / "rna.pdb" for path in inputs)
     assert not list(tmp_path.iterdir())

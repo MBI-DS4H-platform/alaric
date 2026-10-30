@@ -47,7 +47,8 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Cut an RNA PDB into dinucleotide fragments and report the best "
             "discrete pose using the best-fitting conformer."
-        )
+        ),
+        allow_abbrev=False,
     )
     parser.add_argument("rna_pdb", type=_existing_file, help="RNA PDB file to fit.")
     parser.add_argument(
