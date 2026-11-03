@@ -25,8 +25,6 @@ from alaric.middle.schema import normalize_action
 from alaric.middle.sigil import compute_project_sigils
 from alaric.npy_io import load_npy, save_npy
 from alaric.poses import write_arc_file
-from alaric.score_add import main as score_add_main
-from alaric.score_concat import main as score_concat_main
 
 
 def _write_project(root: Path) -> None:
@@ -43,10 +41,15 @@ def _write_project(root: Path) -> None:
 """.strip()
         + "\n"
     )
-    (data / "anchor.yaml").write_text("angle: 30\ndihedral: 45 -45\n")
+    (data / "anchor.yaml").write_text("angle: 30\ndihedral: 45 -45\novrmsd: 1.0\n")
     (data / "pdbcode.txt").write_text("1abc\n")
+    (data / "range-2-aa.pdb").write_text("HEADER test\n")
     (data / "dom-aa.pdb").write_text("HEADER test\n")
-    (data / "dom.pdb").write_text("HEADER test plain\n")
+    (data / "dom.pdb").write_text(
+        "ATOM      1  CA  PHE A   1       0.000   0.000   0.000  1.00 20.00           C\n"
+    )
+    (data / "reference.pdb").write_text("HEADER reference\n")
+    (data / "sequence.txt").write_text("GUUUUUUUUUU\n")
 
     def action(name: str, spec: dict) -> None:
         path = root / name
@@ -56,33 +59,32 @@ def _write_project(root: Path) -> None:
     action(
         "frag4-anchor",
         {
-            "action": "anchor",
+            "action": "anchor-refe",
             "fragment": "auto",
             "sequence": "auto",
             "exclude": "auto",
-            "protein": "dom",
-            "resid": 1,
             "nucleotide": "first",
-        },
-    )
-    action(
-        "frag4-score",
-        {
-            "action": "score",
-            "input": "frag4-anchor",
-            "sequence": "auto",
-            "exclude": "auto",
-            "protein": "dom",
+            "ovrmsd": "auto",
         },
     )
     action(
         "frag4-filter",
         {
-            "action": "filter",
+            "action": "energy-filter",
             "input": "frag4-anchor",
-            "score_input": "frag4-score",
-            "threshold": "auto",
+            "fragment": "auto",
+            "sequence": "auto",
+            "exclude": "auto",
+            "protein": "range-2",
+            "threshold": -1.0,
+            "epsilon": 15,
+            "cascade": [],
+            "min_cascade": 0,
         },
+    )
+    action(
+        "frag4-rmsd",
+        {"action": "rmsd", "input": "frag4-anchor", "fragment": "auto", "exclude": "auto"},
     )
     action(
         "frag5-fwd",
@@ -108,7 +110,7 @@ def test_sigil_is_deterministic_and_writes_parameters(tmp_path: Path) -> None:
     )
     assert first == second
     assert first["frag4-anchor"].endswith("-null")
-    assert (tmp_path / "CACHE" / "parameters" / first["frag4-score"]).is_file()
+    assert (tmp_path / "CACHE" / "parameters" / first["frag4-filter"]).is_file()
 
 
 def test_deploy_auto_sigils_only_target_dependency_closure(tmp_path: Path) -> None:
@@ -118,13 +120,16 @@ def test_deploy_auto_sigils_only_target_dependency_closure(tmp_path: Path) -> No
     (unrelated / "alaric.yaml").write_text(
         yaml.safe_dump(
             {
-                "action": "anchor",
+                "action": "energy-filter",
+                "input": "missing",
                 "fragment": 4,
                 "sequence": "auto",
                 "exclude": "auto",
-                "protein": "missing",
-                "resid": 1,
-                "nucleotide": "first",
+                "protein": "range-2",
+                "threshold": 0.0,
+                "epsilon": 15,
+                "cascade": [],
+                "min_cascade": 0,
             },
             sort_keys=False,
         )
@@ -133,7 +138,6 @@ def test_deploy_auto_sigils_only_target_dependency_closure(tmp_path: Path) -> No
     deploy("local", tmp_path / "frag4-filter")
 
     assert (tmp_path / "frag4-anchor" / "sigil.txt").is_file()
-    assert (tmp_path / "frag4-score" / "sigil.txt").is_file()
     assert (tmp_path / "frag4-filter" / "sigil.txt").is_file()
     assert not (tmp_path / "frag5-fwd" / "sigil.txt").exists()
     assert not (unrelated / "sigil.txt").exists()
@@ -144,8 +148,8 @@ def test_run_sh_guards_against_stale_sigil_and_existing_result(tmp_path: Path) -
     _write_project(tmp_path)
     project = Project.discover(tmp_path)
     sigils = compute_project_sigils(project)
-    action = ActionGraph(project).build()["frag4-score"]
-    sigil = sigils["frag4-score"]
+    action = ActionGraph(project).build()["frag5-fwd"]
+    sigil = sigils["frag5-fwd"]
 
     body = generate_run_sh(project, action, "local")
     assert f'SIGIL="{sigil}"' in body
@@ -168,8 +172,8 @@ def test_chunk_scripts_guard_but_organize_and_wrapper_run_sh_dont(tmp_path: Path
     _write_project(tmp_path)
     project = Project.discover(tmp_path)
     sigils = compute_project_sigils(project)
-    action = ActionGraph(project).build()["frag4-score"]
-    sigil = sigils["frag4-score"]
+    action = ActionGraph(project).build()["frag5-fwd"]
+    sigil = sigils["frag5-fwd"]
 
     files = generate_chunk_files(project, action, "local-chunk", nchunks=2)
     for name in ("chunk1.sh", "chunk2.sh"):
@@ -187,14 +191,13 @@ def test_sigil_pool_limits_to_action_and_upstream_dependencies(tmp_path: Path) -
     from alaric.middle.sigil import main as sigil_main
 
     _write_project(tmp_path)
-    action_dir = tmp_path / "frag4-filter"
+    action_dir = tmp_path / "frag5-fwd"
 
     assert sigil_main(["--pool", str(action_dir)]) == 0
 
     assert (tmp_path / "frag4-anchor" / "sigil.txt").is_file()
-    assert (tmp_path / "frag4-score" / "sigil.txt").is_file()
     assert (tmp_path / "frag4-filter" / "sigil.txt").is_file()
-    assert not (tmp_path / "frag5-fwd" / "sigil.txt").exists()
+    assert (tmp_path / "frag5-fwd" / "sigil.txt").is_file()
 
 
 def test_deploy_recomputes_stale_sigil_on_redeploy(tmp_path: Path) -> None:
@@ -208,7 +211,7 @@ def test_deploy_recomputes_stale_sigil_on_redeploy(tmp_path: Path) -> None:
 
     anchor_dir = tmp_path / "frag4-anchor"
     spec = yaml.safe_load((anchor_dir / "alaric.yaml").read_text())
-    spec["resid"] = 2
+    spec["ovrmsd"] = 1.01
     anchor_dir.joinpath("alaric.yaml").write_text(yaml.safe_dump(spec, sort_keys=False))
 
     # Before the fix, deploy() only recomputed sigils when sigil.txt was entirely missing,
@@ -233,53 +236,8 @@ def test_check_sh_reports_status_message(tmp_path: Path) -> None:
     assert 'exit "$status"' in body
 
 
-def test_deploy_score_chunk_emits_independent_chunk_and_organize_scripts(tmp_path: Path) -> None:
-    _write_project(tmp_path)
-    project = Project.discover(tmp_path)
-    compute_project_sigils(project)
-    d = tmp_path / "frag4-score"
-    deploy("local-chunk", d, nchunks=3)
-
-    # Each chunk is an independent, parallel-runnable script that discovers its own range.
-    for i in (1, 2, 3):
-        body = (d / f"chunk{i}.sh").read_text()
-        assert f"IDX={i}" in body
-        assert "PoseReader.get_nposes" in body
-        assert '"$FIRST"' in body and '"$LAST"' in body
-        assert "np.concatenate" not in body
-
-    # The organize step concatenates the chunk scores via the memory-safe helper, and
-    # requires them to cover the input pool exactly.
-    organize = (d / "organize.sh").read_text()
-    assert "score_concat.py" in organize
-    assert "PoseReader.get_nposes" in organize
-    assert '--nposes "$TOTAL"' in organize
-    assert "np.concatenate" not in organize
-    assert "result_sidecar.py array" not in organize
-    assert "score.npy.CHECKSUM ../CACHE/checksum/" in organize
-
-    # run.sh is only a convenience wrapper: chunks one-by-one, then organize.
-    run_sh = (d / "run.sh").read_text()
-    assert "./check.sh" in run_sh
-    for i in (1, 2, 3):
-        assert f"bash ./chunk{i}.sh" in run_sh
-    assert "bash ./organize.sh" in run_sh
-    # The per-chunk body must NOT be inlined into run.sh.
-    assert "PoseReader.get_nposes" not in run_sh
 
 
-def test_score_deploy_defaults_to_compiled_kernel(tmp_path: Path) -> None:
-    _write_project(tmp_path)
-    project = Project.discover(tmp_path)
-    sigils = compute_project_sigils(project)
-
-    d = tmp_path / "frag4-score"
-    deploy("local", d)
-    body = (d / "run.sh").read_text()
-    assert "\n  compiled \\\n" in body
-    assert "\n  jax \\\n" not in body
-    assert f"ln -s ../CACHE/results/{sigils['frag4-score']} results" in body
-    assert f"cp ../CACHE/checksum/{sigils['frag4-score']} result.txt" in body
 
 
 def test_anchor_test_requires_nconformers_or_conformer(tmp_path: Path) -> None:
@@ -291,6 +249,8 @@ def test_anchor_test_requires_nconformers_or_conformer(tmp_path: Path) -> None:
         "protein": "dom",
         "resid": 1,
         "nucleotide": "first",
+        "precomputed_filter_name": "gaussian-rrm",
+        "precomputed_filter_threshold": "rrm50",
     }
 
     with pytest.raises(SchemaError, match="exactly one of nconformers or conformer"):
@@ -316,6 +276,8 @@ def test_anchor_test_deploy_renders_single_conformer(tmp_path: Path) -> None:
                 "protein": "dom",
                 "resid": 1,
                 "nucleotide": "first",
+                "precomputed_filter_name": "gaussian-rrm",
+                "precomputed_filter_threshold": "rrm50",
                 "conformer": 7,
             },
             sort_keys=False,
@@ -344,6 +306,8 @@ def test_anchor_test_single_conformer_chunk_deploys_once(tmp_path: Path) -> None
                 "protein": "dom",
                 "resid": 1,
                 "nucleotide": "first",
+                "precomputed_filter_name": "gaussian-rrm",
+                "precomputed_filter_threshold": "rrm50",
                 "conformer": 7,
             },
             sort_keys=False,
@@ -372,6 +336,8 @@ def test_grow_deploy_renders_restrict_input(tmp_path: Path) -> None:
                 "protein": "dom",
                 "resid": 1,
                 "nucleotide": "first",
+                "precomputed_filter_name": "gaussian-rrm",
+                "precomputed_filter_threshold": "rrm50",
                 "nconformers": 1,
             },
             sort_keys=False,
@@ -466,19 +432,6 @@ def test_grow_test_deploy_renders_single_conformer(tmp_path: Path) -> None:
     assert (tmp_path / "CACHE" / "parameters" / sigil).is_file()
 
 
-def test_filter_deploy_compresses_both_routes(tmp_path: Path) -> None:
-    """Every pose-producing action writes compressed poses; filter is no exception."""
-    _write_project(tmp_path)
-    project = Project.discover(tmp_path)
-    compute_project_sigils(project)
-    action = ActionGraph(project).build()["frag4-filter"]
-
-    for deployer in ("local", "remote"):
-        body = generate_run_sh(project, action, deployer)
-        # both routes are rendered into the script: select-poses.py for a mask input,
-        # filter-poses.py for a score threshold, and each one asks for compression
-        assert "select-poses.py" in body and "filter-poses.py" in body, deployer
-        assert body.count("--compress") == 2, deployer
 
 
 def test_grow_deploy_propagates_auto_pdb_exclude(tmp_path: Path) -> None:
@@ -494,55 +447,15 @@ def test_grow_deploy_propagates_auto_pdb_exclude(tmp_path: Path) -> None:
     assert "--pdb-exclude 1abc" in files["chunk1.sh"]
 
 
-def test_score_chunk_deploy_defaults_to_compiled_kernel(tmp_path: Path) -> None:
-    _write_project(tmp_path)
-    project = Project.discover(tmp_path)
-    sigils = compute_project_sigils(project)
-
-    d = tmp_path / "frag4-score"
-    deploy("local-chunk", d, nchunks=2)
-    body = (d / "chunk1.sh").read_text()
-    assert "\n  compiled \\\n" in body
-    assert "\n  jax \\\n" not in body
-    organize = (d / "organize.sh").read_text()
-    assert f"ln -s ../CACHE/results/{sigils['frag4-score']} results" in organize
-    assert f"cp ../CACHE/checksum/{sigils['frag4-score']} result.txt" in organize
 
 
-def test_remote_score_deploy_defaults_to_compiled_kernel(tmp_path: Path) -> None:
-    _write_project(tmp_path)
-    project = Project.discover(tmp_path)
-    sigils = compute_project_sigils(project)
-    action = ActionGraph(project).build()["frag4-score"]
-
-    body = generate_run_sh(project, action, "remote")
-    assert f'cd "${{ALARIC_REMOTE_DEPLOYMENT_DIR:?}}/SIGIL/{sigils["frag4-score"]}"' in body
-    assert "\n  compiled \\\n" in body
-    assert "\n  jax \\\n" not in body
-
-    files = generate_chunk_files(project, action, "remote-chunk", nchunks=2)
-    chunk = files["chunk1.sh"]
-    assert "\n  compiled \\\n" in chunk
-    assert "\n  jax \\\n" not in chunk
-    chunk_root = f"${{ALARIC_REMOTE_RESULT_DIR:?}}/{sigils['frag4-score']}-CHUNKS"
-    # The per-chunk dir is bound through SCORE_CHUNKS, defaulting to the shared FS so an
-    # independently submitted chunk still writes where the organize job can see it.
-    assert f'SCORE_CHUNKS="${{ALARIC_SCORE_CHUNKS_DIR:-{chunk_root}}}"' in chunk
-    assert "CHUNK_DIR=${SCORE_CHUNKS}/chunk-${IDX}" in chunk
-    assert '"$CHUNK_DIR/score.npy"' in chunk
-    assert "score_concat.py ${SCORE_CHUNKS} " in files["organize.sh"]
-    assert "--nchunks 2" in files["organize.sh"]
-    # organize.sh recomputes the pool size itself and requires the concat to cover it, so a
-    # chunk score left over from an earlier deploy at a different --nchunks cannot slip in.
-    assert "PoseReader.get_nposes" in files["organize.sh"]
-    assert '--nposes "$TOTAL"' in files["organize.sh"]
 
 
 def test_remote_deploy_uses_sigil_dir_and_project_alias(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write_project(tmp_path)
     project = Project.discover(tmp_path)
     sigils = compute_project_sigils(project)
-    action_dir = tmp_path / "frag4-filter"
+    action_dir = tmp_path / "frag5-fwd"
     calls: list[list[str]] = []
 
     def fake_run(args: list[str], **_kwargs: object) -> None:
@@ -557,9 +470,9 @@ def test_remote_deploy_uses_sigil_dir_and_project_alias(tmp_path: Path, monkeypa
 
     deploy("remote", action_dir)
 
-    sigil = sigils["frag4-filter"]
+    sigil = sigils["frag5-fwd"]
     assert ["ssh", "cluster", "mkdir", "-p", f"/remote/deploy/SIGIL/{sigil}", "/remote/deploy/DATA", "/remote/deploy/PROJECT"] in calls
-    assert ["ssh", "cluster", "ln", "-sfn", f"../SIGIL/{sigil}", "/remote/deploy/PROJECT/frag4-filter"] in calls
+    assert ["ssh", "cluster", "ln", "-sfn", f"../SIGIL/{sigil}", "/remote/deploy/PROJECT/frag5-fwd"] in calls
     assert ["ssh", "cluster", "ln", "-sfn", f"/remote/results/{sigil}", f"/remote/deploy/SIGIL/{sigil}/results"] in calls
     assert any(call[0] == "scp" and call[-1] == f"cluster:/remote/deploy/SIGIL/{sigil}/" for call in calls)
 
@@ -626,20 +539,6 @@ def test_remote_chunk_anchor_pool_defaults_to_shared_fs_and_run_sh_overrides(tmp
     assert f"mkdir -p {partial}" not in run_sh
 
 
-def test_remote_chunk_score_run_sh_redirects_chunk_dir(tmp_path: Path) -> None:
-    _write_project(tmp_path)
-    project = Project.discover(tmp_path)
-    compute_project_sigils(project)
-    action = ActionGraph(project).build()["frag4-score"]
-
-    files = generate_chunk_files(project, action, "remote-chunk", nchunks=2)
-
-    run_sh = files["run.sh"]
-    assert 'ALARIC_SCORE_CHUNKS_DIR="$(mktemp -d -p ' in run_sh
-    assert "export ALARIC_SCORE_CHUNKS_DIR" in run_sh
-    # score has no unorganized pool, so there are no pose sidecars to clean up.
-    assert 'trap \'rm -rf "${ALARIC_SCORE_CHUNKS_DIR}"\' EXIT' in run_sh
-    assert ".INDEX" not in run_sh
 
 
 def test_remote_grow_still_pools_on_the_shared_fs(tmp_path: Path) -> None:
@@ -676,7 +575,7 @@ def test_remote_chunk_deploy_warns_about_shared_fs(tmp_path: Path, capsys: pytes
     project = Project.discover(tmp_path)
     compute_project_sigils(project)
 
-    deploy("local-chunk", tmp_path / "frag4-score", nchunks=2)
+    deploy("local-chunk", tmp_path / "frag5-fwd", nchunks=2)
     assert capsys.readouterr().err == ""
 
     with pytest.raises(MiddleError):
@@ -692,7 +591,7 @@ def test_remote_chunk_python_paths_are_expandvars_compatible(tmp_path: Path) -> 
     _write_project(tmp_path)
     project = Project.discover(tmp_path)
     compute_project_sigils(project)
-    action = ActionGraph(project).build()["frag4-score"]
+    action = ActionGraph(project).build()["frag5-fwd"]
 
     files = generate_chunk_files(project, action, "remote-chunk", nchunks=3)
     body = "\n".join(files.values())
@@ -701,23 +600,13 @@ def test_remote_chunk_python_paths_are_expandvars_compatible(tmp_path: Path) -> 
     assert "os.path.expandvars('${ALARIC_REMOTE_RESULT_DIR:?}" not in body
 
 
-def test_score_add_and_mask_validate_shapes(tmp_path: Path) -> None:
-    a = tmp_path / "a.npy"
-    b = tmp_path / "b.npy"
+def test_mask_action_accepts_a_numeric_score_array(tmp_path: Path) -> None:
     out = tmp_path / "out.npy"
-    np.save(a, np.array([1.0, 2.0, 3.0]))
-    np.save(b, np.array([4.0, 5.0, 6.0]))
-    assert score_add_main([str(a), str(b), str(out)]) == 0
-    np.testing.assert_array_equal(np.load(out), np.array([5.0, 7.0, 9.0]))
-
+    np.save(out, np.array([5.0, 7.0, 9.0]))
     mask_out = tmp_path / "mask.npy"
     assert mask_main([str(out), "8.0", str(mask_out)]) == 0
     mask = np.load(mask_out)
     assert mask.ndim == 1
-
-    np.save(b, np.array([1.0]))
-    with pytest.raises(ValueError):
-        score_add_main([str(a), str(b), str(out)])
 
 
 def test_mask_action_compresses_but_keeps_the_logical_result_name(tmp_path: Path) -> None:
@@ -746,7 +635,7 @@ def test_mask_deploy_asks_for_compression(tmp_path: Path) -> None:
             {
                 "action": "mask",
                 "input": "frag4-anchor",
-                "score_input": "frag4-score",
+                "score_input": "frag4-rmsd",
                 "threshold": -1.0,
             },
             sort_keys=False,
@@ -804,13 +693,12 @@ def test_mask_common_conformer_action_renders_two_pool_backend(tmp_path: Path) -
         (tmp_path / name / "alaric.yaml").write_text(
             yaml.safe_dump(
                 {
-                    "action": "anchor",
+                    "action": "anchor-refe",
                     "fragment": 5,
                     "sequence": "UU",
                     "exclude": "auto",
-                    "protein": "dom",
-                    "resid": 1,
                     "nucleotide": "first",
+                    "ovrmsd": 1.0,
                 },
                 sort_keys=False,
             )
@@ -830,89 +718,12 @@ def test_mask_common_conformer_action_renders_two_pool_backend(tmp_path: Path) -
     assert "result_sidecar.py pose" in body
 
 
-def test_filter_selects_matching_mask_common_conformer_output(tmp_path: Path) -> None:
-    _write_project(tmp_path)
-    for name in ("frag5-anchor-bwd", "frag5-anchor-fwd"):
-        (tmp_path / name).mkdir()
-        (tmp_path / name / "alaric.yaml").write_text(
-            yaml.safe_dump(
-                {
-                    "action": "anchor",
-                    "fragment": 5,
-                    "sequence": "UU",
-                    "exclude": "auto",
-                    "protein": "dom",
-                    "resid": 1,
-                    "nucleotide": "first",
-                },
-                sort_keys=False,
-            )
-        )
-    (tmp_path / "frag5-common-conformer").mkdir()
-    (tmp_path / "frag5-common-conformer" / "alaric.yaml").write_text(
-        "action: mask-common-conformer\ninput1: frag5-anchor-bwd\ninput2: frag5-anchor-fwd\n"
-    )
-    (tmp_path / "frag5-anchor-bwd-filtered").mkdir()
-    (tmp_path / "frag5-anchor-bwd-filtered" / "alaric.yaml").write_text(
-        "action: filter\ninput: frag5-anchor-bwd\nmask_input: frag5-common-conformer\nmask: 1\n"
-    )
-    project = Project.discover(tmp_path)
-    compute_project_sigils(project)
-    action = ActionGraph(project).build()["frag5-anchor-bwd-filtered"]
-
-    body = generate_run_sh(project, action, "local")
-    assert "/mask1.npy" in body
-
-    (tmp_path / "frag5-anchor-bwd-filtered" / "alaric.yaml").write_text(
-        "action: filter\ninput: frag5-anchor-bwd\nmask_input: frag5-common-conformer\nmask: 2\n"
-    )
-    with pytest.raises(GraphError, match="must select the mask"):
-        ActionGraph(Project.discover(tmp_path)).build()
 
 
-def test_score_concat_requires_all_expected_chunks(tmp_path: Path) -> None:
-    chunks = tmp_path / "chunks"
-    (chunks / "chunk-1").mkdir(parents=True)
-    np.save(chunks / "chunk-1" / "score.npy", np.array([1.0], dtype=np.float32))
-
-    with pytest.raises(FileNotFoundError):
-        score_concat_main([str(chunks), str(tmp_path / "score.npy"), "--nchunks", "2"])
 
 
-def test_score_concat_rejects_chunks_that_do_not_cover_the_pool(tmp_path: Path) -> None:
-    # A chunk score left behind by an earlier deploy at a different --nchunks covers the
-    # wrong pose range; --nposes is what stops it from being folded in silently.
-    chunks = tmp_path / "chunks"
-    for idx, values in enumerate(
-        (np.array([1.0, 2.0], dtype=np.float32), np.array([3.0], dtype=np.float32)), start=1
-    ):
-        chunk = chunks / f"chunk-{idx}"
-        chunk.mkdir(parents=True)
-        np.save(chunk / "score.npy", values)
-
-    output = tmp_path / "score.npy"
-    with pytest.raises(ValueError, match="cover 3 poses, expected 4"):
-        score_concat_main([str(chunks), str(output), "--nchunks", "2", "--nposes", "4"])
-    assert not output.exists()
-
-    # The matching count still goes through.
-    assert score_concat_main([str(chunks), str(output), "--nchunks", "2", "--nposes", "3"]) == 0
-    np.testing.assert_array_equal(np.load(output), np.array([1.0, 2.0, 3.0], dtype=np.float32))
 
 
-def test_score_concat_writes_checksum_while_copying(tmp_path: Path) -> None:
-    chunks = tmp_path / "chunks"
-    for idx, values in enumerate(
-        (np.array([1.0, 2.0], dtype=np.float32), np.array([3.0], dtype=np.float32)), start=1
-    ):
-        chunk = chunks / f"chunk-{idx}"
-        chunk.mkdir(parents=True)
-        np.save(chunk / "score.npy", values)
-
-    output = tmp_path / "score.npy"
-    assert score_concat_main([str(chunks), str(output), "--nchunks", "2", "--block", "1"]) == 0
-    np.testing.assert_array_equal(np.load(output), np.array([1.0, 2.0, 3.0], dtype=np.float32))
-    assert (tmp_path / "score.npy.CHECKSUM").read_text().strip() == byte_checksum(output)
 
 
 def test_checksum_is_zstd_transparent(tmp_path: Path) -> None:
@@ -969,7 +780,11 @@ def test_provenance_download_merges_into_an_existing_result(tmp_path: Path, monk
     (tmp_path / "DATA").mkdir()
     action = tmp_path / "frag1-filter"
     action.mkdir()
-    (action / "alaric.yaml").write_text("action: filter\ninput: frag1-input\nmask_input: mask\n")
+    (action / "alaric.yaml").write_text(
+        "action: energy-filter\ninput: frag1-input\nfragment: 1\nsequence: AA\n"
+        "exclude: []\nprotein: range-1\nthreshold: 0.0\nepsilon: 15\n"
+        "cascade: []\nmin_cascade: 0\n"
+    )
     # Only the project/action/sigil lifecycle matters here; do not resolve the action graph.
     sigil = "test-sigil"
     (action / "sigil.txt").write_text(sigil + "\n")

@@ -58,14 +58,20 @@ def _rotvecs_for(rotaconformers: np.ndarray) -> np.ndarray:
     raise ValueError(f"Unsupported rotamer shape {rotaconformers.shape}")
 
 
-def _load_library(sequence: str):
+def _load_library(sequence: str, excluded_pdb_codes: list[str] | None = None):
     from library import config
     libraries, _ = config(verify_checksums=False)
     if sequence not in libraries:
         raise ValueError(f"Sequence {sequence} not in fragment library")
     lib_source = libraries[sequence]
     lib_source.load_rotaconformers()
-    return lib_source.create(None, with_rotaconformers=True)
+    excluded = [str(code).lower() for code in (excluded_pdb_codes or [])]
+    pdb_filter: str | list[str] | None = None
+    if len(excluded) == 1:
+        pdb_filter = excluded[0]
+    elif excluded:
+        pdb_filter = excluded
+    return lib_source.create(pdb_filter, with_rotaconformers=True)
 
 
 def _process_chunk(
@@ -113,6 +119,7 @@ def convert_arc_dir(
     pose_dir: Path,
     pose_range: tuple[int, int] | None,
     sequence: str,
+    excluded_pdb_codes: list[str] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return (rotvec_dofs, conformers).
 
@@ -122,7 +129,7 @@ def convert_arc_dir(
     """
     from poses import PoseReader
 
-    lib = _load_library(sequence)
+    lib = _load_library(sequence, excluded_pdb_codes)
     rotvec_cache: dict[int, np.ndarray] = {}
     rotvec_chunks: list[np.ndarray] = []
     conf_chunks: list[np.ndarray] = []
@@ -156,6 +163,8 @@ def main() -> None:
                     help="Dinucleotide sequence (e.g. GU)")
     ap.add_argument("--output-prefix", required=True,
                     help="Output prefix (no extension)")
+    ap.add_argument("--pdb-exclude", action="append", default=[],
+                    help="PDB code to exclude from the conformer library (repeatable)")
     args = ap.parse_args()
 
     pose_range = None
@@ -169,6 +178,7 @@ def main() -> None:
         Path(args.pose_dir),
         pose_range,
         args.sequence,
+        args.pdb_exclude,
     )
 
     prefix = args.output_prefix

@@ -1,0 +1,4 @@
+action: filter
+input: frag6-fwd
+score_input: frag6-fwd-score
+threshold: -16.59

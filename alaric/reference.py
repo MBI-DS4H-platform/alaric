@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import numpy as np
 
+try:
+    from .backbone import MAX_BACKBONE_BOND_DISTANCE, peptide_link_is_continuous
+except ImportError:  # pragma: no cover - direct CLI import
+    from backbone import MAX_BACKBONE_BOND_DISTANCE, peptide_link_is_continuous
+
 from library import load_mononucleotide_templates
 from rna_pdb import ppdb2nucseq
 
@@ -98,6 +103,24 @@ class Reference:
         self.sequence = "".join(sequence)
         self._coordinates = coordinates
         self._resids = resids
+        self._continuous_links = []
+        for index in range(max(0, len(resids) - 1)):
+            if resids[index + 1] != resids[index] + 1:
+                self._continuous_links.append(False)
+                continue
+            left_template = mononucleotide_templates[sequence[index]]
+            right_template = mononucleotide_templates[sequence[index + 1]]
+            o3_index = _template_atom_index(left_template, {"O3'", "O3*"})
+            p_index = _template_atom_index(right_template, {"P"})
+            if o3_index is None or p_index is None:
+                self._continuous_links.append(False)
+                continue
+            self._continuous_links.append(
+                peptide_link_is_continuous(
+                    {"O3'": coordinates[index][o3_index]},
+                    {"P": coordinates[index + 1][p_index]},
+                )
+            )
 
     def get_fragment_positions(self, fraglen: int) -> list[int]:
         """Return 1-based positions for all contiguous valid fragments."""
@@ -107,7 +130,12 @@ class Reference:
             first = resids[0]
             if resids != list(range(first, first + fraglen)):
                 continue
-            result.append(first - self._resids[0] + 1)
+            if not self._has_continuous_backbone(pos0, fraglen):
+                continue
+            # Fragment numbers describe positions in the prepared RNA sequence,
+            # not PDB residue labels.  A numbering gap leaves a hole while all
+            # later fragment numbers retain their ordinal value.
+            result.append(pos0 + 1)
         return result
 
     def get_resids(self, fragment_position: int, fraglen: int) -> list[int]:
@@ -131,14 +159,39 @@ class Reference:
     def _get_pos(self, fragment_position: int, fraglen: int) -> int:
         if not self._resids:
             raise ValueError("Reference contains no valid nucleotides")
-        offset = self._resids[0]
-        first_resid = offset + fragment_position - 1
-        try:
-            pos = self._resids.index(first_resid)
-        except ValueError:
+        if fragment_position < 1:
             raise ValueError("Not a valid fragment") from None
+        pos = fragment_position - 1
+        if pos + fraglen > len(self._resids):
+            raise ValueError("Not a valid fragment")
+        first_resid = self._resids[pos]
         if self._resids[pos : pos + fraglen] != list(
             range(first_resid, first_resid + fraglen)
         ):
             raise ValueError("Not a valid fragment")
+        if not self._has_continuous_backbone(pos, fraglen):
+            raise ValueError("Not a valid fragment: RNA backbone is discontinuous")
         return pos
+
+    def _has_continuous_backbone(self, pos: int, fraglen: int) -> bool:
+        if fraglen <= 1:
+            return True
+        links = getattr(self, "_continuous_links", None)
+        if links is None:
+            # A lightweight Reference assembled from already-validated positions
+            # may not carry coordinates; retain the residue-number continuity rule.
+            return all(
+                self._resids[index + 1] == self._resids[index] + 1
+                for index in range(pos, pos + fraglen - 1)
+            )
+        return len(links) >= pos + fraglen - 1 and all(
+            links[index] for index in range(pos, pos + fraglen - 1)
+        )
+
+
+def _template_atom_index(template: np.ndarray, names: set[str]) -> int | None:
+    for index, raw_name in enumerate(template["name"]):
+        atom_name = bytes(raw_name).decode(errors="replace").strip().replace("*", "'")
+        if atom_name in names:
+            return index
+    return None

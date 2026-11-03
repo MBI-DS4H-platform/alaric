@@ -27,14 +27,14 @@ CODE = {
     "refe-best-fit.DEPS": {
         "refe-best-fit.py", "refe_best_fit_seamless_support.py",
         *{f"../alaric/{name}.py" for name in
-          ("library", "parse_pdb", "reference", "superimpose", "write_pdb", "rna_pdb", "mutate")}},
+          ("library", "parse_pdb", "reference", "backbone", "superimpose", "write_pdb", "rna_pdb", "mutate")}},
     "refe-fragments.DEPS": {
         "refe-fragments.py", "../alaric/parse_pdb.py", "../alaric/rna_pdb.py",
-        "../alaric/write_pdb.py"},
+        "../alaric/backbone.py", "../alaric/write_pdb.py"},
     "refe-best-fit-tables.DEPS": {
         "refe-best-fit-tables.py", "refe-best-fit-pairs.py", "refe-best-fit-bases.py",
         *{f"../alaric/{name}.py" for name in
-          ("library", "parse_pdb", "reference", "rna_pdb", "superimpose", "mutate")}},
+          ("library", "parse_pdb", "reference", "backbone", "rna_pdb", "superimpose", "mutate")}},
     "refe-thresholds.DEPS": {"refe-thresholds.py", "../alaric/threshold_rounding.py"},
 }
 

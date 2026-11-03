@@ -1,15 +1,12 @@
-"""Stream an organized pose dir through a selector into a new organized pose dir.
+"""Stream an organized pose dir through an index or mask selector.
 
-Both routes of the middle-level ``filter`` action land here: filtering on a score
-threshold (``filter-poses.py``) and selecting by mask/index array (``select-poses.py``).
-
-Scale is the whole design. A pool holds tens of gigaposes with a per-pose score array to
-match -- 15 gigaposes is a 60 GB float32 score file -- so nothing here may build a
+Scale is the whole design. A pool holds tens of gigaposes with a per-pose mask array to
+match -- 15 gigaposes is a 15 GB boolean mask -- so nothing here may build a
 per-pose array of the *input*, in Python or in NumPy. Instead:
 
 * poses are read in bounded chunks straight off the ``.arc`` stream;
 * the selector is asked only about the pose range currently in hand, so it reads only
-  the matching slice of its score/mask file;
+  the matching slice of its mask file;
 * only the *kept* poses are ever materialized, and they go straight into a
   ``PoseWriter`` shard.
 
@@ -54,7 +51,7 @@ from poses import (
 
 
 # Working-set size per step, not a filesystem request size: the pose stream and the
-# score/mask array each read ahead in much larger blocks (poses.ARC_STREAM_READ_SIZE,
+# mask array each read ahead in much larger blocks (poses.ARC_STREAM_READ_SIZE,
 # npy_io.RANGE_READ_BLOCK), so this can stay small enough to keep the per-chunk arrays
 # cheap.
 DEFAULT_CHUNK_POSES = 1_000_000
@@ -96,7 +93,7 @@ class _RangeSource:
     """Range reads from a per-pose array given either as a .npy path or as an array.
 
     A path is read with ``os.pread`` and never mapped -- that is the pool-scale case (a
-    60 GB score file). An array (typically a mapping of a decompressed one, see
+    large mask file). An array (typically a mapping of a decompressed one, see
     :func:`open_range_source`) is simply sliced.
     """
 
@@ -141,25 +138,6 @@ def open_range_source(path: str | Path, stack: contextlib.ExitStack):
     if not is_compressed(resolved):
         return resolved
     return stack.enter_context(open_npy_mmap(resolved))
-
-
-class ScoreThresholdSelector:
-    """Keep poses whose score is below a threshold."""
-
-    tagged = False
-
-    def __init__(self, scores, threshold: float) -> None:
-        self._source = _RangeSource(scores)
-        if not np.issubdtype(self._source.dtype, np.number):
-            raise ValueError(f"{self._source.name}: score array must be numeric")
-        self.threshold = float(threshold)
-
-    def __len__(self) -> int:
-        return len(self._source)
-
-    def kept(self, start: int, stop: int) -> tuple[np.ndarray, np.ndarray | None]:
-        scores = self._source.read(start, stop)
-        return np.flatnonzero(scores < self.threshold), None
 
 
 class BoolMaskSelector:
@@ -436,7 +414,7 @@ def filter_pose_dir(
                 ctx.Pool(workers, initializer=_init_worker, initargs=(state,))
             )
             # Hand out *contiguous* runs of files. Tasks are in pose order, so a run is
-            # one contiguous span of the score/mask file: each worker then reads it as a
+            # one contiguous span of the mask file: each worker then reads it as a
             # long sequential stream instead of interleaving with the others, which is
             # what a network filesystem serves best. Several batches per worker so a
             # straggler still leaves work for the others to pick up.

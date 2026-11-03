@@ -167,7 +167,7 @@ def _pair_thresholds(project: Project, source_fragment: int, target_fragment: in
 
 def _resolve_precomputed_filter_directory(project: Project, filter_name: str, threshold: str) -> Path:
     """Resolve a Gaussian cache through the committed A7 directory declaration."""
-    if filter_name != "gaussian":
+    if filter_name != "gaussian-rrm":
         raise ResolveError(f"unsupported precomputed filter family {filter_name!r}")
     spec = _gaussian_filter_spec()
     try:
@@ -245,13 +245,8 @@ def resolve_action(
     action = spec.action
     if "fragment" in p:
         p["fragment"] = resolve_fragment(p["fragment"], spec.name)
-    if action in {"anchor", "anchor-test", "anchor-refe", "grow", "grow-test"} and p.get("sequence") == "auto":
+    if action in {"anchor", "anchor-test", "anchor-refe", "grow", "grow-test", "energy-filter"} and p.get("sequence") == "auto":
         p["sequence"] = resolve_sequence(project, int(p["fragment"]))
-    if action == "score" and p.get("sequence") == "auto":
-        dep = resolved_by_name.get(str(p["input"]))
-        if dep is None:
-            raise ResolveError(f"{spec.name}: score sequence:auto needs resolved input")
-        p["sequence"] = final_sequence(dep)
     if p.get("exclude") == "auto" or "exclude" in p:
         p["exclude"] = resolve_exclude(project, p["exclude"])
     if "protein" in p:
@@ -338,6 +333,32 @@ def resolve_action(
         p["reference"] = ref_path.name
         p["__reference"] = ref_path.name
         files["reference"] = ref_path
+    if action == "energy-filter":
+        from ..energy_filter import load_threshold, resolve_config
+
+        if p.get("threshold") == "auto":
+            threshold_path = project.data_dir / "energy-thresholds.json"
+            try:
+                p["threshold"] = load_threshold(
+                    threshold_path,
+                    int(p["fragment"]),
+                    str(p["sequence"]),
+                    str(p["protein"]),
+                )
+            except (OSError, ValueError, KeyError) as exc:
+                raise ResolveError(f"{spec.name}: {exc}") from exc
+            p["__threshold_file"] = threshold_path.name
+            files["energy-thresholds"] = threshold_path
+        if p.get("cascade") == "auto" or p.get("min_cascade") == "auto":
+            defaults_path = project.data_dir / "score-filter.yaml"
+            try:
+                p["cascade"], p["min_cascade"] = resolve_config(
+                    p["cascade"], p["min_cascade"], defaults_path
+                )
+            except (OSError, ValueError) as exc:
+                raise ResolveError(f"{spec.name}: {exc}") from exc
+            p["__score_filter_file"] = defaults_path.name
+            files["score-filter"] = defaults_path
     return ResolvedAction(spec.name, spec.path, action, p, files)
 
 

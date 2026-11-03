@@ -16,6 +16,7 @@ if str(ALARIC_DIR) not in sys.path:
 
 from parse_pdb import parse_pdb  # noqa: E402
 from rna_pdb import ppdb2nucseq  # noqa: E402
+from backbone import peptide_link_is_continuous  # noqa: E402
 from write_pdb import write_pdb  # noqa: E402
 
 
@@ -61,6 +62,11 @@ def write_reference_fragments(
     written = []
     for residue_index in range(len(sequence) - 1):
         if residues[residue_index + 1] != residues[residue_index] + 1:
+            continue
+        if not peptide_link_is_continuous(
+            atoms_by_residue[residue_index].values(),
+            atoms_by_residue[residue_index + 1].values(),
+        ):
             continue
         fragment_sequence = sequence[residue_index : residue_index + 2]
         fragment_number = residue_index + 1

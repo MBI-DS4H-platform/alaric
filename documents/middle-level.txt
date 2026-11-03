@@ -29,8 +29,8 @@ nucleotide: first or second
 
 Anchoring uses precomputed ring-level filters only (brute-force angle/dihedral anchoring has been removed):
 
-precomputed_filter_name: gaussian [required]
-precomputed_filter_threshold: rrm50, rrm60, rrm70, rrm80, rrm90, rrm95, or a variant such as rrm95-tilt30, rrm95-disp45, rrm95-tilt30-disp45 (same for rrm90) [required; loads from ./precomputed-filters/gaussian/<threshold>/*.npy(.zst); see alaric/gaussian_stacking_filter.json. Generate with util/gaussian-precalc.py <threshold>]
+precomputed_filter_name: gaussian-rrm [required]
+precomputed_filter_threshold: rrm50, rrm60, rrm70, rrm80, rrm90, rrm95, or a variant such as rrm95-tilt30, rrm95-disp45, rrm95-tilt30-disp45 (same for rrm90) [required; see alaric/gaussian_stacking_filter.json]
 
 ## anchor-refe
 
@@ -46,12 +46,6 @@ nucleotide: first or second
 ovrmsd: 0.75, or auto (read from ../DATA/anchor.yaml)
 reference: reference.pdb (default). Read from ../DATA
 
-## score
-
-This is a scoring action. This action dir can only be a score_input. Generates not poses but a 1D score.npy file
-sequence, protein, exclude: see "anchor"
-input: frag4-fwd-filtered . Name of action dir
-
 ## rmsd
 
 This is a scoring action. This action dir can only be a score_input. Generates not poses but a 1D score.npy file
@@ -60,12 +54,26 @@ fragment, exclude: see "anchor"
 input: frag4-fwd-filtered . Name of action dir
 
 
-## score_add
+## energy-filter
 
-This is a scoring action. This action dir can only be a score_input. Generates not poses but a 1D score.npy file
-score_input1: name of scoring action dir
-score_input2: name of scoring action dir
-Both scoring dirs must have the same input
+Scores one pose input against exactly one protein range and retains poses whose gridless
+energy is strictly below the numeric threshold. The grid cascade is an accelerator; poses
+still in the uncertainty band are decided by gridless scoring. Repeated ranges are separate
+energy-filter actions connected in sequence, so the result is an AND across ranges.
+
+input: name of a pose action dir
+fragment: 5 or auto (read from dirname "frag5-X")
+sequence: UU or auto (read from DATA/sequence.txt or DATA/reference.pdb)
+exclude: 1b7f or auto (read from DATA/pdbcode.txt)
+protein: range-2 [exactly one range-K]
+threshold: -16.59 or auto (read from DATA/energy-thresholds.json)
+epsilon: 15
+cascade: list of plateau_distance, neighbour_distance, max_error steps, or auto
+min_cascade: non-negative integer, or auto (cascade settings read from DATA/score-filter.yaml)
+
+Grid instances are reused within one energy-filter action by the tuple
+(protein range, plateau distance, neighbour distance). The runtime is service-free; it does
+not promise grid reuse across action processes or restarts.
 
 
 ## mask
@@ -77,21 +85,6 @@ score_input: name of scoring action dir
 threshold: 0.23 or "auto" (try to extract from constraints.json)
 The score_input.input must be equal to the input
 
-
-## filter
-
-input: name of action dir
-score_input: name of scoring action dir
-threshold: 0.23 or "auto" (try to extract from constraints.json)
-mask_input: name of mask action dir.
-score_input+threshold XOR mask_input must be defined.
-The score_input.input or mask_input.input must be equal to the input
-
-Both routes read the pool and the score/mask array piecemeal and filter in parallel per
-organized input file (see alaric/pose_filter.py), so memory does not scale with the pool.
-The score route also writes provenance.npy (uint64 input pose ids); the mask route writes
-order-array.npy (the request position of each organized pose) unless the input is a
-boolean mask, in which case pose order is unchanged and no order array is needed.
 
 ## grow
 
@@ -137,14 +130,10 @@ conformer array; after each mask is written, that pool's conformers and mask are
 input1: frag5-anchor-bwd . Name of the first pose action dir
 input2: frag5-anchor-fwd . Name of the second pose action dir
 
-Use either output in a mask-based `filter` by selecting it explicitly. The selected mask
-must correspond to the filter input:
+Use either output with `select-poses.py`, selecting the corresponding input pool explicitly:
 
 ```
-action: filter
-input: frag5-anchor-bwd
-mask_input: frag5-common-conformer
-mask: 1
+python alaric/select-poses.py POSE_DIR mask.npy OUTPUT_DIR --base 0
 ```
 
 
@@ -176,7 +165,7 @@ This requires that result.txt is not present in the action dir.
 Pre-checking: first look for the file ./CACHE/checksum/[SIGIL] and if it exists, copy it to result.txt and exit. 
 Chunk deployers insert a third parameter nchunks: alaric-deploy <chunk-deployer> nchunks [action dir].
 There are four deployers: local, local-chunk, remote, remote-chunk
-All deployers take a bash template from ./templates/[deployer]/[action].sh and fill in parameters.
+Local deployers take a bash template from ./templates/[deployer]/[action].sh and fill in parameters.
 
 ##  Local deployment
 
@@ -214,14 +203,13 @@ The check.sh is written as well.
 Chunk deployers generate N=1..nchunks chunkN.sh scripts. For grow.py, they generate an organize.sh script.
 For local deployment, they generate a run.sh that calls all chunkN.sh and then the organize.sh in tandem.
 In the templates, non-load-bearing parameters are present in commented-out form.
-In general, compression is always enabled: poses (grow/anchor/organize/filter/identity),
+In general, compression is always enabled: poses (grow/anchor/organize/identity),
 the per-pose index arrays that travel with them (provenance.npy.zst, map-*.npy.zst,
 order-array.npy.zst), and mask.npy.zst. Compression is transparent for checksums and for
 readers, which resolve either form, so it changes neither a result checksum nor a sigil;
 a consumer (and the sidecar step) is always given the logical, uncompressed name.
 
-score.npy is the deliberate exception: it is consumed by memory-mapped streaming
-(filter-poses, score_concat) at gigapose scale, and float energies compress poorly.
+The RMSD result array is stored as score.npy and may be memory-mapped by downstream tools.
 
 # alaric-result-clean
 

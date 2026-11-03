@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shlex
 import re
 from pathlib import Path
@@ -16,7 +17,6 @@ SCRATCH_EXPR = "${ALARIC_REMOTE_SCRATCH_DIR:-${TMPDIR:-/tmp}}"
 # independently submitted chunkN.sh jobs require: they run on different nodes than the
 # organize job, so a node-local pool would be invisible to it.
 POOL_ENV_VAR = "ALARIC_UNORGANIZED_DIR"
-SCORE_CHUNKS_ENV_VAR = "ALARIC_SCORE_CHUNKS_DIR"
 
 
 def q(value: str | Path | int | float) -> str:
@@ -72,10 +72,6 @@ def exclude_args(values: list[str], flag: str = "--pdb-exclude") -> str:
     if not values:
         return ""
     return " ".join([q(flag), *[q(v) for v in values]])
-
-
-def score_exclude_args(values: list[str]) -> str:
-    return " ".join(f"-x {q(v)}" for v in values)
 
 
 def python_bin() -> str:
@@ -140,27 +136,6 @@ def organize_command(alaric_dir: str, output_dir: str, location: str, *, pool: s
     return "\n".join(lines)
 
 
-def score_concat_command(alaric_dir: str, output_dir: str, chunks_dir: str, location: str) -> str:
-    # Memory-safe concat of the per-chunk score.npy files (memmap streaming, not
-    # np.concatenate). On remote, point the staging dir at node-local scratch via TMPDIR so
-    # the output file is built locally and then copied to the final (network FS) destination.
-    #
-    # --nposes is load-bearing: the chunk dir is keyed on the sigil alone and survives a
-    # failed attempt, so a chunk score written by an earlier deploy at a different --nchunks
-    # can still be sitting there when this one runs. Requiring the concatenation to cover the
-    # input pool exactly turns that into an error instead of a wrong result. $TOTAL is
-    # computed by the organize body, the same way each chunk computes its own range.
-    lines: list[str] = []
-    if location == "remote":
-        lines.append(f'export TMPDIR="{SCRATCH_EXPR}"')
-    lines.append(
-        f"{python_bin()} {alaric_dir}/score_concat.py {shell_path(chunks_dir)} "
-        f"{shell_path(f'{output_dir}/score.npy')} --nposes \"$TOTAL\" --nchunks "
-        + "{{ nchunks }}"
-    )
-    return "\n".join(lines)
-
-
 def conformer_range_args(p: dict[str, Any]) -> str:
     if "conformer" in p:
         conformer = q(p["conformer"])
@@ -199,6 +174,7 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
         context.update(
             {
                 "protein_path": data_file_path(p["__protein"], location),
+                "protein_range": q(p["protein"]),
                 "resid": q(p["resid"]),
                 "sequence": q(p["sequence"]),
                 "nucleotide_flag": "--first" if p["nucleotide"] == "first" else "--second",
@@ -249,19 +225,23 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
                 "organize_command": organize_command(alaric_dir, output_dir, location),
             }
         )
-    elif action.action == "score":
-        chunks_dir = f"{output_dir.removesuffix('.partial')}-CHUNKS"
+    elif action.action == "energy-filter":
+        cascade_json = json.dumps(p["cascade"], separators=(",", ":"))
         context.update(
             {
-                "score_exclude_args": score_exclude_args(p.get("exclude", [])),
                 "input_result_path": shell_path(dep_result_path(p["input"], location)),
-                "input_result_python": python_path(dep_result_path(p["input"], location)),
-                "sequence": q(p["sequence"]),
                 "protein_path": data_file_path(p["__protein"], location),
-                "nb_kernel": q(p.get("nb_kernel", "compiled")),
-                "score_output_path": shell_path(f"{output_dir}/score.npy"),
-                "score_chunks_path": shell_path(chunks_dir),
-                "score_concat_command": score_concat_command(alaric_dir, output_dir, chunks_dir, location),
+                "protein_range": q(p["protein"]),
+                "sequence": q(p["sequence"]),
+                "fragment": q(p["fragment"]),
+                "exclude_args": exclude_args(p.get("exclude", [])),
+                "threshold": q(p["threshold"]),
+                "epsilon": q(p["epsilon"]),
+                "cascade_json": q(cascade_json),
+                "min_cascade": q(p["min_cascade"]),
+                "nprocs": q(p.get("nprocs", 1)),
+                "chunk_poses": q(p.get("chunk_poses", 10000)),
+                "output_path": shell_path(output_dir),
             }
         )
     elif action.action == "rmsd":
@@ -274,14 +254,6 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
                 "exclude_args": exclude_args(p.get("exclude", [])),
             }
         )
-    elif action.action == "score_add":
-        context.update(
-            {
-                "score_input1_path": shell_path(result_file(p["score_input1"], location)),
-                "score_input2_path": shell_path(result_file(p["score_input2"], location)),
-                "score_output_path": shell_path(f"{output_dir}/score.npy"),
-            }
-        )
     elif action.action == "mask":
         context.update(
             {
@@ -290,22 +262,6 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
                 "mask_output_path": shell_path(f"{output_dir}/mask.npy"),
             }
         )
-    elif action.action == "filter":
-        context["input_result_path"] = shell_path(dep_result_path(p["input"], location))
-        context["filter_mode"] = "mask" if "mask_input" in p else "score"
-        if "mask_input" in p:
-            mask_input = p["mask_input"]
-            if mask_input.action == "mask-common-conformer":
-                mask_path = f"{dep_result_path(mask_input, location)}/mask{p['mask']}.npy"
-                context["mask_input_path"] = shell_path(mask_path)
-            else:
-                context["mask_input_path"] = shell_path(result_file(mask_input, location))
-            context["score_input_path"] = '""'
-            context["threshold"] = '""'
-        else:
-            context["score_input_path"] = shell_path(result_file(p["score_input"], location))
-            context["threshold"] = q(p["threshold"])
-            context["mask_input_path"] = '""'
     elif action.action == "identity":
         context.update(
             {

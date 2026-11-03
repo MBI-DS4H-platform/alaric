@@ -129,7 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=_positive_int,
         metavar="N",
         help=(
-            "Select residues N and N+1 from the reference PDB. "
+            "Select the Nth and (N+1)th residues present in the reference PDB. "
             "If omitted, the reference must contain exactly two residues."
         ),
     )
@@ -288,16 +288,28 @@ def _convert_library_rotaconformers_to_matrices(
 
 
 def _infer_fragment(
-    reference: np.ndarray, first_resid: int | None
+    reference: np.ndarray, fragment_position: int | None
 ) -> tuple[str, np.ndarray]:
-    if first_resid is None:
-        selected_resids = [int(resid) for resid in np.unique(reference["resid"])]
+    ordered_resids = [int(resid) for resid in np.unique(reference["resid"])]
+    if fragment_position is None:
+        selected_resids = ordered_resids
         if len(selected_resids) != 2:
             raise ValueError(
                 "--fragment is required unless the reference contains exactly two residues"
             )
     else:
-        selected_resids = [first_resid, first_resid + 1]
+        if fragment_position < 1:
+            raise ValueError("--fragment must be positive")
+        start = fragment_position - 1
+        selected_resids = ordered_resids[start : start + 2]
+        if len(selected_resids) != 2:
+            raise ValueError(
+                f"Reference does not contain fragment {fragment_position}"
+            )
+    if selected_resids[1] != selected_resids[0] + 1:
+        raise ValueError(
+            f"Selected fragment {fragment_position or 1} crosses a residue-numbering gap"
+        )
     mask = np.isin(reference["resid"], selected_resids)
     fragment = reference[mask]
     if len(fragment) == 0:
@@ -309,6 +321,17 @@ def _infer_fragment(
     if present_resids != selected_resids:
         raise ValueError(
             f"Expected selected residues {selected_resids}, found {present_resids}"
+        )
+    try:
+        from .backbone import peptide_link_is_continuous
+    except ImportError:  # pragma: no cover - direct CLI import
+        from backbone import peptide_link_is_continuous
+
+    left = fragment[fragment["resid"] == selected_resids[0]]
+    right = fragment[fragment["resid"] == selected_resids[1]]
+    if not peptide_link_is_continuous(left, right):
+        raise ValueError(
+            f"Selected fragment {fragment_position or 1} crosses a chemical RNA backbone break"
         )
 
     sequence = []
@@ -356,7 +379,7 @@ def _load_library(
 
 def _load_reference_coordinates(
     reference_path: Path,
-    first_resid: int | None,
+    fragment_position: int | None,
     sequence: str | None,
     template: np.ndarray,
 ) -> tuple[str, np.ndarray]:
@@ -371,7 +394,7 @@ def _load_reference_coordinates(
         if len(reference) == 0:
             raise ValueError("Reference PDB first model contains no atoms")
 
-    inferred_sequence, fragment = _infer_fragment(reference, first_resid)
+    inferred_sequence, fragment = _infer_fragment(reference, fragment_position)
     if sequence is not None and sequence != inferred_sequence:
         raise ValueError(
             f"--sequence {sequence} does not match reference sequence {inferred_sequence}"

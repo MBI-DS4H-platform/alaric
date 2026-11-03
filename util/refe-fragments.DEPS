@@ -1,6 +1,7 @@
 refe-fragments.py
 ../alaric/parse_pdb.py
 ../alaric/rna_pdb.py
+../alaric/backbone.py
 ../alaric/write_pdb.py
 ../fraglib/templates/A-ppdb.npy
 ../fraglib/templates/C-ppdb.npy

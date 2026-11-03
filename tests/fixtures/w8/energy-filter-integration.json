@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "source": "tests/1b7f/frag4-det-a",
+  "source_arc_sha256": "d01dab14f65ac580a61161d33eb8d453e6d5b5dcb9198efebba5156a4f144748",
+  "source_recipe": "tests/1b7f/stack-frag4-determinism.sh",
+  "sequence": "GU",
+  "fragment": 4,
+  "exclude": ["1b7f"],
+  "sample_count": 2048,
+  "sample_rule": "unique integer linspace from 0 to source_count-1, inclusive",
+  "threshold_rule": "median of exact finite-sample gridless energies; strict energy < threshold",
+  "ranges": [
+    {
+      "protein_range": "range-1",
+      "protein": "tests/1b7f/pdbs/1b7f_dom2.pdb",
+      "protein_sha256": "180e0563725cb5b4589f282d78dea4f69504cbcf7ce6cbdca206718dac65bec8",
+      "scope": "complete recorded dom2 receptor; not an exported/clipped range"
+    }
+  ]
+}

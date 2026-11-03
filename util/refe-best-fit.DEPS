@@ -1,6 +1,7 @@
 ../alaric/library.py
 ../alaric/parse_pdb.py
 ../alaric/reference.py
+../alaric/backbone.py
 ../alaric/superimpose.py
 ../alaric/write_pdb.py
 ../alaric/rna_pdb.py

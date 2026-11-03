@@ -30,7 +30,7 @@ def _anchor_data(filter_name: str) -> dict:
         "protein": "dom",
         "resid": 256,
         "nucleotide": "first",
-        "precomputed_filter_name": "gaussian",
+        "precomputed_filter_name": "gaussian-rrm",
         "precomputed_filter_threshold": filter_name,
     }
 

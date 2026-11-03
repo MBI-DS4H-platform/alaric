@@ -4,6 +4,7 @@ refe-best-fit-bases.py
 ../alaric/library.py
 ../alaric/parse_pdb.py
 ../alaric/reference.py
+../alaric/backbone.py
 ../alaric/rna_pdb.py
 ../alaric/superimpose.py
 ../alaric/mutate.py

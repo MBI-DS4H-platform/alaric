@@ -89,7 +89,7 @@ class PoolNode:
     sigil: str | None = None
     result_dir: str | None = None  # relative to project root, if a sigil exists
     materialized: bool = False
-    constraint: dict[str, Any] | None = None  # filter: threshold + score_input
+    constraint: dict[str, Any] | None = None  # energy-filter parameters
 
 
 def _pool_kind(action: ResolvedAction) -> str:
@@ -97,7 +97,7 @@ def _pool_kind(action: ResolvedAction) -> str:
         return "anchor"
     if action.action in {"grow", "grow-test"}:
         return "grow"
-    if action.action == "filter":
+    if action.action == "energy-filter":
         return "filter"
     if action.action == "identity":
         in1 = action.params.get("input1")
@@ -130,7 +130,7 @@ def _provenance_edges(action: ResolvedAction, fragment: int, frag_of: dict[str, 
             edges.append(
                 ProvEdge(restrict.name, "restrict", None, frag_of[restrict.name] != fragment)
             )
-    elif action.action == "filter":
+    elif action.action == "energy-filter":
         src = dep("input")
         if src is not None:
             edges.append(
@@ -183,11 +183,13 @@ class PoolGraph:
             )
             if action.action in {"grow", "grow-test"}:
                 node.direction = str(action.params.get("direction"))
-            if action.action == "filter":
-                score_input = action.params.get("score_input")
+            if action.action == "energy-filter":
                 node.constraint = {
                     "threshold": action.params.get("threshold"),
-                    "score_input": score_input.name if isinstance(score_input, ResolvedAction) else None,
+                    "protein": action.params.get("protein"),
+                    "epsilon": action.params.get("epsilon"),
+                    "cascade": action.params.get("cascade"),
+                    "min_cascade": action.params.get("min_cascade"),
                 }
             sigil = _read_sigil(action)
             if sigil:

@@ -1,0 +1,4 @@
+action: filter
+input: frag10-anchor
+score_input: frag10-anchor-score
+threshold: -13.99

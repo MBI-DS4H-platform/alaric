@@ -11,11 +11,9 @@ from pathlib import Path
 
 from .backend import (
     POOL_ENV_VAR,
-    SCORE_CHUNKS_ENV_VAR,
     SCRATCH_EXPR,
     organize_command,
     render_template,
-    score_concat_command,
     template_context,
 )
 from .checksum import byte_checksum
@@ -30,8 +28,7 @@ from .sigil import compute_project_sigils
 #   anchor / anchor-test -> conformers (--conformer-range)
 #   anchor-refe          -> conformers (--conformer-range)
 #   grow / grow-test    -> source poses (--pose-range)
-#   score                -> source poses (POSE_START/POSE_END)
-CHUNKABLE = {"anchor", "anchor-test", "anchor-refe", "grow", "grow-test", "score"}
+CHUNKABLE = {"anchor", "anchor-test", "anchor-refe", "grow", "grow-test"}
 # Actions whose producer writes an unorganized shard pool that the organize step then
 # consumes, and whose pool may therefore be redirected to node-local scratch whenever a
 # single script owns the whole pool (see _mktemp_pool_lines). grow/grow-test are excluded
@@ -293,7 +290,6 @@ def _finalize_lines(
     *,
     payload_dir: str | None = None,
     payload_guard: str | None = None,
-    sidecar_already_written: bool = False,
 ) -> list[str]:
     """Write the result sidecar, then promote the partial result to its final name.
 
@@ -308,16 +304,7 @@ def _finalize_lines(
     ``output_dir``, where moving it onto itself would fail.
     """
     payload = payload_dir or output_dir
-    if sidecar_already_written:
-        # score_concat.py has hashed the final NPY byte stream while it copied each
-        # chunk. Re-reading the completed score file here is especially expensive when
-        # it lives on the shared filesystem. Local deployments still need the cache copy.
-        lines = []
-        if local:
-            name = "mask.npy" if result_kind == "mask" else "score.npy"
-            lines.append(f"cp {payload}/{name}.CHECKSUM ../CACHE/checksum/{sigil}")
-    else:
-        lines = [_sidecar_command(result_kind, payload, sigil, local=local, alaric_dir=alaric_dir)]
+    lines = [_sidecar_command(result_kind, payload, sigil, local=local, alaric_dir=alaric_dir)]
     if local:
         return lines
     if payload_dir is not None:
@@ -467,7 +454,6 @@ def generate_chunk_files(
     # the shared filesystem. Only run.sh — which executes every chunk plus organize itself,
     # in one job on one node — redirects that output to node-local scratch.
     use_pool = not local and action.action in POOL_ACTIONS
-    use_score_pool = not local and action.action == "score"
     output_dir, final_dir, setup = _compute_dirs(action, sigil, local, create_output=not use_pool)
     n = max(1, int(nchunks or 1))
     if action.action == "anchor-test" and "conformer" in action.params:
@@ -484,10 +470,6 @@ def generate_chunk_files(
     if use_pool:
         pool = "${POSE_POOL}"
         pool_lines = _pool_default_lines(POOL_ENV_VAR, "POSE_POOL", output_dir, "Unorganized shard pool")
-    elif use_score_pool:
-        pool_lines = _pool_default_lines(
-            SCORE_CHUNKS_ENV_VAR, "SCORE_CHUNKS", f"{final_dir}-CHUNKS", "Per-chunk score output"
-        )
 
     base_ctx = template_context(
         action, alaric_dir=alaric_dir, output_dir=pool or output_dir, location=location
@@ -496,11 +478,6 @@ def generate_chunk_files(
         # organize.sh is the same file whether or not run.sh redirected the pool, so the
         # staging knobs have to be resolved at runtime rather than baked in here.
         base_ctx["organize_command"] = organize_command(alaric_dir, pool, location, pool="auto")
-    elif use_score_pool:
-        base_ctx["score_chunks_path"] = "${SCORE_CHUNKS}"
-        base_ctx["score_concat_command"] = score_concat_command(
-            alaric_dir, output_dir, "${SCORE_CHUNKS}", location
-        )
     pp = _pythonpath_line(alaric_dir)
     result_kind = _result_output_kind(action)
 
@@ -532,8 +509,6 @@ def generate_chunk_files(
 
     org_ctx = dict(base_ctx)
     org_ctx["nchunks"] = n
-    if action.action == "score":
-        org_ctx["score_concat_command"] = str(org_ctx["score_concat_command"]).replace("{{ nchunks }}", str(n))
     org_body = render_template(organize_tpl, org_ctx).strip()
     org_lines = _prologue(local, sigil)
     org_lines.append("")
@@ -557,7 +532,6 @@ def generate_chunk_files(
             alaric_dir,
             payload_dir=pool,
             payload_guard=f'[ -n "${{{POOL_ENV_VAR}:-}}" ]' if pool else None,
-            sidecar_already_written=action.action == "score",
         )
     )
     if local:
@@ -573,10 +547,6 @@ def generate_chunk_files(
     run_lines.extend(setup)
     if use_pool:
         run_lines.extend(_mktemp_pool_lines(sigil, POOL_ENV_VAR, export=True, sidecars=True))
-    elif use_score_pool:
-        run_lines.extend(_mktemp_pool_lines(sigil, SCORE_CHUNKS_ENV_VAR, export=True, sidecars=False))
-    elif action.action == "score":
-        run_lines.append(f"rm -rf {base_ctx['score_chunks_path']}")
     run_lines.append("")
     for idx in range(1, n + 1):
         run_lines.append(f"bash ./chunk{idx}.sh")

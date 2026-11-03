@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -34,11 +36,9 @@ ACTION_SCHEMAS: dict[str, set[str]] = {
     "anchor-refe": {"action", "type", "fragment", "sequence", "exclude", "nucleotide", "ovrmsd", "reference"},
     "grow": {"action", "type", "input", "restrict_input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
     "grow-test": {"action", "type", "input", "restrict_input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd", "conformer"},
-    "score": {"action", "type", "input", "sequence", "exclude", "protein", "nb_kernel"},
+    "energy-filter": {"action", "type", "input", "fragment", "sequence", "exclude", "protein", "threshold", "epsilon", "cascade", "min_cascade"},
     "rmsd": {"action", "type", "input", "fragment", "exclude", "reference"},
-    "score_add": {"action", "type", "score_input1", "score_input2"},
     "mask": {"action", "type", "input", "score_input", "threshold"},
-    "filter": {"action", "type", "input", "score_input", "threshold", "mask_input", "mask"},
     "identity": {"action", "type", "input1", "input2"},
     "mask-common-conformer": {"action", "type", "input1", "input2"},
 }
@@ -49,11 +49,9 @@ REQUIRED: dict[str, set[str]] = {
     "anchor-refe": {"fragment", "sequence", "exclude", "nucleotide", "ovrmsd"},
     "grow": {"input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
     "grow-test": {"input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd", "conformer"},
-    "score": {"input", "sequence", "exclude", "protein"},
+    "energy-filter": {"input", "fragment", "sequence", "exclude", "protein", "threshold", "epsilon", "cascade", "min_cascade"},
     "rmsd": {"input", "fragment", "exclude"},
-    "score_add": {"score_input1", "score_input2"},
     "mask": {"input", "score_input", "threshold"},
-    "filter": {"input"},
     "identity": {"input1", "input2"},
     "mask-common-conformer": {"input1", "input2"},
 }
@@ -64,11 +62,9 @@ DEPENDENCY_FIELDS: dict[str, dict[str, str]] = {
     "anchor-refe": {},
     "grow": {"input": POSE, "restrict_input": POSE},
     "grow-test": {"input": POSE, "restrict_input": POSE},
-    "score": {"input": POSE},
+    "energy-filter": {"input": POSE},
     "rmsd": {"input": POSE},
-    "score_add": {"score_input1": SCORE, "score_input2": SCORE},
     "mask": {"input": POSE, "score_input": SCORE},
-    "filter": {"input": POSE, "score_input": SCORE, "mask_input": MASK},
     "identity": {"input1": POSE, "input2": POSE},
     "mask-common-conformer": {"input1": POSE, "input2": POSE},
 }
@@ -79,14 +75,12 @@ OUTPUT_KIND = {
     "anchor-refe": POSE,
     "grow": POSE,
     "grow-test": POSE,
-    "score": SCORE,
+    "energy-filter": POSE,
     "rmsd": SCORE,
-    "score_add": SCORE,
     "mask": MASK,
-    "filter": POSE,
     "identity": POSE,
-    # A paired conformer mask is consumed by the filter mask route, which selects one of
-    # its two files through ``filter.mask``.
+    # A paired conformer mask contains one selector for each input pool; callers pass the
+    # corresponding mask to select-poses.py.
     "mask-common-conformer": MASK,
 }
 
@@ -96,10 +90,9 @@ AUTO_FIELDS = {
     "anchor-refe": {"fragment", "sequence", "exclude", "ovrmsd"},
     "grow": {"fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
     "grow-test": {"fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
-    "score": {"sequence", "exclude", "protein"},
+    "energy-filter": {"fragment", "sequence", "exclude", "threshold", "cascade", "min_cascade"},
     "rmsd": {"fragment", "exclude"},
     "mask": {"threshold"},
-    "filter": {"threshold"},
 }
 
 
@@ -143,9 +136,9 @@ def normalize_action(name: str, path: Path, data: dict[str, Any]) -> ActionSpec:
             filter_namespace = str(data["precomputed_filter_name"])
             filter_name = str(data["precomputed_filter_threshold"])
             spec = _gaussian_filter_spec()
-            if filter_namespace != "gaussian":
+            if filter_namespace != "gaussian-rrm":
                 raise SchemaError(
-                    f"{path}: precomputed_filter_name must be 'gaussian'"
+                    f"{path}: precomputed_filter_name must be 'gaussian-rrm'"
                 )
             if filter_name not in spec["thresholds"]:
                 raise SchemaError(
@@ -180,10 +173,33 @@ def normalize_action(name: str, path: Path, data: dict[str, Any]) -> ActionSpec:
         if conformer <= 0:
             raise SchemaError(f"{path}: conformer must be positive")
         data["conformer"] = conformer
-    if action == "score":
-        data.setdefault("nb_kernel", "compiled")
-        if data["nb_kernel"] not in {"compiled", "jax"}:
-            raise SchemaError(f"{path}: nb_kernel must be compiled or jax")
+    if action == "energy-filter":
+        protein = data.get("protein")
+        if not isinstance(protein, str) or re.fullmatch(r"range-\d+", protein) is None:
+            raise SchemaError(f"{path}: energy-filter protein must name exactly one range-K")
+        threshold = data.get("threshold")
+        if threshold != "auto":
+            if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
+                raise SchemaError(f"{path}: energy-filter threshold must be numeric or auto")
+            if not math.isfinite(float(threshold)):
+                raise SchemaError(f"{path}: energy-filter threshold must be finite")
+            data["threshold"] = float(threshold)
+        epsilon = data.get("epsilon")
+        if isinstance(epsilon, bool) or not isinstance(epsilon, (int, float)) or float(epsilon) != 15.0:
+            raise SchemaError(f"{path}: energy-filter epsilon must be 15")
+        data["epsilon"] = 15.0
+        from ..energy_filter import _validate_minimum, _validate_steps
+
+        if data["cascade"] != "auto":
+            try:
+                data["cascade"] = _validate_steps(data["cascade"])
+            except ValueError as exc:
+                raise SchemaError(f"{path}: {exc}") from exc
+        if data["min_cascade"] != "auto":
+            try:
+                data["min_cascade"] = _validate_minimum(data["min_cascade"])
+            except ValueError as exc:
+                raise SchemaError(f"{path}: {exc}") from exc
     if action == "anchor-refe" and data.get("ovrmsd") != "auto":
         ovrmsd = float(data["ovrmsd"])
         if ovrmsd <= 0:
@@ -191,20 +207,6 @@ def normalize_action(name: str, path: Path, data: dict[str, Any]) -> ActionSpec:
         data["ovrmsd"] = ovrmsd
     if action in {"rmsd", "anchor-refe"}:
         data.setdefault("reference", "reference.pdb")
-    if action == "filter":
-        score_route = {"score_input", "threshold"} <= set(data)
-        mask_route = "mask_input" in data
-        if score_route == mask_route:
-            raise SchemaError(f"{path}: filter requires either score_input+threshold or mask_input")
-        if "mask" in data:
-            if not mask_route:
-                raise SchemaError(f"{path}: filter.mask requires mask_input")
-            try:
-                data["mask"] = int(data["mask"])
-            except (TypeError, ValueError) as exc:
-                raise SchemaError(f"{path}: filter.mask must be 1 or 2") from exc
-            if data["mask"] not in {1, 2}:
-                raise SchemaError(f"{path}: filter.mask must be 1 or 2")
     for key, value in data.items():
         if value == "auto" and key not in AUTO_FIELDS.get(action, set()):
             raise SchemaError(f"{path}: {key}: auto is not supported for {action}")
