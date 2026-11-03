@@ -26,13 +26,14 @@ if str(_CODE_DIR) not in sys.path:
 
 from library import config, load_crmsds
 from poses import PoseReader, PoseWriter, discover_organized
+from anchor_constants import BOUNDARY_RECOMPUTE_TOLERANCE, validate_ovrmsd
 
 
 GRID_SPACING = sqrt(3.0) / 3.0
 MAX_OVERLAP_RMSD = 1.3
 ROTAMER_BATCH_SIZE = 4096
 RMSD_BOUNDARY_TOLERANCE = 2e-6
-TRACE_RMSD_BOUNDARY_TOLERANCE = 1e-5
+TRACE_RMSD_BOUNDARY_TOLERANCE = BOUNDARY_RECOMPUTE_TOLERANCE
 
 
 @dataclass(frozen=True)
@@ -852,6 +853,7 @@ def run_pooled_trace_grow(
     Shared by grow (source = a pose pool) and anchor-refe (source = a single
     reference nucleobase).
     """
+    ov_rmsd = validate_ovrmsd(ov_rmsd)
     nprocs = min(int(nprocs), max(1, len(target_conformers)))
     if nprocs <= 1:
         return _pooled_trace_grow(
@@ -1243,8 +1245,7 @@ def _pooled_trace_grow(
 def _run(args: argparse.Namespace) -> int:
     if args.crmsd < 0.0:
         raise ValueError("--crmsd must be non-negative")
-    if args.ov_rmsd <= 0.0:
-        raise ValueError("--ov-rmsd must be positive")
+    args.ov_rmsd = validate_ovrmsd(args.ov_rmsd)
     if args.cache_size <= 0:
         raise ValueError("--cache-size must be positive")
     if args.bucket_size < 1 or args.bucket_size > 65535:

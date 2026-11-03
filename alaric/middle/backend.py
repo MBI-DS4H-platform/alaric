@@ -183,7 +183,7 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
         precalc_dir = p["__precomputed_filter_dir"]
         if location == "remote":
             # On remote, precomputed filter directory and reference rings are in alaric repo
-            precalc_dir = f"${{ALARIC_REMOTE_ALARIC_DIR:?}}/../precomputed-filters/{p['precomputed_filter_name']}/{p['precomputed_filter_threshold']}"
+            precalc_dir = f"${{ALARIC_REMOTE_ALARIC_DIR:?}}/../{p['__precomputed_filter_relative_dir']}"
             ref_ring = f"${{ALARIC_REMOTE_ALARIC_DIR:?}}/../ring-refe/{p['__anchor_reference_ring']}"
             protein_ref_ring = f"${{ALARIC_REMOTE_ALARIC_DIR:?}}/../ring-refe/{p['__anchor_reference_protein_ring']}"
         else:
@@ -192,6 +192,7 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
             protein_ref_ring = f"${{ALARIC_DIR:?}}/../ring-refe/{p['__anchor_reference_protein_ring']}"
         precalc_args = (
             f"--precalculated-anchor {shell_path(precalc_dir)} "
+            f"--precalculated-filter-name {q(p['precomputed_filter_threshold'])} "
             f"--anchor-reference-ring {ref_ring} "
             f"--anchor-reference-protein-ring {protein_ref_ring}"
         )

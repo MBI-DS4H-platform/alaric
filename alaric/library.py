@@ -6,7 +6,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Optional, TypeAlias, cast
+from typing import Optional, Sequence, TypeAlias, cast
 import numpy as np
 from ruamel.yaml import YAML
 
@@ -1052,6 +1052,8 @@ def load_mononucleotide_templates() -> dict[str, np.ndarray]:
 
 def config(
     verify_checksums: bool = True,
+    *,
+    sequences: Sequence[str] | None = None,
 ) -> tuple[dict[str, "LibraryFactory"], dict[str, np.ndarray]]:
     config_data = _fraglib_config()
 
@@ -1086,8 +1088,11 @@ def config(
 
     dinucleotide_templates = {}
     dinucleotide_libraries = {}
+    selected_sequences = None if sequences is None else set(sequences)
     for seq0 in itertools.product(_bases, repeat=2):
         seq = "".join(seq0)
+        if selected_sequences is not None and seq not in selected_sequences:
+            continue
         ppdb = np.load(str(templates_dir / f"{seq}-ppdb.npy"))
         dinucleotide_templates[seq] = ppdb
         libf = lib_dinuc_directory.load(

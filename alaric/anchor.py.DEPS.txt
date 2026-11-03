@@ -1,4 +1,7 @@
 anchor.py
+anchor_precalc.py
+anchor_constants.py
+gaussian_stacking_filter.json
 stack_geometry.py
 library.py
 offsets.py
@@ -28,3 +31,9 @@ nprocs.py
 ../fraglib/templates/UC-ppdb.npy
 ../fraglib/templates/UG-ppdb.npy
 ../fraglib/templates/UU-ppdb.npy
+../ring-refe/refe-A.npy
+../ring-refe/refe-C.npy
+../ring-refe/refe-PHE.npy
+../ring-refe/refe-HIS.npy
+../ring-refe/refe-ARG.npy
+../ring-refe/refe-TRP.npy

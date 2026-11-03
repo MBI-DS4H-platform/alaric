@@ -9,6 +9,20 @@ import yaml
 from .errors import SchemaError
 
 
+def _gaussian_filter_spec() -> dict[str, Any]:
+    """Load the authoritative runtime name table from A7."""
+    try:
+        from ..gaussian_filter import load_spec
+
+        spec = load_spec(Path(__file__).resolve().parents[1] / "gaussian_stacking_filter.json")
+    except Exception as exc:
+        raise SchemaError(f"cannot load the Gaussian filter specification: {exc}") from exc
+    thresholds = spec.get("thresholds")
+    if not isinstance(thresholds, dict) or len(thresholds) != 12:
+        raise SchemaError("Gaussian filter specification must define all twelve names")
+    return spec
+
+
 POSE = "pose"
 SCORE = "score"
 MASK = "mask"
@@ -125,6 +139,19 @@ def normalize_action(name: str, path: Path, data: dict[str, Any]) -> ActionSpec:
         if nuc not in {"first", "second"}:
             raise SchemaError(f"{path}: nucleotide must be first or second")
         data["nucleotide"] = nuc
+        if action in {"anchor", "anchor-test"}:
+            filter_namespace = str(data["precomputed_filter_name"])
+            filter_name = str(data["precomputed_filter_threshold"])
+            spec = _gaussian_filter_spec()
+            if filter_namespace != "gaussian":
+                raise SchemaError(
+                    f"{path}: precomputed_filter_name must be 'gaussian'"
+                )
+            if filter_name not in spec["thresholds"]:
+                raise SchemaError(
+                    f"{path}: unsupported Gaussian filter {filter_name!r}; "
+                    "read the twelve legal names from A7"
+                )
         if action == "anchor-test":
             has_nconformers = "nconformers" in data
             has_conformer = "conformer" in data

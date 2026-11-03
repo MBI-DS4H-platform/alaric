@@ -20,6 +20,7 @@ if str(_CODE_DIR) not in sys.path:
     sys.path.insert(0, str(_CODE_DIR))
 
 from anchor import _select_conformers
+from anchor_constants import validate_ovrmsd
 from grow import (
     SourceConformerCache,
     _precompute_translation_sets,
@@ -269,8 +270,7 @@ def reference_source_cache(base_coordinates: np.ndarray) -> SourceConformerCache
 
 
 def _run(args: argparse.Namespace) -> int:
-    if args.ov_rmsd <= 0.0:
-        raise ValueError("--ov-rmsd must be positive")
+    args.ov_rmsd = validate_ovrmsd(args.ov_rmsd)
     if args.cache_size <= 0:
         raise ValueError("--cache-size must be positive")
     if args.bucket_size < 1 or args.bucket_size > 65535:

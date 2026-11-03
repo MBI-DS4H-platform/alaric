@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from concurrent.futures import Executor
 from pathlib import Path
 
 FILE_NAMES = ("rotations", "translations", "filtered-sizes", "filtered-concat")
@@ -82,20 +83,46 @@ def verify_file(npy_path, sha256, npy_sha256, *, command: str = "") -> tuple[Pat
     fail("file is missing")
 
 
-def _verify_entry(directory: Path, files: dict, command: str) -> dict:
-    return {
-        fname: verify_file(
-            directory / f"{fname}.npy", e.get("sha256"), e["npy_sha256"], command=command
-        )[0]
-        for fname, e in files.items()
-    }
+def _verify_entry(
+    directory: Path,
+    files: dict,
+    command: str,
+    *,
+    executor: Executor | None = None,
+) -> dict:
+    def verify(item: tuple[str, dict]) -> tuple[str, Path]:
+        fname, entry = item
+        path, _ = verify_file(
+            directory / f"{fname}.npy",
+            entry.get("sha256"),
+            entry["npy_sha256"],
+            command=command,
+        )
+        return fname, path
+
+    # The four files are independent. A caller doing multiple filter checks
+    # may provide one shared pool; wait for every file before returning paths.
+    if executor is None:
+        return dict(map(verify, files.items()))
+    return dict(executor.map(verify, files.items()))
 
 
-def verify_filter_cache(spec: dict, name: str, root) -> dict:
+def verify_filter_cache(
+    spec: dict,
+    name: str,
+    root,
+    *,
+    executor: Executor | None = None,
+) -> dict:
     """Verify all four files of filter ``name``; return {file name: resolved path}."""
     root = Path(root)
     pre = spec["thresholds"][name]["precalc"]
-    return _verify_entry(root / pre["dir"], pre["files"], generator_command(name, root))
+    return _verify_entry(
+        root / pre["dir"],
+        pre["files"],
+        generator_command(name, root),
+        executor=executor,
+    )
 
 
 def decompress_dir(directory) -> None:

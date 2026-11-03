@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,7 +11,7 @@ import yaml
 from .errors import ResolveError
 from .jsonutil import read_json
 from .project import Project
-from .schema import ActionSpec
+from .schema import ActionSpec, _gaussian_filter_spec
 
 
 FRAG_RE = re.compile(r"(?:^|-)frag(\d+)(?:-|$)")
@@ -165,11 +166,20 @@ def _pair_thresholds(project: Project, source_fragment: int, target_fragment: in
 
 
 def _resolve_precomputed_filter_directory(project: Project, filter_name: str, threshold: str) -> Path:
-    """Resolve precomputed filter name and threshold to the actual directory path."""
-    # Assume precomputed-filters is a sibling of the project or in the alaric repo
+    """Resolve a Gaussian cache through the committed A7 directory declaration."""
+    if filter_name != "gaussian":
+        raise ResolveError(f"unsupported precomputed filter family {filter_name!r}")
+    spec = _gaussian_filter_spec()
+    try:
+        relative_dir = Path(spec["thresholds"][threshold]["precalc"]["dir"])
+    except (KeyError, TypeError) as exc:
+        raise ResolveError(f"A7 has no precalculation directory for {threshold!r}") from exc
+    if relative_dir.is_absolute() or ".." in relative_dir.parts:
+        raise ResolveError(f"A7 precalculation directory is not repository-relative: {relative_dir}")
+    # The A7 directory is normally a sibling of DATA, or under this checkout.
     candidate_paths = [
-        project.root / "precomputed-filters" / filter_name / threshold,
-        Path(__file__).resolve().parents[2] / "precomputed-filters" / filter_name / threshold,
+        project.root / relative_dir,
+        Path(__file__).resolve().parents[2] / relative_dir,
     ]
     for path in candidate_paths:
         if path.is_dir():
@@ -258,6 +268,18 @@ def resolve_action(
         threshold = str(p["precomputed_filter_threshold"])
         filter_dir = _resolve_precomputed_filter_directory(project, filter_name, threshold)
         p["__precomputed_filter_dir"] = str(filter_dir)
+        filter_spec = _gaussian_filter_spec()
+        filter_entry = filter_spec["thresholds"][threshold]
+        file_entries = filter_entry["precalc"]["files"]
+        p["__precomputed_filter_relative_dir"] = filter_entry["precalc"]["dir"]
+        p["precomputed_filter_identity"] = {
+            "name": threshold,
+            "spec_digest": filter_spec["spec_digest"],
+            "arrays": {
+                filename: str(file_entry["npy_sha256"])
+                for filename, file_entry in sorted(file_entries.items())
+            },
+        }
         # Reference file depends on which nucleotide (first or second) in the sequence
         sequence = str(p["sequence"]).upper()
         nucleotide_idx = 0 if p["nucleotide"] == "first" else 1
@@ -266,7 +288,7 @@ def resolve_action(
         nucleotide = sequence[nucleotide_idx]
         ring_code = _nucleotide_to_ring_code(nucleotide)
         # Validate that reference file exists; will be referenced from ALARIC_DIR/../ring-refe/
-        _resolve_ring_reference_file(project.root, ring_code)
+        nucleotide_reference_path = _resolve_ring_reference_file(project.root, ring_code)
         p["__anchor_reference_ring"] = f"refe-{ring_code}.npy"
 
         # Resolve protein ring reference based on residue type
@@ -276,9 +298,20 @@ def resolve_action(
             _, protein_path = resolve_protein(project, p.get("protein", "auto"), all_atom=False)
         resid = int(p["resid"])
         protein_resname = _protein_residue_from_pdb(protein_path, resid)
+        reference_protein_resname = "PHE" if protein_resname == "TYR" else protein_resname
         # Validate that reference file exists
-        _resolve_ring_reference_file(project.root, protein_resname)
-        p["__anchor_reference_protein_ring"] = f"refe-{protein_resname}.npy"
+        protein_reference_path = _resolve_ring_reference_file(
+            project.root, reference_protein_resname
+        )
+        p["__anchor_reference_protein_ring"] = f"refe-{reference_protein_resname}.npy"
+        p["anchor_reference_identity"] = {
+            "nucleotide_sha256": hashlib.sha256(
+                nucleotide_reference_path.read_bytes()
+            ).hexdigest(),
+            "protein_sha256": hashlib.sha256(
+                protein_reference_path.read_bytes()
+            ).hexdigest(),
+        }
     if action in {"grow", "grow-test"}:
         p["direction"] = resolve_direction(p["direction"], spec.name)
         dep = resolved_by_name.get(str(p["input"]))
