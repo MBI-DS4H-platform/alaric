@@ -1,0 +1,8 @@
+energetics_seamless_support.py
+../alaric/parse_pdb.py
+reduce-npy.py
+../alaric/reduce.dat
+../attract-jax/util/jax_scorer.py
+../attract-jax/util/numpy_grid_score.py
+../attract-jax/util/pdb_io.py
+../attract-jax/attract-original/attract-par.npz
