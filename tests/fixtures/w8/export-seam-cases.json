@@ -3,30 +3,123 @@
   "default_score_filter": {
     "min_cascade": 1000,
     "cascade": [
-      {"plateau_distance": 5, "neighbour_distance": 7, "max_error": 1.0},
-      {"plateau_distance": 10, "neighbour_distance": 12, "max_error": 0.05}
+      {
+        "plateau_distance": 5,
+        "neighbour_distance": 7,
+        "max_error": 1.0
+      },
+      {
+        "plateau_distance": 10,
+        "neighbour_distance": 12,
+        "max_error": 0.05
+      }
     ]
   },
-  "energy_thresholds": {"schema": 1, "frag-1-AC": {"range-2": "-16.59"}, "frag-3-GU": {"range-2": "-2.00"}},
+  "energy_thresholds": {
+    "schema": 1,
+    "frag-1-AC": {
+      "range-2": "-16.59"
+    },
+    "frag-3-GU": {
+      "range-2": "-2.00"
+    }
+  },
   "reference_candidates": [
-    {"fragment": 1, "nucleotide": "second", "ovrmsd": "0.70"},
-    {"fragment": 3, "nucleotide": "first", "ovrmsd": "1.73"},
-    {"fragment": 3, "nucleotide": "first", "ovrmsd": "1.73"}
+    {
+      "fragment": 1,
+      "nucleotide": "second",
+      "ovrmsd": "0.70",
+      "ovrmsd_raw": 0.69
+    },
+    {
+      "fragment": 3,
+      "nucleotide": "first",
+      "ovrmsd": "1.73",
+      "ovrmsd_raw": 1.72
+    },
+    {
+      "fragment": 3,
+      "nucleotide": "first",
+      "ovrmsd": "1.73",
+      "ovrmsd_raw": 1.72
+    }
   ],
   "readiness_cases": [
-    {"clause":"X5", "change":"Gaussian amber fill 0.1", "hard_block":false, "proceed_anyway":true},
-    {"clause":"X5", "change":"Gaussian red pose rejected", "hard_block":false, "proceed_anyway":true},
-    {"clause":"X5", "change":"computed class below RRM95", "hard_block":false, "proceed_anyway":true},
-    {"clause":"X5", "change":"bases threshold minus raw equals 0.000005", "hard_block":false, "proceed_anyway":true},
-    {"clause":"X5", "change":"bestfit energy equals edited threshold", "hard_block":false, "proceed_anyway":true},
-    {"clause":"X5", "change":"bestfit energy exceeds edited threshold", "hard_block":false, "proceed_anyway":true},
-    {"clause":"X6", "change":"emitted anchor-refe bases threshold 1.74", "hard_block":true},
-    {"clause":"X6", "change":"emitted kept grow pairs threshold 1.74", "hard_block":true},
-    {"clause":"X6", "change":"unkept pair threshold 1.74", "hard_block":false},
-    {"clause":"X6", "change":"required result stale", "hard_block":true},
-    {"clause":"X6", "change":"required result running", "hard_block":true},
-    {"clause":"X6", "change":"required result failed", "hard_block":true},
-    {"clause":"X6", "change":"required decision null", "hard_block":true},
-    {"clause":"X6", "change":"required decision invalid", "hard_block":true}
+    {
+      "clause": "X5",
+      "change": "Gaussian amber fill 0.1",
+      "hard_block": false,
+      "proceed_anyway": true
+    },
+    {
+      "clause": "X5",
+      "change": "Gaussian red pose rejected",
+      "hard_block": false,
+      "proceed_anyway": true
+    },
+    {
+      "clause": "X5",
+      "change": "computed class below RRM95",
+      "hard_block": false,
+      "proceed_anyway": true
+    },
+    {
+      "clause": "X5",
+      "change": "pair threshold minus raw equals 0.000005",
+      "hard_block": false,
+      "proceed_anyway": true
+    },
+    {
+      "clause": "X5",
+      "change": "bestfit energy equals edited threshold",
+      "hard_block": false,
+      "proceed_anyway": true
+    },
+    {
+      "clause": "X5",
+      "change": "bestfit energy exceeds edited threshold",
+      "hard_block": false,
+      "proceed_anyway": true
+    },
+    {
+      "clause": "X6",
+      "change": "emitted anchor-refe bases threshold 1.74",
+      "hard_block": false
+    },
+    {
+      "clause": "X6",
+      "change": "emitted kept grow pairs threshold 1.74",
+      "hard_block": true
+    },
+    {
+      "clause": "X6",
+      "change": "unkept pair threshold 1.74",
+      "hard_block": false
+    },
+    {
+      "clause": "X6",
+      "change": "required result stale",
+      "hard_block": true
+    },
+    {
+      "clause": "X6",
+      "change": "required result running",
+      "hard_block": true
+    },
+    {
+      "clause": "X6",
+      "change": "required result failed",
+      "hard_block": true
+    },
+    {
+      "clause": "X6",
+      "change": "required decision null",
+      "hard_block": true
+    },
+    {
+      "clause": "X6",
+      "change": "required decision invalid",
+      "hard_block": true
+    }
   ]
 }

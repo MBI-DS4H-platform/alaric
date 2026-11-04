@@ -23,7 +23,6 @@
     "T20",
     "T21",
     "T22",
-    "T23",
     "T24",
     "T25",
     "T26",
@@ -49,7 +48,6 @@
     "S17",
     "S18",
     "S19",
-    "S20",
     "S21",
     "S22",
     "S23",
@@ -79,7 +77,6 @@
     "T20": "gaussian_check_jobs",
     "T21": "gaussian_check",
     "T22": "merge_gaussian_validation",
-    "T23": "validate_refe_anchors",
     "T24": "list_fragments",
     "T25": "share_range_pdbs_aa",
     "T26": "structure_id",
@@ -107,8 +104,7 @@
     "S25": "schemas.json#/$defs/S25",
     "B17": "schemas.json#/$defs/B17",
     "B18": "schemas.json#/$defs/B18",
-    "S19": "schemas.json#/$defs/S19",
-    "S20": "schemas.json#/$defs/S20"
+    "S19": "schemas.json#/$defs/S19"
   },
   "non_enveloped_shares": {
     "S1": "pdbcode text",

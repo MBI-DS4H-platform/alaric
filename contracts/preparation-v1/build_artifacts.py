@@ -46,11 +46,13 @@ base_fields = dict(fragment=positive_int, sequence={"type":"string","pattern":"^
 def thresholds(computed):
     value = rmsd if computed else nullable(rmsd)
     pair = dict(pair_fields, ovrmsd=value, crmsd=value)
-    base = dict(base_fields, nuc1_ovrmsd=value, nuc2_ovrmsd=value)
+    result = dict(pairs=arr(obj(pair)))
     if computed:
         pair.update(ovrmsd_raw=number, crmsd_raw=number)
+        base = dict(base_fields, nuc1_ovrmsd=value, nuc2_ovrmsd=value)
         base.update(nuc1_ovrmsd_raw=number, nuc2_ovrmsd_raw=number)
-    return dict(pairs=arr(obj(pair)), bases=arr(obj(base)))
+        result['bases'] = arr(obj(base))
+    return result
 
 def keyed_values(value):
     return {"type":"object", "patternProperties":{frag['pattern']:value}, "additionalProperties":False}
@@ -102,7 +104,6 @@ D['energy-thresholds']['patternProperties']={frag['pattern']:{"type":"object","p
 # Versioned merged validation shares: state codes are established UI outcomes.
 validation_row=obj(dict(key=string,state={"enum":["green","amber","red","blocked"]},messages=arr(string)))
 D['S19']=nullable(envelope(dict(echo=obj(dict(classes=arr(class_row),clip=clip,selected_keys=arr(string,uniqueItems=True),best_fits=fit_echo)),rows=arr(validation_row))))
-D['S20']=nullable(envelope(dict(echo=obj(dict(bases=arr(obj(dict(base_fields,nuc1_ovrmsd=nullable(rmsd),nuc2_ovrmsd=nullable(rmsd)))),clip=clip,selected_keys=arr(string,uniqueItems=True),best_fits=fit_echo)),rows=arr(validation_row))))
 def exact_ends(value):
     # ECMA/Python $ also matches before a final newline. Boundary addresses and
     # decimal strings have no such whitespace allowance; require actual EOF.
@@ -144,14 +145,14 @@ if __name__ == '__main__':
     score_echo_value=dict(bestfit_stackings=energy_echo_value,selected_keys=['anchor-A'],clip=clip_value)
     matrix=dict(schema=1,basis=['anchor-A'],active=True,rows=keys,ranges=['range-2','range-3'],grid=[[False,False],[True,False],[True,False],[True,False],[False,False]])
     edits=dict(schema=1,basis=basis_value,ranges=[dict(row=p,values={k:None for k in keys}) for p in proteins])
-    tedit=dict(schema=1,basis=basis_value,active=True,pairs=[dict(p,ovrmsd=None,crmsd=None) for p in pairs],bases=[dict(fragment=r['number'],sequence=r['sequence'],nuc1_ovrmsd=None,nuc2_ovrmsd=None) for r in fragments])
+    tedit=dict(schema=1,basis=basis_value,active=True,pairs=[dict(p,ovrmsd=None,crmsd=None) for p in pairs])
     computed=dict(schema=1,echo=fit_echo_value,pairs=[dict(p,ovrmsd='0.13',crmsd='0.13',ovrmsd_raw=0.123,crmsd_raw=0.123) for p in pairs],bases=[dict(fragment=r['number'],sequence=r['sequence'],nuc1_ovrmsd='0.13',nuc2_ovrmsd='0.13',nuc1_ovrmsd_raw=0.123,nuc2_ovrmsd_raw=0.123) for r in fragments])
     corpus=[]
     def case(name,operation,payload,expected,**context):
         corpus.append(dict(id=name,operation=operation,payload=copy.deepcopy(payload),expected=copy.deepcopy(expected),**copy.deepcopy(context)))
     def shape(name,schema,payload,error=None):
         case(name,'schema',payload,{'error':error} if error else {'valid':True},boundary=schema)
-    for sid in ['S4','S5','S7','S8','S9','S10','S11','S13','S14','S15','S17','S18','S19','S20','S21','S22','S23','S24','S25']:
+    for sid in ['S4','S5','S7','S8','S9','S10','S11','S13','S14','S15','S17','S18','S19','S21','S22','S23','S24','S25']:
         shape(sid+'-undecided',sid,None)
     shape('threshold-empty-skeleton','S11',tedit)
     inactive=copy.deepcopy(tedit); inactive['active']=False
@@ -174,16 +175,18 @@ if __name__ == '__main__':
     shape('strict-boolean-active','S11',bad,'type')
     bad=copy.deepcopy(matrix); bad['grid'][0][0]=1
     shape('strict-boolean-grid','S14',bad,'type')
-    bad=copy.deepcopy(tedit); bad['bases'][0]['nuc1_ovrmsd']='1.234'
+    bad=copy.deepcopy(tedit); bad['pairs'][0]['ovrmsd']='1.234'
     shape('threshold-too-many-decimals','S11',bad,'pattern')
-    bad=copy.deepcopy(tedit); bad['bases'][0]['nuc1_ovrmsd']='0'
+    bad=copy.deepcopy(tedit); bad['pairs'][0]['ovrmsd']='0'
     case('threshold-zero-rejected','rmsd',bad,{'error':'pattern'})
     bad=copy.deepcopy(computed); del bad['pairs'][0]['ovrmsd_raw']
     shape('computed-raw-required','S9',bad,'required')
     for token in ['activation_token','parent_token','validation_receipt','model_identity']:
         bad=dict(tedit,**{token:'rejected-extension'})
         shape('reject-'+token,'S11',bad,'additional')
-    for label,text in [('malformed','{"schema":1,'),('legacy','{"active":true,"pairs":[],"bases":[]}'),('unsupported','{"schema":2,"basis":{},"active":true}')]:
+    legacy_tedit=copy.deepcopy(tedit)
+    legacy_tedit['bases']=[dict(fragment=r['number'],sequence=r['sequence'],nuc1_ovrmsd=None,nuc2_ovrmsd=None) for r in fragments]
+    for label,text in [('malformed','{"schema":1,'),('legacy',json.dumps(legacy_tedit)),('unsupported','{"schema":2,"basis":{},"active":true}')]:
         case('load-'+label,'load',text,dict(value=None,diagnostic=label))
     case('load-undecided','load','null',dict(value=None,diagnostic=None))
     case('load-schema2-before-basis','load','{"schema":2}',dict(value=None,diagnostic='unsupported'))
@@ -250,12 +253,12 @@ if __name__ == '__main__':
     shape('energy-export-exact-top-level','energy-thresholds',dict(schema=1,**{keys[2]:{'range-2':'-17.00'}}))
     shape('energy-export-no-envelope','energy-thresholds',dict(schema=1,thresholds={}), 'additional')
     shape('energy-export-two-decimals','energy-thresholds',dict(schema=1,**{keys[2]:{'range-2':'-17.0'}}),'pattern')
-    case('threshold-kept-only-complete','threshold-complete',tedit,{'complete':False},kept=[3],fragment_map=fmap)
+    case('threshold-no-kept-pairs-is-complete','threshold-complete',tedit,{'complete':True},kept=[3],fragment_map=fmap)
     partial=copy.deepcopy(tedit)
-    for b in partial['bases']:
-        if b['fragment']==3: b.update(nuc1_ovrmsd='0.13',nuc2_ovrmsd='0.13')
-    case('threshold-clipped-blanks-permitted','threshold-complete',partial,{'complete':True},kept=[3],fragment_map=fmap)
-    for gate,checks,validator in [('4-5',['threshold_complete','clip_valid','energetics_fresh'],'T10'),('5-6',['matrix_valid','energetics_fresh','fit_fresh','clip_valid','geometry_fresh','scores_fresh','goldens_passed','energy_complete'],'T27')]:
+    for pair in partial['pairs']:
+        if pair['down']==2: pair.update(ovrmsd='0.13',crmsd='0.13')
+    case('threshold-clipped-pair-blanks-permitted','threshold-complete',partial,{'complete':True},kept=[2,3],fragment_map=fmap)
+    for gate,checks,validator in [('4-5',['threshold_complete','clip_valid','thresholds_fresh','energetics_fresh'],'T10'),('5-6',['matrix_valid','energetics_fresh','fit_fresh','clip_valid','geometry_fresh','scores_fresh','goldens_passed','energy_complete'],'T27')]:
         ready={k:True for k in checks}
         for status in ['failed','complete','pending','blocked']:
             case(gate+'-'+validator+'-'+status,'gate',dict(checks=ready,validator_status=status),{'allowed':status!='failed'})
@@ -335,7 +338,6 @@ if __name__ == '__main__':
       'S15':dict(schema=1,echo=energy_echo_value,values=copy_values),
       'S17':dict(schema=1,echo=energy_echo_value,rows=[]),
       'S19':dict(schema=1,echo=dict(classes=[],clip=clip_value,selected_keys=[],best_fits=fit_echo_value),rows=[]),
-      'S20':dict(schema=1,echo=dict(bases=[],clip=clip_value,selected_keys=[],best_fits=fit_echo_value),rows=[]),
       'S21':dict(schema=1,structure_id='1b7f'),
       'S23':dict(schema=1,pdb_code='1b7f',range_specs=dict(schema=1,pdbcode='1b7f',biounit=1,rows=[rna,*proteins]),pdbs=[dict(range='range-1',name='range-1-aa.pdb',pdb='ATOM  example\n')]),
       'interactions':dict(schema=1,clip1=0,clip2=0,kept_residues=residues,ranges=[dict(index=2,**proteins[0])],runs=[],interactions={})}
@@ -349,10 +351,7 @@ if __name__ == '__main__':
             if version is None: del bad['schema']
             else: bad['schema']=version
             shape(sid+'-all-version-'+str(version),sid,bad,'schema-version')
-    missing_base=copy.deepcopy(partial);missing_base['bases']=[b for b in partial['bases'] if b['fragment']!=3]
-    case('threshold-missing-kept-base','threshold-complete',missing_base,{'complete':False},kept=[3],fragment_map=fmap)
     all_filled=copy.deepcopy(tedit)
-    for b in all_filled['bases']: b.update(nuc1_ovrmsd='0.13',nuc2_ovrmsd='0.13')
     for p in all_filled['pairs']: p.update(ovrmsd='0.13',crmsd='0.13')
     all_filled['pairs']=[]
     case('threshold-missing-kept-pair','threshold-complete',all_filled,{'complete':False},kept=[2,3],fragment_map=fmap)
@@ -378,8 +377,8 @@ if __name__ == '__main__':
           rounding_source='plans/final/contract-boundaries.md §1; future A4/A6 goldens',rounding_examples=[dict(raw='-16.5913',rounded='-16.59'),dict(raw='-16.59',rounded='-16.58'),dict(raw='0.123',rounded='0.13')]))
     write('fixtures.json',dict(schema=1,cases=corpus))
     write('golden-references.json',goldens)
-    write('inventory.json',dict(schema=1,active_transformers=['T'+str(i) for i in range(29) if i!=17],active_shares=['S'+str(i) for i in range(1,26) if i!=16],
-      transformer_names=dict(zip(['T'+str(i) for i in range(29) if i!=17],['parse_ranges','ranges_to_pdb','pdbs_to_folder','aareduce_ranges','detect_stacking','best_fit','refe_fragments','best_fit_tables','best_fit_thresholds','parse_best_fits','validate_threshold_edits','clip_fragments','energetics_ligands','energetics_range_<k>','merge_energetics','interaction_handoff','energy_thresholds','detect_stacking_bestfit','validate_gaussian_classes','gaussian_check_jobs','gaussian_check','merge_gaussian_validation','validate_refe_anchors','list_fragments','share_range_pdbs_aa','structure_id','validate_energy_threshold_edits','gaussian_scores'])),
+    write('inventory.json',dict(schema=1,active_transformers=['T'+str(i) for i in range(29) if i not in (17,23)],active_shares=['S'+str(i) for i in range(1,26) if i not in (16,20)],
+      transformer_names=dict(zip(['T'+str(i) for i in range(29) if i not in (17,23)],['parse_ranges','ranges_to_pdb','pdbs_to_folder','aareduce_ranges','detect_stacking','best_fit','refe_fragments','best_fit_tables','best_fit_thresholds','parse_best_fits','validate_threshold_edits','clip_fragments','energetics_ligands','energetics_range_<k>','merge_energetics','interaction_handoff','energy_thresholds','detect_stacking_bestfit','validate_gaussian_classes','gaussian_check_jobs','gaussian_check','merge_gaussian_validation','list_fragments','share_range_pdbs_aa','structure_id','validate_energy_threshold_edits','gaussian_scores'])),
       schemas={k:'schemas.json#/$defs/'+k for k in D if k.startswith(('S','B'))},
       non_enveloped_shares={'S1':'pdbcode text','S2':'biounit positive integer','S3':'CIF text','S6':'unshared list[str]; internal cell'},
       backend_boundaries={'B17':'gaussian_check_jobs','B18':'gaussian_check','interactions':'interaction_handoff','energy-thresholds':'energy-thresholds.json'}))

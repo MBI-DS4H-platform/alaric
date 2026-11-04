@@ -94,7 +94,7 @@ def test_export_multi_range_energy_actions_form_successive_and_chain(snapshot):
 @pytest.mark.parametrize("path", [
     ("validations",), ("validations", "results"), ("validations", "decisions"),
     ("validations", "results", "fit"), ("validations", "results", "energetics"),
-    ("validations", "results", "gaussian"), ("validations", "decisions", "thresholds"),
+    ("validations", "results", "gaussian"), ("validations", "results", "thresholds"), ("validations", "decisions", "thresholds"),
     ("handoff",), ("class_table",), ("selected_anchors",), ("reference_candidates",),
 ], ids=lambda path: ".".join(path))
 @pytest.mark.parametrize("replacement", ["absent", "null", "empty"])

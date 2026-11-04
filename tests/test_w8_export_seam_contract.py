@@ -29,8 +29,8 @@ def snapshot():
     # Anchor 1/second addresses RNA residue 2, shared by fragment 2/first;
     # anchor 3/first addresses residue 3, shared by fragment 2/second.
     candidates.extend([
-        dict(fragment=2,sequence='CG',nucleotide='first',ovrmsd='0.80'),
-        dict(fragment=2,sequence='CG',nucleotide='second',ovrmsd='0.90'),
+        dict(fragment=2,sequence='CG',nucleotide='first',ovrmsd='0.80',ovrmsd_raw=0.79),
+        dict(fragment=2,sequence='CG',nucleotide='second',ovrmsd='0.90',ovrmsd_raw=0.89),
     ])
     reference=b'HEADER prepared RNA\r\nATOM preserved bytes\r\nEND\r\n'
     return dict(
@@ -48,7 +48,7 @@ def snapshot():
         bestfit_energies={'frag-1-AC':{'range-2':-16.6},'frag-3-GU':{'range-2':-2.01}},
         class_table={'schema':1,'rows':[{'key':'anchor-a','class':95}]},
         handoff={'schema':1,'fragment_rows':['frag-1-AC','frag-2-CG','frag-3-GU']},
-        validations={'results':{'fit':'fresh','energetics':'fresh','gaussian':'fresh'},
+        validations={'results':{'fit':'fresh','energetics':'fresh','gaussian':'fresh','thresholds':'fresh'},
                      'decisions':{'thresholds':{'valid':True,'value':{'schema':1}}}},
         proceed_anyway_required=False,proceed_anyway=False)
 
@@ -85,7 +85,7 @@ def test_x2_computes_missing_checksum_without_normalizing_bytes(snapshot):
     assert bundle['reference_sha256']==hashlib.sha256(snapshot['prepared_reference']).hexdigest()
 
 
-def test_x3_both_modes_explicit_edited_thresholds_and_candidate_deduplication(snapshot):
+def test_x3_both_modes_explicit_computed_thresholds_and_candidate_deduplication(snapshot):
     bundle=api().build_export_bundle(snapshot)
     anchors=bundle['anchor_actions']
     assert len(anchors)==2
@@ -210,3 +210,89 @@ def test_w8a_export_preserves_selected_stackings_and_both_modes_from_kept_candid
     assert {(row["fragment"], row["nucleotide"]) for row in bundle["anchor_refe_actions"]} == expected
     assert all(row["ovrmsd"] != "auto" for row in bundle["anchor_refe_actions"])
     assert snapshot["class_table"] == classes_before
+
+
+@pytest.mark.parametrize('rounded,raw,sentinel', [('1.73', 1.72, False), ('1.74', 1.731, True), ('2.25', 2.24, True)])
+def test_w8b_computed_threshold_is_copied_or_disabled_with_associated_comment(snapshot, rounded, raw, sentinel):
+    row = snapshot['reference_candidates'][0]
+    row.update(ovrmsd=rounded, ovrmsd_raw=raw)
+    bundle = api().build_export_bundle(snapshot)
+    action = next(a for a in bundle['anchor_refe_actions'] if (a['fragment'], a['nucleotide']) == (row['fragment'], row['nucleotide']))
+    assert not bundle['hard_blocks']
+    assert bundle['ready']
+    assert bundle['proceed_anyway_required'] is False
+    assert float(action['ovrmsd']) == (-1 if sentinel else float(rounded))
+    if sentinel:
+        assert isinstance(action['ovrmsd'], (int, float)) and not isinstance(action['ovrmsd'], bool)
+    assert 'comment' not in action
+    comments = [c for c in bundle['anchor_refe_comments'] if (c['fragment'], c['nucleotide']) == (row['fragment'], row['nucleotide'])]
+    assert len(comments) == int(sentinel)
+    if sentinel:
+        comment = comments[0]['comment']
+        assert str(raw) in comment and rounded in comment
+        assert 'L_ov' in comment or 'L_OV' in comment
+        assert 'disabled positive control' in comment.lower()
+        assert 'without misses' in comment.lower()
+        if raw < 3 ** .5:
+            assert 'best-fit pose itself lies beyond' not in comment.lower()
+    frozen = deepcopy(bundle['anchor_refe_comments'])
+    row['ovrmsd_raw'] = 99
+    assert bundle['anchor_refe_comments'] == frozen
+
+
+@pytest.mark.parametrize('field,value', [
+    ('ovrmsd', None), ('ovrmsd', 'auto'), ('ovrmsd', True), ('ovrmsd', 'NaN'),
+    ('ovrmsd_raw', None), ('ovrmsd_raw', 'auto'), ('ovrmsd_raw', True), ('ovrmsd_raw', float('inf')),
+])
+def test_w8b_missing_or_malformed_computed_candidate_evidence_is_refused(snapshot, field, value):
+    snapshot['reference_candidates'][0][field] = value
+    try:
+        bundle = api().build_export_bundle(snapshot)
+    except ValueError:
+        return
+    assert bundle['hard_blocks'] and not bundle['ready']
+
+
+@pytest.mark.parametrize('field', ['ovrmsd', 'ovrmsd_raw'])
+def test_w8b_missing_computed_candidate_value_is_refused(snapshot, field):
+    del snapshot['reference_candidates'][0][field]
+    try:
+        bundle = api().build_export_bundle(snapshot)
+    except ValueError:
+        return
+    assert bundle['hard_blocks'] and not bundle['ready']
+
+
+@pytest.mark.parametrize('field,second', [('ovrmsd', '2.26'), ('ovrmsd_raw', 2.23)])
+def test_w8b_dedup_checks_original_values_before_sentinel_substitution(snapshot, field, second):
+    target = snapshot['reference_candidates'][0]
+    target.update(ovrmsd='2.25', ovrmsd_raw=2.24)
+    duplicate = {**target, field: second}
+    snapshot['reference_candidates'].append(duplicate)
+    try:
+        bundle = api().build_export_bundle(snapshot)
+    except ValueError:
+        return
+    assert bundle['hard_blocks'] and not bundle['ready']
+
+
+@pytest.mark.parametrize('status', [None, 'stale', 'running', 'failed'])
+def test_w8b_s9_freshness_is_required_at_export_even_after_continue(snapshot, status):
+    snapshot['validations']['results']['thresholds'] = status
+    snapshot['proceed_anyway'] = True
+    try:
+        bundle = api().build_export_bundle(snapshot)
+    except ValueError:
+        return
+    assert bundle['hard_blocks'] and not bundle['ready']
+
+
+def test_w8b_clipping_disabled_candidate_removes_its_action_and_comment(snapshot):
+    snapshot['reference_candidates'][0].update(ovrmsd='2.25', ovrmsd_raw=2.24)
+    del snapshot['kept_fragments']['frag-1-AC']
+    snapshot['kept_pairs'] = snapshot['kept_pairs'][1:]
+    snapshot['handoff']['fragment_rows'] = list(snapshot['kept_fragments'])
+    bundle = api().build_export_bundle(snapshot)
+    assert bundle['ready'] and not bundle['hard_blocks']
+    assert not any(row['fragment'] == 1 for row in bundle['anchor_refe_actions'])
+    assert not any(row['fragment'] == 1 for row in bundle['anchor_refe_comments'])

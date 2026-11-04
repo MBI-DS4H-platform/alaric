@@ -202,7 +202,7 @@ def normalize_action(name: str, path: Path, data: dict[str, Any]) -> ActionSpec:
                 raise SchemaError(f"{path}: {exc}") from exc
     if action == "anchor-refe" and data.get("ovrmsd") != "auto":
         ovrmsd = float(data["ovrmsd"])
-        if ovrmsd <= 0:
+        if not math.isfinite(ovrmsd) or (ovrmsd <= 0 and ovrmsd != -1):
             raise SchemaError(f"{path}: ovrmsd must be positive")
         data["ovrmsd"] = ovrmsd
     if action in {"rmsd", "anchor-refe"}:

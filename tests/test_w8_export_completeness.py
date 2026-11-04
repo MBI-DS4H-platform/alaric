@@ -86,7 +86,7 @@ def test_single_terminal_kept_fragment_allows_empty_pair_set(
     complete_snapshot["selected_anchors"] = [anchor]
     complete_snapshot["reference_candidates"] = [dict(
         fragment=fragment, sequence=anchor["sequence"],
-        nucleotide=nucleotide, ovrmsd="0.80",
+        nucleotide=nucleotide, ovrmsd="0.80", ovrmsd_raw=0.79,
     )]
     complete_snapshot["kept_pairs"] = []
     complete_snapshot["handoff"]["fragment_rows"] = [key]
@@ -106,7 +106,7 @@ def test_nonadjacent_kept_ids_do_not_invent_a_grow_pair(complete_snapshot):
         anchor["nucleotide"] = nucleotide
     complete_snapshot["reference_candidates"] = [dict(
         fragment=anchor["fragment"], sequence=anchor["sequence"],
-        nucleotide=anchor["nucleotide"], ovrmsd="0.80",
+        nucleotide=anchor["nucleotide"], ovrmsd="0.80", ovrmsd_raw=0.79,
     ) for anchor in complete_snapshot["selected_anchors"]]
     complete_snapshot["handoff"]["fragment_rows"] = list(complete_snapshot["kept_fragments"])
     bundle = api().build_export_bundle(complete_snapshot)

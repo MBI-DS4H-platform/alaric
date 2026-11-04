@@ -105,7 +105,7 @@ def _decision_hard_blocks(validations: Any) -> list[str]:
     if not isinstance(results, dict):
         results = {}
         blocks.append("validation results are missing or invalid")
-    for name in ("fit", "energetics", "gaussian"):
+    for name in ("fit", "energetics", "gaussian", "thresholds"):
         if name not in results:
             blocks.append(f"result {name} is missing")
     for name, raw_status in results.items():
@@ -289,6 +289,8 @@ def build_export_bundle(snapshot: dict[str, Any]) -> dict[str, Any]:
     elif not reference_candidates:
         hard_blocks.append("reference candidate evidence is empty")
     refe_by_key: dict[tuple[int, str], dict[str, Any]] = {}
+    computed_by_key: dict[tuple[int, str], tuple[float, float, str]] = {}
+    comment_by_key: dict[tuple[int, str], str] = {}
     available_anchor_candidates: set[tuple[int, str, str]] = set()
     for candidate in reference_candidates:
         if not isinstance(candidate, dict):
@@ -314,28 +316,63 @@ def build_export_bundle(snapshot: dict[str, Any]) -> dict[str, Any]:
         if not sequence:
             raise ValueError(f"fragment {fragment} sequence is required for anchor-refe")
         threshold = candidate.get("ovrmsd")
+        raw_threshold = candidate.get("ovrmsd_raw")
+        if isinstance(threshold, bool) or isinstance(raw_threshold, bool):
+            raise ValueError(f"fragment {fragment} {nucleotide} computed ovRMSD evidence is malformed")
         threshold_number = _finite_threshold(threshold, f"fragment {fragment} {nucleotide} ovrmsd")
+        try:
+            raw_threshold_number = float(raw_threshold)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"fragment {fragment} {nucleotide} raw ovrmsd must be numeric") from exc
+        if not math.isfinite(raw_threshold_number) or raw_threshold_number < 0:
+            raise ValueError(f"fragment {fragment} {nucleotide} raw ovrmsd must be finite and nonnegative")
+        if threshold_number <= raw_threshold_number:
+            raise ValueError(f"fragment {fragment} {nucleotide} rounded ovrmsd must exceed its raw value")
         key = (fragment, nucleotide)
+        evidence = (threshold_number, raw_threshold_number, sequence)
+        previous_evidence = computed_by_key.get(key)
+        if previous_evidence is not None and previous_evidence != evidence:
+            hard_blocks.append(
+                f"conflicting computed anchor-refe evidence for fragment {fragment}/{nucleotide}"
+            )
+        else:
+            computed_by_key[key] = evidence
+        exceeds_limit = threshold_number > L_OV
+        emitted_threshold: str | int = -1 if exceeds_limit else (
+            str(threshold) if isinstance(threshold, str) else str(threshold)
+        )
         action = {
             "action": "anchor-refe",
             "fragment": fragment,
             "sequence": sequence,
             "exclude": "auto",
             "nucleotide": nucleotide,
-            "ovrmsd": str(threshold) if isinstance(threshold, str) else f"{threshold_number:.2f}",
+            "ovrmsd": emitted_threshold,
             "reference": "reference.pdb",
         }
+        if exceeds_limit:
+            comment = (
+                f"Computed base ovRMSD raw={raw_threshold}, rounded={threshold} Å; "
+                f"L_ov={L_OV:.17g} Å. The required rounded positive-control threshold exceeds "
+                "the ovRMSD Alaric can search without misses, so this action cannot work."
+            )
+            if raw_threshold_number > L_OV:
+                comment += " The best-fit pose itself also lies beyond the coverage limit."
+            comment += " This action is kept on purpose as a disabled positive control."
+            comment_by_key[key] = comment
         available_anchor_candidates.add((fragment, nucleotide, sequence))
         previous = refe_by_key.get(key)
-        if previous is not None and previous["ovrmsd"] != action["ovrmsd"]:
+        if previous is not None and previous["sequence"] != action["sequence"]:
             hard_blocks.append(
-                f"conflicting anchor-refe thresholds for fragment {fragment}/{nucleotide}"
+                f"conflicting anchor-refe sequences for fragment {fragment}/{nucleotide}"
             )
-            if float(action["ovrmsd"]) > float(previous["ovrmsd"]):
-                refe_by_key[key] = action
         else:
-            refe_by_key[key] = action
+            refe_by_key.setdefault(key, action)
     anchor_refe_actions = [refe_by_key[key] for key in sorted(refe_by_key)]
+    anchor_refe_comments = [
+        {"fragment": key[0], "nucleotide": key[1], "comment": comment_by_key[key]}
+        for key in sorted(comment_by_key)
+    ]
     for fragment, nucleotide, sequence in sorted(required_anchor_candidates):
         if (fragment, nucleotide, sequence) not in available_anchor_candidates:
             hard_blocks.append(
@@ -487,12 +524,6 @@ def build_export_bundle(snapshot: dict[str, Any]) -> dict[str, Any]:
     for down, up in sorted(required_kept_pair_addresses - observed_kept_pair_addresses):
         hard_blocks.append(f"kept pair {down}->{up} is missing from pair evidence")
 
-    for action in anchor_refe_actions:
-        if float(action["ovrmsd"]) > L_OV:
-            hard_blocks.append(
-                f"X6: anchor-refe fragment {action['fragment']} {action['nucleotide']} ovrmsd exceeds L_OV"
-            )
-
     proceed_condition = frozen.get("proceed_anyway_required")
     if type(proceed_condition) is not bool:
         hard_blocks.append("browser proceed-anyway condition is missing or invalid")
@@ -509,6 +540,7 @@ def build_export_bundle(snapshot: dict[str, Any]) -> dict[str, Any]:
         "min_cell_fraction": fraction,
         "anchor_actions": anchor_actions,
         "anchor_refe_actions": anchor_refe_actions,
+        "anchor_refe_comments": anchor_refe_comments,
         "energy_filter_actions": energy_filter_actions,
         "energy_thresholds": energy_threshold_file,
         "score_filter_defaults": copy.deepcopy(DEFAULT_SCORE_FILTER),

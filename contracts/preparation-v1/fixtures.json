@@ -119,15 +119,6 @@
       "boundary": "S19"
     },
     {
-      "id": "S20-undecided",
-      "operation": "schema",
-      "payload": null,
-      "expected": {
-        "valid": true
-      },
-      "boundary": "S20"
-    },
-    {
       "id": "S21-undecided",
       "operation": "schema",
       "payload": null,
@@ -215,38 +206,6 @@
             "ovrmsd": null,
             "crmsd": null
           }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          }
         ]
       },
       "expected": {
@@ -296,38 +255,6 @@
             "sequence": "UAC",
             "ovrmsd": null,
             "crmsd": null
-          }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
           }
         ]
       },
@@ -516,38 +443,6 @@
             "ovrmsd": null,
             "crmsd": null
           }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          }
         ]
       },
       "expected": {
@@ -597,38 +492,6 @@
             "sequence": "UAC",
             "ovrmsd": null,
             "crmsd": null
-          }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
           }
         ]
       },
@@ -811,38 +674,6 @@
             "ovrmsd": null,
             "crmsd": null
           }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          }
         ]
       },
       "expected": {
@@ -891,38 +722,6 @@
             "sequence": "UAC",
             "ovrmsd": null,
             "crmsd": null
-          }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
           }
         ]
       },
@@ -973,38 +772,6 @@
             "sequence": "UAC",
             "ovrmsd": null,
             "crmsd": null
-          }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
           }
         ]
       },
@@ -1893,38 +1660,6 @@
             "ovrmsd": null,
             "crmsd": null
           }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          }
         ]
       },
       "expected": {
@@ -1999,7 +1734,7 @@
             "down": 1,
             "up": 2,
             "sequence": "ACG",
-            "ovrmsd": null,
+            "ovrmsd": "1.234",
             "crmsd": null
           },
           {
@@ -2022,38 +1757,6 @@
             "sequence": "UAC",
             "ovrmsd": null,
             "crmsd": null
-          }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": "1.234",
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
           }
         ]
       },
@@ -2081,7 +1784,7 @@
             "down": 1,
             "up": 2,
             "sequence": "ACG",
-            "ovrmsd": null,
+            "ovrmsd": "0",
             "crmsd": null
           },
           {
@@ -2104,38 +1807,6 @@
             "sequence": "UAC",
             "ovrmsd": null,
             "crmsd": null
-          }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": "0",
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
           }
         ]
       },
@@ -2323,38 +1994,6 @@
             "crmsd": null
           }
         ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          }
-        ],
         "activation_token": "rejected-extension"
       },
       "expected": {
@@ -2404,38 +2043,6 @@
             "sequence": "UAC",
             "ovrmsd": null,
             "crmsd": null
-          }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
           }
         ],
         "parent_token": "rejected-extension"
@@ -2489,38 +2096,6 @@
             "crmsd": null
           }
         ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          }
-        ],
         "validation_receipt": "rejected-extension"
       },
       "expected": {
@@ -2572,38 +2147,6 @@
             "crmsd": null
           }
         ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          }
-        ],
         "model_identity": "rejected-extension"
       },
       "expected": {
@@ -2623,7 +2166,7 @@
     {
       "id": "load-legacy",
       "operation": "load",
-      "payload": "{\"active\":true,\"pairs\":[],\"bases\":[]}",
+      "payload": "{\"schema\": 1, \"basis\": {\"pdbcode\": \"1b7f\", \"rna\": {\"chain\": \"R\", \"start\": 101, \"end\": 106}}, \"active\": true, \"pairs\": [{\"down\": 1, \"up\": 2, \"sequence\": \"ACG\", \"ovrmsd\": null, \"crmsd\": null}, {\"down\": 2, \"up\": 3, \"sequence\": \"CGU\", \"ovrmsd\": null, \"crmsd\": null}, {\"down\": 3, \"up\": 4, \"sequence\": \"GUA\", \"ovrmsd\": null, \"crmsd\": null}, {\"down\": 4, \"up\": 5, \"sequence\": \"UAC\", \"ovrmsd\": null, \"crmsd\": null}], \"bases\": [{\"fragment\": 1, \"sequence\": \"AC\", \"nuc1_ovrmsd\": null, \"nuc2_ovrmsd\": null}, {\"fragment\": 2, \"sequence\": \"CG\", \"nuc1_ovrmsd\": null, \"nuc2_ovrmsd\": null}, {\"fragment\": 3, \"sequence\": \"GU\", \"nuc1_ovrmsd\": null, \"nuc2_ovrmsd\": null}, {\"fragment\": 4, \"sequence\": \"UA\", \"nuc1_ovrmsd\": null, \"nuc2_ovrmsd\": null}, {\"fragment\": 5, \"sequence\": \"AC\", \"nuc1_ovrmsd\": null, \"nuc2_ovrmsd\": null}]}",
       "expected": {
         "value": null,
         "diagnostic": "legacy"
@@ -2677,7 +2220,7 @@
     {
       "id": "load-valid-inactive",
       "operation": "load",
-      "payload": "{\"schema\": 1, \"basis\": {\"pdbcode\": \"1b7f\", \"rna\": {\"chain\": \"R\", \"start\": 101, \"end\": 106}}, \"active\": false, \"pairs\": [{\"down\": 1, \"up\": 2, \"sequence\": \"ACG\", \"ovrmsd\": null, \"crmsd\": null}, {\"down\": 2, \"up\": 3, \"sequence\": \"CGU\", \"ovrmsd\": null, \"crmsd\": null}, {\"down\": 3, \"up\": 4, \"sequence\": \"GUA\", \"ovrmsd\": null, \"crmsd\": null}, {\"down\": 4, \"up\": 5, \"sequence\": \"UAC\", \"ovrmsd\": null, \"crmsd\": null}], \"bases\": [{\"fragment\": 1, \"sequence\": \"AC\", \"nuc1_ovrmsd\": null, \"nuc2_ovrmsd\": null}, {\"fragment\": 2, \"sequence\": \"CG\", \"nuc1_ovrmsd\": null, \"nuc2_ovrmsd\": null}, {\"fragment\": 3, \"sequence\": \"GU\", \"nuc1_ovrmsd\": null, \"nuc2_ovrmsd\": null}, {\"fragment\": 4, \"sequence\": \"UA\", \"nuc1_ovrmsd\": null, \"nuc2_ovrmsd\": null}, {\"fragment\": 5, \"sequence\": \"AC\", \"nuc1_ovrmsd\": null, \"nuc2_ovrmsd\": null}]}",
+      "payload": "{\"schema\": 1, \"basis\": {\"pdbcode\": \"1b7f\", \"rna\": {\"chain\": \"R\", \"start\": 101, \"end\": 106}}, \"active\": false, \"pairs\": [{\"down\": 1, \"up\": 2, \"sequence\": \"ACG\", \"ovrmsd\": null, \"crmsd\": null}, {\"down\": 2, \"up\": 3, \"sequence\": \"CGU\", \"ovrmsd\": null, \"crmsd\": null}, {\"down\": 3, \"up\": 4, \"sequence\": \"GUA\", \"ovrmsd\": null, \"crmsd\": null}, {\"down\": 4, \"up\": 5, \"sequence\": \"UAC\", \"ovrmsd\": null, \"crmsd\": null}]}",
       "expected": {
         "value": {
           "schema": 1,
@@ -2718,38 +2261,6 @@
               "sequence": "UAC",
               "ovrmsd": null,
               "crmsd": null
-            }
-          ],
-          "bases": [
-            {
-              "fragment": 1,
-              "sequence": "AC",
-              "nuc1_ovrmsd": null,
-              "nuc2_ovrmsd": null
-            },
-            {
-              "fragment": 2,
-              "sequence": "CG",
-              "nuc1_ovrmsd": null,
-              "nuc2_ovrmsd": null
-            },
-            {
-              "fragment": 3,
-              "sequence": "GU",
-              "nuc1_ovrmsd": null,
-              "nuc2_ovrmsd": null
-            },
-            {
-              "fragment": 4,
-              "sequence": "UA",
-              "nuc1_ovrmsd": null,
-              "nuc2_ovrmsd": null
-            },
-            {
-              "fragment": 5,
-              "sequence": "AC",
-              "nuc1_ovrmsd": null,
-              "nuc2_ovrmsd": null
             }
           ]
         },
@@ -5401,7 +4912,7 @@
       "boundary": "energy-thresholds"
     },
     {
-      "id": "threshold-kept-only-complete",
+      "id": "threshold-no-kept-pairs-is-complete",
       "operation": "threshold-complete",
       "payload": {
         "schema": 1,
@@ -5442,297 +4953,6 @@
             "sequence": "UAC",
             "ovrmsd": null,
             "crmsd": null
-          }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          }
-        ]
-      },
-      "expected": {
-        "complete": false
-      },
-      "kept": [
-        3
-      ],
-      "fragment_map": {
-        "schema": 1,
-        "echo": {
-          "pdbcode": "1b7f",
-          "rna": {
-            "chain": "R",
-            "start": 101,
-            "end": 106
-          }
-        },
-        "residues": [
-          {
-            "chain": "R",
-            "resid": 101,
-            "insertion_code": "",
-            "base": "A"
-          },
-          {
-            "chain": "R",
-            "resid": 102,
-            "insertion_code": "",
-            "base": "C"
-          },
-          {
-            "chain": "R",
-            "resid": 103,
-            "insertion_code": "",
-            "base": "G"
-          },
-          {
-            "chain": "R",
-            "resid": 104,
-            "insertion_code": "",
-            "base": "U"
-          },
-          {
-            "chain": "R",
-            "resid": 105,
-            "insertion_code": "",
-            "base": "A"
-          },
-          {
-            "chain": "R",
-            "resid": 106,
-            "insertion_code": "",
-            "base": "C"
-          }
-        ],
-        "fragments": [
-          {
-            "number": 1,
-            "key": "frag-1-AC",
-            "sequence": "AC",
-            "residues": [
-              {
-                "chain": "R",
-                "resid": 101,
-                "insertion_code": "",
-                "base": "A"
-              },
-              {
-                "chain": "R",
-                "resid": 102,
-                "insertion_code": "",
-                "base": "C"
-              }
-            ]
-          },
-          {
-            "number": 2,
-            "key": "frag-2-CG",
-            "sequence": "CG",
-            "residues": [
-              {
-                "chain": "R",
-                "resid": 102,
-                "insertion_code": "",
-                "base": "C"
-              },
-              {
-                "chain": "R",
-                "resid": 103,
-                "insertion_code": "",
-                "base": "G"
-              }
-            ]
-          },
-          {
-            "number": 3,
-            "key": "frag-3-GU",
-            "sequence": "GU",
-            "residues": [
-              {
-                "chain": "R",
-                "resid": 103,
-                "insertion_code": "",
-                "base": "G"
-              },
-              {
-                "chain": "R",
-                "resid": 104,
-                "insertion_code": "",
-                "base": "U"
-              }
-            ]
-          },
-          {
-            "number": 4,
-            "key": "frag-4-UA",
-            "sequence": "UA",
-            "residues": [
-              {
-                "chain": "R",
-                "resid": 104,
-                "insertion_code": "",
-                "base": "U"
-              },
-              {
-                "chain": "R",
-                "resid": 105,
-                "insertion_code": "",
-                "base": "A"
-              }
-            ]
-          },
-          {
-            "number": 5,
-            "key": "frag-5-AC",
-            "sequence": "AC",
-            "residues": [
-              {
-                "chain": "R",
-                "resid": 105,
-                "insertion_code": "",
-                "base": "A"
-              },
-              {
-                "chain": "R",
-                "resid": 106,
-                "insertion_code": "",
-                "base": "C"
-              }
-            ]
-          }
-        ],
-        "adjacent_pairs": [
-          {
-            "down": 1,
-            "up": 2,
-            "sequence": "ACG"
-          },
-          {
-            "down": 2,
-            "up": 3,
-            "sequence": "CGU"
-          },
-          {
-            "down": 3,
-            "up": 4,
-            "sequence": "GUA"
-          },
-          {
-            "down": 4,
-            "up": 5,
-            "sequence": "UAC"
-          }
-        ],
-        "candidates": [
-          {
-            "key": "anchor-A",
-            "fragment": "frag-3-GU",
-            "nucleotide": 1
-          }
-        ]
-      }
-    },
-    {
-      "id": "threshold-clipped-blanks-permitted",
-      "operation": "threshold-complete",
-      "payload": {
-        "schema": 1,
-        "basis": {
-          "pdbcode": "1b7f",
-          "rna": {
-            "chain": "R",
-            "start": 101,
-            "end": 106
-          }
-        },
-        "active": true,
-        "pairs": [
-          {
-            "down": 1,
-            "up": 2,
-            "sequence": "ACG",
-            "ovrmsd": null,
-            "crmsd": null
-          },
-          {
-            "down": 2,
-            "up": 3,
-            "sequence": "CGU",
-            "ovrmsd": null,
-            "crmsd": null
-          },
-          {
-            "down": 3,
-            "up": 4,
-            "sequence": "GUA",
-            "ovrmsd": null,
-            "crmsd": null
-          },
-          {
-            "down": 4,
-            "up": 5,
-            "sequence": "UAC",
-            "ovrmsd": null,
-            "crmsd": null
-          }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": "0.13",
-            "nuc2_ovrmsd": "0.13"
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
           }
         ]
       },
@@ -5919,12 +5139,241 @@
       }
     },
     {
+      "id": "threshold-clipped-pair-blanks-permitted",
+      "operation": "threshold-complete",
+      "payload": {
+        "schema": 1,
+        "basis": {
+          "pdbcode": "1b7f",
+          "rna": {
+            "chain": "R",
+            "start": 101,
+            "end": 106
+          }
+        },
+        "active": true,
+        "pairs": [
+          {
+            "down": 1,
+            "up": 2,
+            "sequence": "ACG",
+            "ovrmsd": null,
+            "crmsd": null
+          },
+          {
+            "down": 2,
+            "up": 3,
+            "sequence": "CGU",
+            "ovrmsd": "0.13",
+            "crmsd": "0.13"
+          },
+          {
+            "down": 3,
+            "up": 4,
+            "sequence": "GUA",
+            "ovrmsd": null,
+            "crmsd": null
+          },
+          {
+            "down": 4,
+            "up": 5,
+            "sequence": "UAC",
+            "ovrmsd": null,
+            "crmsd": null
+          }
+        ]
+      },
+      "expected": {
+        "complete": true
+      },
+      "kept": [
+        2,
+        3
+      ],
+      "fragment_map": {
+        "schema": 1,
+        "echo": {
+          "pdbcode": "1b7f",
+          "rna": {
+            "chain": "R",
+            "start": 101,
+            "end": 106
+          }
+        },
+        "residues": [
+          {
+            "chain": "R",
+            "resid": 101,
+            "insertion_code": "",
+            "base": "A"
+          },
+          {
+            "chain": "R",
+            "resid": 102,
+            "insertion_code": "",
+            "base": "C"
+          },
+          {
+            "chain": "R",
+            "resid": 103,
+            "insertion_code": "",
+            "base": "G"
+          },
+          {
+            "chain": "R",
+            "resid": 104,
+            "insertion_code": "",
+            "base": "U"
+          },
+          {
+            "chain": "R",
+            "resid": 105,
+            "insertion_code": "",
+            "base": "A"
+          },
+          {
+            "chain": "R",
+            "resid": 106,
+            "insertion_code": "",
+            "base": "C"
+          }
+        ],
+        "fragments": [
+          {
+            "number": 1,
+            "key": "frag-1-AC",
+            "sequence": "AC",
+            "residues": [
+              {
+                "chain": "R",
+                "resid": 101,
+                "insertion_code": "",
+                "base": "A"
+              },
+              {
+                "chain": "R",
+                "resid": 102,
+                "insertion_code": "",
+                "base": "C"
+              }
+            ]
+          },
+          {
+            "number": 2,
+            "key": "frag-2-CG",
+            "sequence": "CG",
+            "residues": [
+              {
+                "chain": "R",
+                "resid": 102,
+                "insertion_code": "",
+                "base": "C"
+              },
+              {
+                "chain": "R",
+                "resid": 103,
+                "insertion_code": "",
+                "base": "G"
+              }
+            ]
+          },
+          {
+            "number": 3,
+            "key": "frag-3-GU",
+            "sequence": "GU",
+            "residues": [
+              {
+                "chain": "R",
+                "resid": 103,
+                "insertion_code": "",
+                "base": "G"
+              },
+              {
+                "chain": "R",
+                "resid": 104,
+                "insertion_code": "",
+                "base": "U"
+              }
+            ]
+          },
+          {
+            "number": 4,
+            "key": "frag-4-UA",
+            "sequence": "UA",
+            "residues": [
+              {
+                "chain": "R",
+                "resid": 104,
+                "insertion_code": "",
+                "base": "U"
+              },
+              {
+                "chain": "R",
+                "resid": 105,
+                "insertion_code": "",
+                "base": "A"
+              }
+            ]
+          },
+          {
+            "number": 5,
+            "key": "frag-5-AC",
+            "sequence": "AC",
+            "residues": [
+              {
+                "chain": "R",
+                "resid": 105,
+                "insertion_code": "",
+                "base": "A"
+              },
+              {
+                "chain": "R",
+                "resid": 106,
+                "insertion_code": "",
+                "base": "C"
+              }
+            ]
+          }
+        ],
+        "adjacent_pairs": [
+          {
+            "down": 1,
+            "up": 2,
+            "sequence": "ACG"
+          },
+          {
+            "down": 2,
+            "up": 3,
+            "sequence": "CGU"
+          },
+          {
+            "down": 3,
+            "up": 4,
+            "sequence": "GUA"
+          },
+          {
+            "down": 4,
+            "up": 5,
+            "sequence": "UAC"
+          }
+        ],
+        "candidates": [
+          {
+            "key": "anchor-A",
+            "fragment": "frag-3-GU",
+            "nucleotide": 1
+          }
+        ]
+      }
+    },
+    {
       "id": "4-5-T10-failed",
       "operation": "gate",
       "payload": {
         "checks": {
           "threshold_complete": true,
           "clip_valid": true,
+          "thresholds_fresh": true,
           "energetics_fresh": true
         },
         "validator_status": "failed"
@@ -5940,6 +5389,7 @@
         "checks": {
           "threshold_complete": true,
           "clip_valid": true,
+          "thresholds_fresh": true,
           "energetics_fresh": true
         },
         "validator_status": "complete"
@@ -5955,6 +5405,7 @@
         "checks": {
           "threshold_complete": true,
           "clip_valid": true,
+          "thresholds_fresh": true,
           "energetics_fresh": true
         },
         "validator_status": "pending"
@@ -5970,6 +5421,7 @@
         "checks": {
           "threshold_complete": true,
           "clip_valid": true,
+          "thresholds_fresh": true,
           "energetics_fresh": true
         },
         "validator_status": "blocked"
@@ -5985,6 +5437,7 @@
         "checks": {
           "threshold_complete": false,
           "clip_valid": true,
+          "thresholds_fresh": true,
           "energetics_fresh": true
         },
         "validator_status": "complete"
@@ -6000,6 +5453,23 @@
         "checks": {
           "threshold_complete": true,
           "clip_valid": false,
+          "thresholds_fresh": true,
+          "energetics_fresh": true
+        },
+        "validator_status": "complete"
+      },
+      "expected": {
+        "allowed": false
+      }
+    },
+    {
+      "id": "4-5-missing-thresholds_fresh",
+      "operation": "gate",
+      "payload": {
+        "checks": {
+          "threshold_complete": true,
+          "clip_valid": true,
+          "thresholds_fresh": false,
           "energetics_fresh": true
         },
         "validator_status": "complete"
@@ -6015,6 +5485,7 @@
         "checks": {
           "threshold_complete": true,
           "clip_valid": true,
+          "thresholds_fresh": true,
           "energetics_fresh": false
         },
         "validator_status": "complete"
@@ -10543,230 +10014,6 @@
       "boundary": "S19"
     },
     {
-      "id": "S20-concrete-valid",
-      "operation": "schema",
-      "payload": {
-        "schema": 1,
-        "echo": {
-          "bases": [],
-          "clip": {
-            "schema": 1,
-            "basis": {
-              "pdbcode": "1b7f",
-              "rna": {
-                "chain": "R",
-                "start": 101,
-                "end": 106
-              }
-            },
-            "clip1": 0,
-            "clip2": 0
-          },
-          "selected_keys": [],
-          "best_fits": {
-            "pdb_code": "1b7f",
-            "rna": {
-              "chain": "R",
-              "start": 101,
-              "end": 106
-            },
-            "resids": [
-              {
-                "chain": "R",
-                "resid": 101,
-                "insertion_code": "",
-                "base": "A"
-              },
-              {
-                "chain": "R",
-                "resid": 102,
-                "insertion_code": "",
-                "base": "C"
-              },
-              {
-                "chain": "R",
-                "resid": 103,
-                "insertion_code": "",
-                "base": "G"
-              },
-              {
-                "chain": "R",
-                "resid": 104,
-                "insertion_code": "",
-                "base": "U"
-              },
-              {
-                "chain": "R",
-                "resid": 105,
-                "insertion_code": "",
-                "base": "A"
-              },
-              {
-                "chain": "R",
-                "resid": 106,
-                "insertion_code": "",
-                "base": "C"
-              }
-            ]
-          }
-        },
-        "rows": []
-      },
-      "expected": {
-        "valid": true
-      },
-      "boundary": "S20"
-    },
-    {
-      "id": "S20-all-version-None",
-      "operation": "schema",
-      "payload": {
-        "echo": {
-          "bases": [],
-          "clip": {
-            "schema": 1,
-            "basis": {
-              "pdbcode": "1b7f",
-              "rna": {
-                "chain": "R",
-                "start": 101,
-                "end": 106
-              }
-            },
-            "clip1": 0,
-            "clip2": 0
-          },
-          "selected_keys": [],
-          "best_fits": {
-            "pdb_code": "1b7f",
-            "rna": {
-              "chain": "R",
-              "start": 101,
-              "end": 106
-            },
-            "resids": [
-              {
-                "chain": "R",
-                "resid": 101,
-                "insertion_code": "",
-                "base": "A"
-              },
-              {
-                "chain": "R",
-                "resid": 102,
-                "insertion_code": "",
-                "base": "C"
-              },
-              {
-                "chain": "R",
-                "resid": 103,
-                "insertion_code": "",
-                "base": "G"
-              },
-              {
-                "chain": "R",
-                "resid": 104,
-                "insertion_code": "",
-                "base": "U"
-              },
-              {
-                "chain": "R",
-                "resid": 105,
-                "insertion_code": "",
-                "base": "A"
-              },
-              {
-                "chain": "R",
-                "resid": 106,
-                "insertion_code": "",
-                "base": "C"
-              }
-            ]
-          }
-        },
-        "rows": []
-      },
-      "expected": {
-        "error": "schema-version"
-      },
-      "boundary": "S20"
-    },
-    {
-      "id": "S20-all-version-2",
-      "operation": "schema",
-      "payload": {
-        "schema": 2,
-        "echo": {
-          "bases": [],
-          "clip": {
-            "schema": 1,
-            "basis": {
-              "pdbcode": "1b7f",
-              "rna": {
-                "chain": "R",
-                "start": 101,
-                "end": 106
-              }
-            },
-            "clip1": 0,
-            "clip2": 0
-          },
-          "selected_keys": [],
-          "best_fits": {
-            "pdb_code": "1b7f",
-            "rna": {
-              "chain": "R",
-              "start": 101,
-              "end": 106
-            },
-            "resids": [
-              {
-                "chain": "R",
-                "resid": 101,
-                "insertion_code": "",
-                "base": "A"
-              },
-              {
-                "chain": "R",
-                "resid": 102,
-                "insertion_code": "",
-                "base": "C"
-              },
-              {
-                "chain": "R",
-                "resid": 103,
-                "insertion_code": "",
-                "base": "G"
-              },
-              {
-                "chain": "R",
-                "resid": 104,
-                "insertion_code": "",
-                "base": "U"
-              },
-              {
-                "chain": "R",
-                "resid": 105,
-                "insertion_code": "",
-                "base": "A"
-              },
-              {
-                "chain": "R",
-                "resid": 106,
-                "insertion_code": "",
-                "base": "C"
-              }
-            ]
-          }
-        },
-        "rows": []
-      },
-      "expected": {
-        "error": "schema-version"
-      },
-      "boundary": "S20"
-    },
-    {
       "id": "S21-concrete-valid",
       "operation": "schema",
       "payload": {
@@ -11148,38 +10395,6 @@
             "ovrmsd": null,
             "crmsd": null
           }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          }
         ]
       },
       "expected": {
@@ -11228,38 +10443,6 @@
             "sequence": "UAC",
             "ovrmsd": null,
             "crmsd": null
-          }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
           }
         ]
       },
@@ -11310,38 +10493,6 @@
             "sequence": "UAC",
             "ovrmsd": null,
             "crmsd": null
-          }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
           }
         ]
       },
@@ -13282,259 +12433,6 @@
       "boundary": "S18"
     },
     {
-      "id": "threshold-missing-kept-base",
-      "operation": "threshold-complete",
-      "payload": {
-        "schema": 1,
-        "basis": {
-          "pdbcode": "1b7f",
-          "rna": {
-            "chain": "R",
-            "start": 101,
-            "end": 106
-          }
-        },
-        "active": true,
-        "pairs": [
-          {
-            "down": 1,
-            "up": 2,
-            "sequence": "ACG",
-            "ovrmsd": null,
-            "crmsd": null
-          },
-          {
-            "down": 2,
-            "up": 3,
-            "sequence": "CGU",
-            "ovrmsd": null,
-            "crmsd": null
-          },
-          {
-            "down": 3,
-            "up": 4,
-            "sequence": "GUA",
-            "ovrmsd": null,
-            "crmsd": null
-          },
-          {
-            "down": 4,
-            "up": 5,
-            "sequence": "UAC",
-            "ovrmsd": null,
-            "crmsd": null
-          }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          }
-        ]
-      },
-      "expected": {
-        "complete": false
-      },
-      "kept": [
-        3
-      ],
-      "fragment_map": {
-        "schema": 1,
-        "echo": {
-          "pdbcode": "1b7f",
-          "rna": {
-            "chain": "R",
-            "start": 101,
-            "end": 106
-          }
-        },
-        "residues": [
-          {
-            "chain": "R",
-            "resid": 101,
-            "insertion_code": "",
-            "base": "A"
-          },
-          {
-            "chain": "R",
-            "resid": 102,
-            "insertion_code": "",
-            "base": "C"
-          },
-          {
-            "chain": "R",
-            "resid": 103,
-            "insertion_code": "",
-            "base": "G"
-          },
-          {
-            "chain": "R",
-            "resid": 104,
-            "insertion_code": "",
-            "base": "U"
-          },
-          {
-            "chain": "R",
-            "resid": 105,
-            "insertion_code": "",
-            "base": "A"
-          },
-          {
-            "chain": "R",
-            "resid": 106,
-            "insertion_code": "",
-            "base": "C"
-          }
-        ],
-        "fragments": [
-          {
-            "number": 1,
-            "key": "frag-1-AC",
-            "sequence": "AC",
-            "residues": [
-              {
-                "chain": "R",
-                "resid": 101,
-                "insertion_code": "",
-                "base": "A"
-              },
-              {
-                "chain": "R",
-                "resid": 102,
-                "insertion_code": "",
-                "base": "C"
-              }
-            ]
-          },
-          {
-            "number": 2,
-            "key": "frag-2-CG",
-            "sequence": "CG",
-            "residues": [
-              {
-                "chain": "R",
-                "resid": 102,
-                "insertion_code": "",
-                "base": "C"
-              },
-              {
-                "chain": "R",
-                "resid": 103,
-                "insertion_code": "",
-                "base": "G"
-              }
-            ]
-          },
-          {
-            "number": 3,
-            "key": "frag-3-GU",
-            "sequence": "GU",
-            "residues": [
-              {
-                "chain": "R",
-                "resid": 103,
-                "insertion_code": "",
-                "base": "G"
-              },
-              {
-                "chain": "R",
-                "resid": 104,
-                "insertion_code": "",
-                "base": "U"
-              }
-            ]
-          },
-          {
-            "number": 4,
-            "key": "frag-4-UA",
-            "sequence": "UA",
-            "residues": [
-              {
-                "chain": "R",
-                "resid": 104,
-                "insertion_code": "",
-                "base": "U"
-              },
-              {
-                "chain": "R",
-                "resid": 105,
-                "insertion_code": "",
-                "base": "A"
-              }
-            ]
-          },
-          {
-            "number": 5,
-            "key": "frag-5-AC",
-            "sequence": "AC",
-            "residues": [
-              {
-                "chain": "R",
-                "resid": 105,
-                "insertion_code": "",
-                "base": "A"
-              },
-              {
-                "chain": "R",
-                "resid": 106,
-                "insertion_code": "",
-                "base": "C"
-              }
-            ]
-          }
-        ],
-        "adjacent_pairs": [
-          {
-            "down": 1,
-            "up": 2,
-            "sequence": "ACG"
-          },
-          {
-            "down": 2,
-            "up": 3,
-            "sequence": "CGU"
-          },
-          {
-            "down": 3,
-            "up": 4,
-            "sequence": "GUA"
-          },
-          {
-            "down": 4,
-            "up": 5,
-            "sequence": "UAC"
-          }
-        ],
-        "candidates": [
-          {
-            "key": "anchor-A",
-            "fragment": "frag-3-GU",
-            "nucleotide": 1
-          }
-        ]
-      }
-    },
-    {
       "id": "threshold-missing-kept-pair",
       "operation": "threshold-complete",
       "payload": {
@@ -13548,39 +12446,7 @@
           }
         },
         "active": true,
-        "pairs": [],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": "0.13",
-            "nuc2_ovrmsd": "0.13"
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": "0.13",
-            "nuc2_ovrmsd": "0.13"
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": "0.13",
-            "nuc2_ovrmsd": "0.13"
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": "0.13",
-            "nuc2_ovrmsd": "0.13"
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": "0.13",
-            "nuc2_ovrmsd": "0.13"
-          }
-        ]
+        "pairs": []
       },
       "expected": {
         "complete": false
@@ -13883,7 +12749,7 @@
             "down": 1,
             "up": 2,
             "sequence": "ACG",
-            "ovrmsd": null,
+            "ovrmsd": "0",
             "crmsd": null
           },
           {
@@ -13906,38 +12772,6 @@
             "sequence": "UAC",
             "ovrmsd": null,
             "crmsd": null
-          }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": "0",
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
           }
         ]
       },
@@ -13964,7 +12798,7 @@
             "down": 1,
             "up": 2,
             "sequence": "ACG",
-            "ovrmsd": null,
+            "ovrmsd": "0",
             "crmsd": null
           },
           {
@@ -13987,38 +12821,6 @@
             "sequence": "UAC",
             "ovrmsd": null,
             "crmsd": null
-          }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": "0",
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
           }
         ]
       },
@@ -15065,38 +13867,6 @@
             "ovrmsd": null,
             "crmsd": null
           }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          }
         ]
       },
       "expected": {
@@ -15323,38 +14093,6 @@
             "sequence": "UAC",
             "ovrmsd": null,
             "crmsd": null
-          }
-        ],
-        "bases": [
-          {
-            "fragment": 1,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 2,
-            "sequence": "CG",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 3,
-            "sequence": "GU",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 4,
-            "sequence": "UA",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
-          },
-          {
-            "fragment": 5,
-            "sequence": "AC",
-            "nuc1_ovrmsd": null,
-            "nuc2_ovrmsd": null
           }
         ]
       },
