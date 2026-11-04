@@ -186,3 +186,27 @@ def test_x7_bundle_is_immutable_snapshot_of_nested_inputs(snapshot):
     assert bundle==frozen
     assert bundle['snapshot']==original
     assert api().bundle_is_stale(bundle,snapshot)
+
+
+@pytest.mark.parametrize("removed", [(1,), (3,), (1, 3)], ids=["clip-5prime", "clip-3prime", "keep-middle-only"])
+def test_w8a_export_preserves_selected_stackings_and_both_modes_from_kept_candidates(snapshot, removed):
+    for fragment in removed:
+        key = next(key for key, row in snapshot["kept_fragments"].items() if row["fragment"] == fragment)
+        del snapshot["kept_fragments"][key]
+    kept = {row["fragment"] for row in snapshot["kept_fragments"].values()}
+    snapshot["kept_pairs"] = [row for row in snapshot["kept_pairs"] if row["down"] in kept and row["up"] in kept]
+    snapshot["handoff"]["fragment_rows"] = list(snapshot["kept_fragments"])
+    for candidate in snapshot["reference_candidates"]:
+        if candidate["fragment"] in removed:
+            candidate["ovrmsd"] = "1.74"  # clipped failure cannot block export
+    classes_before = deepcopy(snapshot["class_table"])
+    bundle = api().build_export_bundle(snapshot)
+    assert not bundle["hard_blocks"]
+    assert bundle["ready"]
+    assert len(bundle["anchor_actions"]) == 2
+    assert {row["fragment"] for row in bundle["anchor_actions"]} <= kept
+    assert [row["precomputed_filter_threshold"] for row in bundle["anchor_actions"]] == ["rrm95", "rrm90-disp45"]
+    expected = {(fragment, nucleotide) for fragment, nucleotide in [(1, "second"), (2, "first"), (2, "second"), (3, "first")] if fragment in kept}
+    assert {(row["fragment"], row["nucleotide"]) for row in bundle["anchor_refe_actions"]} == expected
+    assert all(row["ovrmsd"] != "auto" for row in bundle["anchor_refe_actions"])
+    assert snapshot["class_table"] == classes_before

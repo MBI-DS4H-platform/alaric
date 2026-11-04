@@ -19,7 +19,7 @@ Author decisions taken in this session:
 - the fit waits for stage 3;
 - Continue closes when there is nothing to anchor on;
 - stage 4's main purpose is the cRMSD/ovRMSD threshold table, which the user may copy from the reference values and/or fill in themselves;
-- the clip is changed in stage 4, never beyond a stacking anchor. On 5→4→5 the interaction matrix is reused: the clip it was built for is read from its extent (its fragment-row keys, I2), and the first and last runs are filled in or reduced.
+- the clip is changed in stage 4 and keeps at least one candidate of every selected stacking anchor (author amendment, 2026-11-04). On 5→4→5 the interaction matrix is reused: the clip it was built for is read from its extent (its fragment-row keys, I2), and the first and last runs and candidate locks are adapted.
 
 The author's answers to §11 (2026-10-29):
 - Back keeps the decision of every stage, by deactivating its marker (§11.3);
@@ -33,8 +33,8 @@ The author's answers to §11 (2026-10-29):
 - Seamless guarantees that an equal-value PUT never revokes downstream, and that read-only mounts are polled (§11.12, §11.13).
 
 The author's answers in `contract-open-questions.md` (2026-10-29):
-- "beyond an anchor" has the strict reading: no candidate fragment of a selected anchor is ever clipped (D2a);
-- a kept clip that cuts a newly selected anchor is clamped by Continue 3→4, automatically and possibly silently; this is the only exception to G9 of `oracle-contract.md` (D2b);
+- D2a's original strict reading is superseded by the author's 2026-11-04 amendment: one of two candidate fragments may be clipped, provided every selected anchor retains at least one candidate;
+- a kept clip is minimally clamped by Continue 3→4 only when a newly selected anchor has no kept candidate, automatically and possibly silently; this is the only exception to G9 of `oracle-contract.md` (D2b as amended);
 - rows uncovered when the kept matrix is adapted are filled by Recompute's growth rule, only at run ends that touched the old clip boundary (D3);
 - rows of clipped fragments need not be filled before stage 5 (D4);
 - no interacting matrix cell may lie on a row with a scoring error (D12);
@@ -116,7 +116,7 @@ Seamless has seven node states: `unwired`, `miswired`, `blocked`, `waiting`, `co
 | waiting | `waiting` | an upstream is still computing |
 | blocked | `blocked-by-error` | an upstream failed |
 
-Transformer state never feeds the derived stage, and no Continue gate reads it. It only chooses between "computing…" and an error, and it drives banners.
+Transformer state never feeds the derived stage. Continue uses content echoes for freshness, with the author's retained exceptions that T10 must not be failed for 4→5 and T27 must not be failed for 5→6 (I4, §4.2). Those checks read the state graph; they are not validation receipts or a freshness guarantee. Otherwise node state chooses between "computing…" and an error, and drives banners.
 
 ## 3. The stage is derived from markers
 
@@ -130,7 +130,7 @@ Transformer state never feeds the derived stage, and no Continue gate reads it. 
 | 5 | S14 `interaction_matrix` | the selected stacking keys; the clip, as recorded by the matrix's fragment-row keys (I2) | Recompute |
 | 6 | S18 `gaussian_classes` | the selected stacking keys | the computed default classes |
 
-**valid(M_k)** ⇔ M_k is non-null, `active`, passes the frontend's validation, and its basis equals the current upstream values.
+**valid(M_k)** ⇔ M_k is non-null, `active`, is well-formed under the frontend's edit-only checks, and its basis equals the current upstream decisions. This predicate uses no computed cell or node state. In particular, S14's stored row extent is compared with the clip derived from edit decisions, while result-dependent matrix read checks against fresh S13/S10 belong to the 5→6 gate and editor, not stage derivation (OC P3, P5.6). An incomplete threshold skeleton is a valid stage-4 marker; completeness belongs to gate 4→5.
 
 **Stage** = the largest k such that M2..Mk are all valid. If M2 is not valid, the stage is 1.
 
@@ -160,7 +160,7 @@ Example: a tab that slept during stage 2 wakes up, and its queued `ranges` PUT l
   - It always holds a value: `{clip1, clip2, basis}`, with loader default `{0,0}`.
   - Its basis is `pdbcode` plus the range-1 row, the same as S11's.
   - **It is editable in stage 4 only (author decision)**, so it passes the rule. The matrix that depends on it is inactive whenever the clip can change. The matrix is adapted once, on Continue 4→5 (§4.2), not rewritten on every clip edit.
-  - **It never cuts a selected anchor (author decision).** The stage-4 clip control stops at the outermost anchor fragments. To clip further, the user first disables that anchor in stage 3. This is the strict reading of "beyond an anchor" (author, D2a): no candidate fragment of a selected anchor is ever clipped. An anchor newly selected inside a kept clip is handled by Continue 3→4, which clamps the clip (§4.2, D2b).
+  - **It keeps at least one candidate of every selected anchor (author amendment, 2026-11-04).** The stage-4 clip control may remove one of two candidates, but stops before removing the last candidate; a terminal singleton is protected. To clip further, the user first disables that anchor in stage 3. Continue 3→4 clamps only when a newly selected anchor has no kept candidate (§4.2, D2 as amended).
   - Whether it fits (it does not cut an anchor, and clip1 + clip2 < fragments in S22) is a gate and banner condition, not a stage condition.
 - **S24 `energy_threshold_edits`** is a stage-5 parameter, not a marker (author, D13). It passes the rule: nothing decided later depends on it, only the export.
   - It is null until stage 5 is first entered, then `{schema:1, basis:{pdbcode, range-1 row}, ranges:[{row, values:{"frag-N-SEQ": "-16.59" or null}}]}`. There is one entry per protein range, and every fragment key of S22 appears in each.
@@ -172,7 +172,7 @@ Example: a tab that slept during stage 2 wakes up, and its queued `ranges` PUT l
 ### 3.5 Invariant and orphans
 - In normal flow, every marker beyond the current stage is null or inactive.
 - **Orphans** are markers that are active beyond stage + 1. They appear only through races (§7.1) or exogenous writes. They do not affect derivation.
-- **Continue into stage k** first deactivates any active M_{>k}, and resets or clamps a non-marker decision of stage k (S12 when entering 4: reset when stale, clamped when it cuts a selected anchor; S24 when entering 5: reset when stale, per protein range). It waits for those writes to be accepted, and only then writes M_k.
+- **Continue into stage k** first deactivates any active M_{>k}, and resets or clamps a non-marker decision of stage k (S12 when entering 4: reset when stale, minimally clamped only when a selected anchor has no kept candidate; S24 when entering 5: reset when stale, per protein range). It waits for those writes to be accepted, and only then writes M_k.
   - Without that order, an orphan whose basis happens to match could become valid again and skip stage k's gate.
   - In normal flow nothing needs deactivating, so Continue is a single write.
   - `draft-implementation-plan.md` argues that this order does not close every cross-cell race, and proposed activation tokens (I1) and an admission check at commit time (D17). The author rejected both and weakened the guarantee instead: it holds only if tabs do not race (D17, O7).
@@ -203,7 +203,7 @@ Per-ligand `error` entries in S13 do not block Continue: Recompute stops at thos
 - **Input absent or computing:** "uploading structure…".
 - **Input failed:** S21 ≠ S1 once settled: banner (§7.1, last row).
 - **Writes:** S4 := `{basis:{pdbcode,biounit}, active, rows}`.
-- **Cascade:** T0 → S5 → T1 → S6 → T2, T3, T4 → S7. Once B4 exists: T6 → T24 → S22. Group B stays gated (§5.3).
+- **Cascade:** T0 → S5 → T1 → S6 → T2, T3, T4 → S7. Once B4 exists: T6 → T24 → S22. T3 also feeds T25 → S23. Group B stays gated (§5.3).
 
 **2→3**
 - **Gate:**
@@ -221,15 +221,16 @@ Per-ligand `error` entries in S13 do not block Continue: Recompute stops at thos
 - **Gate:**
   - S8 is valid and its keys equal those of a fresh S7;
   - at least one stacking is selected (author decision);
-  - S22 is fresh. The fit is **not** needed.
+  - S22 is fresh;
+  - this tab holds a fresh S23, the all-atom range PDBs that stage 4 must show (CB §8.6.5; OC P11). The fit is **not** needed.
 - **Input absent or computing:** "preparing all-atom structure…".
-- **Input failed:** banner for T3 (aareduce, for example a modified nucleotide), T6 or T24.
+- **Input failed:** banner for T3 (aareduce, for example a modified nucleotide), T6, T24 or T25.
 - **Writes:**
   - If S12's basis is stale: S12 := `{0,0, basis}`, awaited.
   - Otherwise, if S12 cuts a selected anchor: S12 := the clamped clip (below), awaited.
   - Then S11, kept or as a skeleton.
-- **Clip cutting an anchor (author, D2b).** A selection change in stage 3 can put an anchor inside the kept clip. Continue 3→4 then clamps the clip to the outermost anchors: with a_min and a_max the lowest and highest candidate fragment numbers of the selected anchors, clip1 := min(clip1, a_min − 1) and clip2 := min(clip2, n − a_max). The clamp is automatic and may be silent. It is the only automatic correction of a decision: the author's one exception to G9 of `oracle-contract.md`. A clamp can uncover empty threshold rows; the 4→5 gate then waits for them (D4).
-- **Cascade:** T10 becomes real, and T11 and T23 become real once S10 and S9 are fresh. T20 → T21 runs once S10 is fresh. T15 runs as a sentinel.
+- **Clip removing every candidate of an anchor (author, D2 as amended).** A selection change in stage 3 can leave a newly selected anchor with no kept candidate. Continue 3→4 minimally clamps the clip: over each selected anchor's candidate group C, clip1 := min(clip1, min_C(max(C) − 1)) and clip2 := min(clip2, min_C(n − min(C))). Integer/count constraints still apply. A clip already retaining one candidate per anchor stays unchanged. The clamp is automatic and may be silent. It is the only automatic correction of a decision: the author's one exception to G9 of `oracle-contract.md`. A clamp can uncover empty threshold rows; the 4→5 gate then waits for them (D4).
+- **Cascade:** T10 becomes real. T11 becomes real once S10 is fresh; it reads the edited thresholds, not S9. T23 becomes real once S10 and S9 are fresh. T20 → T21 runs once S10 is fresh. T15 runs as a sentinel.
 
 **4→5**
 - **Gate:**
@@ -245,15 +246,15 @@ Per-ligand `error` entries in S13 do not block Continue: Recompute stops at thos
   - Then S14 := `{basis: selected keys, active, rows, ranges, grid}`, in one of two ways. `rows` are the ordered keys of the fragments kept when the matrix was built, and `ranges` the ordered range ids of its columns (author, I2).
     - **Kept and adapted.** If an inactive S14 with matching selected keys exists, it is reactivated and adapted to the current clip:
       - the clip it was built for is read from its `rows`;
-      - only the first and last runs are affected: they are filled in where the new clip uncovered rows, and reduced where it covers more;
+      - for each protein range independently, only the 5′ end of its first run and the 3′ end of its last run are affected: they are filled in where the new clip uncovered rows, and reduced where it covers more;
       - uncovered rows are filled by Recompute's growth rule, applied to those rows only, and only at a run end that touched the old clip boundary. From there the run grows outwards while |E_refe| ≥ 1 or |E_bestfit| ≥ 1, and stops before the first row where both are < 1 and before a row with a scoring error. A run end that stopped short of the old boundary stays as the user left it (author, D3, §11.4a);
-      - every other run is unchanged.
+      - every other cell, lock and "until next anchor" join is unchanged.
     - **Recompute** otherwise.
 - **Cascade:** T15 → B14; T27 validates S24.
 
 **5→6**
 - **Gate:**
-  - S14 passes read validation (EN:81–84) against fresh S13, S10 and S12;
+  - S14 passes read validation against fresh S13, S10 and the current S12: its addressed extent is the kept fragments × protein ranges, its grid contains booleans only, every true run contains a lock of its range, every anchor cell is true, and no true cell has a scoring error (OC P5.6; D12). If an anchor's own lock has an error, no matrix passes: the diagnostic names the anchor and the user must deselect it in stage 3. A refused read disables the editor and offers explicit Recompute; nothing is repaired or written automatically;
   - S17 is fresh;
   - S25 is fresh: T28 has scored the candidates and derived the computed classes, and its golden check passed (O5);
   - every true cell of S14 has a value in S24, for its fragment and range, and T27 is not failed (author, D13; kept after I4). Values may come from Copy, from typing, or both; S15 is not needed. A cap move or a matrix adapted to a smaller clip can add true cells without a value, and the gate then stays closed until they are filled.
@@ -291,9 +292,9 @@ The alternative (A), clearing the marker to null, was rejected (author, §11.3).
 | S3 + S1 | 1 | as a pair, in the same tick, only after a successful download (§8.6.1); arbiter rule (§7.1) | S21; everything else is a sentinel because M2 is null or inactive |
 | S2 | 1 | immediately | T0, and through `range_specs` everything downstream of the ranges (D7) |
 | S4 | 2 | on row commit (blur or Enter), only rows that pass frontend validation; never per keystroke | T0–T4, T6, T24 (group B gated) |
-| S8 | 3 | per toggle | T15, T19, T20, T23 (sentinel or waiting) |
+| S8 | 3 | per toggle | T15, T19, T20, T23 (sentinel or waiting), T28 (computed class) |
 | S11 | 4–6 (OQ:8); `bases` also in the stage-6 refe panel | per committed table cell; Copy (enabled when S9 is fresh, with confirmation before overwriting typed values) | T10, T11, T23 |
-| S12 | 4 only (author); the control stops at the outermost anchors | debounced, about 300 ms | T11, T20 → T21 (seconds), T23. T15 runs as a sentinel, because S14 is inactive in stage 4. |
+| S12 | 4 only (author); the control stops at the outermost anchors | debounced, about 300 ms | T11, T20 → T21 (seconds), T23, T28 (computed class). T15 runs as a sentinel, because S14 is inactive in stage 4. |
 | S14 | 5 | per toggle | T15 |
 | S24 | 5–6 (D13) | per committed table cell; Copy (enabled when S15 is fresh, with confirmation before overwriting typed values) | T27 |
 | S18 | 6 | debounced, 500 ms (S6) | T19, T22 |
@@ -332,6 +333,7 @@ Steady state means after all computation has finished.
 | S5 `range_specs` | sentinel | F | F | F | F | F |
 | S7 `stackings` | sentinel | F | F | F | F | F |
 | S22 `fragments` (new) | sentinel | F | F | F | F | F |
+| S23 `range_pdbs_aa` | sentinel | F | F | F | F | F |
 | S9 `best_fit_thresholds`, S10 `best_fits` | gated | gated | computing → F | F | F | F |
 | S13 `energetics` | gated | gated | computing → F | F | F | F |
 | S15 `energy_thresholds` | gated | gated | computing → F | F | F | F |
@@ -349,10 +351,11 @@ S9, S10 and S13 are often still computing at stage 4. Stage 4 does not wait for 
 
 | Transformer(s) | 1 | 2 | 3 | 4 | 5 | 6 |
 |---|---|---|---|---|---|---|
-| T0–T4, T6, T24 | sentinel | real | complete | complete | complete | complete |
+| T0–T4, T6, T24, T25 | sentinel | real | complete | complete | complete | complete |
 | group B | gated | gated | real (minutes: library loading in T5 and T7) | complete, or still running | complete | complete |
 | T10 | sentinel | sentinel | sentinel | real | real | real |
-| T11, T23 | gated | gated | sentinel | real once S9 and S10 are fresh | real | real |
+| T11 | gated | gated | sentinel | real once S10 is fresh | real | real |
+| T23 | gated | gated | sentinel | real once S9 and S10 are fresh | real | real |
 | T15 | gated | gated | sentinel | sentinel | real | real |
 | T16 | gated | gated | real once S13 is fresh | real | real | real |
 | T27 | sentinel, or real on a kept S24 | same | same | same | real | real |
@@ -368,7 +371,7 @@ T13 instances are added and removed with S5 already at stage 2 (contract-boundar
 |---|---|---|---|
 | 1 | PDB code, biounit, viewer | "uploading structure…" | download error (browser-local); S21 ≠ S1 |
 | 2 | ranges table, viewer | none (S5 is not shown) | T0, T1 |
-| 3 | stacking table and selection | "detecting stackings…", "preparing all-atom structure…" | + T3, T4, T6, T24 |
+| 3 | stacking table and selection | "detecting stackings…", "preparing all-atom structure…" | + T3, T4, T6, T24, T25 |
 | 4 | threshold table (editable, with S9's computed values clearly visible alongside so that it is clear what Copy does (§11.6), "differs from computed" marks), Copy, clip, best-fit overlays | "computing reference thresholds…" (Copy disabled), "fitting…" | + T5–T11 |
 | 5 | energetics, matrix, energy-threshold table (editable, with S15's computed values clearly visible alongside, Copy, "differs from computed" marks; D13), threshold table, clip (read-only) | "scoring…" | + T12–T16, T27 |
 | 6 | classes, validation, refe panel, threshold table, energy-threshold table, clip (read-only) | "validating…" | + T18–T23, T28 |
@@ -384,6 +387,7 @@ Example: S13's fragment keys stay the same when a protein range is edited. If th
 |---|---|---|
 | S7 | structure id; range rows (T0-normalised) | S1; this tab's S4 rows |
 | S22 | `exclude_pdb_code`; range-1 row | lower-cased S1; S4 range 1 |
+| S23 | `exclude_pdb_code`; T0-normalised range specs (including biounit) | lower-cased S1; this tab's S4 rows and S2, normalised as by T0 |
 | S9, S10 | `exclude_pdb_code`; range-1 row and resids | lower-cased S1; S4 range 1 |
 | S13 | S10's echo plus every protein range row | S1; S4 |
 | S15 | S13's echo | S1; S4 |
@@ -450,10 +454,10 @@ The gate guarantee holds only if tabs do not race (author, D17, O7). The rows be
 ## 8. Load, reconnect and restart
 **Load** (a new tab or a reload):
 1. `connecting`: an overlay; nothing is editable.
-2. Wait until S1, S2, S4, S8, S11, S12, S14 and S18 have been read. Edit cells answer 200 or 204, never 404, so each one arrives. Computed cells may still be unread or 404.
+2. Wait until S1, S2, S4, S8, S11, S12, S14, S24 and S18 have been read. Edit cells answer 200 or 204, never 404, so each one arrives. S3 (`cif.cif`) is not auto-read by the share client; its mounted content stays backend-authoritative and is checked through S21. Computed cells may still be unread or 404.
 3. Derive the stage and render it. Computed cells that are unread or 404 show the pending wording.
 4. Show banners only after the first state graph.
-5. The viewer loads the structure for S1. There is no upload, because S3 is mounted (author decision).
+5. In stages 1–3 the viewer loads the structure for S1. In stages 4–6 it shows only fresh S23 range PDBs with fragment overlays, or "preparing all-atom structure…" until S23 is fresh (CB §8.6.5; OC P11). There is no upload, because S3 is mounted (author decision).
 6. Apply URL parameters as in §7.
 
 **Websocket blip** (same server process):
@@ -493,7 +497,7 @@ These changes were proposed here and applied to that document when both were fin
    - The `best_fits` signature reset of S11 and S12 is replaced by their bases.
    - Back deactivates instead of resetting.
    - The clip-driven matrix rewrite goes: the clip is edited in stage 4 only, and the kept matrix is adapted on Continue 4→5 (author decision; replaces EN:33 and EN:88).
-   - The clip control stops at the outermost selected anchors.
+   - The clip control stops before removing the last kept candidate of any selected anchor (D2 as amended).
    - The only remaining multi-cell write is S3 + S1, under the arbiter rule.
 7. **§8.4, echoes** are extended as in §6.
    - S13's echo must cover the protein ranges.
@@ -521,10 +525,10 @@ These changes were proposed here and applied to that document when both were fin
 3. **Back semantics: decided (author), (B), the `active` flag, for every marker (§11.3).** The matrix reuse across 5→4→5 requires (B) for M5.
    - (A), null, would throw away the threshold table on every Back 4→3.
 4. **Clip and matrix: decided (author).**
-   - The clip is edited in stage 4 only, never beyond a selected anchor.
+   - The clip is edited in stage 4 only and retains at least one candidate of every selected anchor (D2 as amended).
    - The kept matrix is adapted on Continue 4→5 from the clip recorded in its fragment-row keys (I2): the first and last runs are filled in or reduced.
    - Uncovered rows are filled by Recompute's growth rule, only at run ends that touched the old clip boundary (D3).
-   - An anchor newly selected inside the kept clip makes Continue 3→4 clamp the clip (D2b).
+   - A newly selected anchor with no kept candidate makes Continue 3→4 minimally clamp the clip (D2 as amended).
 5. **Export (deferred).**
    - The trigger is an edit cell, `export_request`, carrying the basis: every decision value plus the "proceed anyway" checkboxes.
    - The export runs only if that basis still matches when it executes, and its result echoes it.
@@ -539,7 +543,7 @@ These changes were proposed here and applied to that document when both were fin
 1. ~~Gate for group B~~: answered, wait for stage 3.
 2. ~~Empty selections~~: answered, both 2→3 and 3→4 are closed.
 3. **Back semantics (§10.3).** The matrix reuse implies deactivate-and-keep for M5. Should it apply uniformly to every marker, including S4, S8, S11 and S18? [Author: yes]
-4. ~~Clip and matrix~~: answered. The clip is edited in stage 4 only, never beyond an anchor, and the matrix is adapted on 5→4→5.
+4. ~~Clip and matrix~~: answered. The clip is edited in stage 4 only, retains at least one candidate per selected anchor (D2 as amended 2026-11-04), and the matrix is adapted on 5→4→5. The original question and answer below are historical; the amendment limits clamping to an anchor with no kept candidate.
    - (a) **Filling in uncovered rows.** When the new clip uncovers rows, do the first and last runs simply extend to the new boundary? Or are the new rows decided by Recompute's energy rule (|E| ≥ 1, stopping at error rows), applied to those rows only? [Author: Recompute's rule, only for a run that touched the old clip boundary (D3)]
    - (b) **An anchor selected inside a kept clip.** Suppose a user selects, in stage 3, a stacking whose fragment lies inside the kept clip. The draft opened stage 4 with the clip flagged and 4→5 closed until the clip is reduced. Would you prefer Continue 3→4 to clamp the clip to the outermost anchor automatically (one more awaited write before S11)? [Author: clamp the clip (D2b)]
 5. **Stage 4 gate.** Is "every unclipped threshold filled (copied and/or typed)" the right condition for 4→5, replacing OQ:8's "copied before stage 5"? Should rows of clipped fragments be required too? [Author: yes] Confirmed (D4): rows of clipped fragments are not required.

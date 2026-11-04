@@ -3,7 +3,9 @@
 This is a contract, not a design. It says what preparic must do and what Alaric must provide during project preparation (stages 1–6), at the level a test oracle needs. Each clause states an observable property, and its **Oracle** line says how to decide whether an implementation meets it. How a clause is met is left open. Where a plan chose a mechanism (a factory, a shared cell, an echo, a marker), this document keeps only the property the mechanism was meant to secure. Appendix A points back to the plans that describe one way of meeting each clause.
 
 **Sources and precedence.** The author's decisions win. They are recorded in these places:
+- the author's amendment of 2026-11-04: a clip may remove one candidate fragment of a selected stacking, provided at least one candidate remains. This supersedes the earlier strict reading of D2 and its assumption that matrix locks never change with the clip (§1, G9, P4.4, P5.3–P5.6, P6, X3);
 - `open-questions.md`;
+- `final/gaussian-precomputation-decisions.md`, including the accepted A7/A8 handoff, and `final/gaussian-boundary-goldens-amendment.md`, including its review verdict;
 - the "author decisions" list of `final/state-transitions.md` and the answers in its §11;
 - the author's clarification of 2026-10-29 on clip and interaction matrix (P4.4, P5.6);
 - the author's decision of 2026-10-29 on the displayed structure (P11);
@@ -13,7 +15,7 @@ This is a contract, not a design. It says what preparic must do and what Alaric 
 - the author's decision of 2026-10-29 that slip angle and displacement angle are one and the same, φ, measured from the protein ring normal (A7, P3.1, P3.2);
 - the author's answers of 2026-10-29 in `contract-open-questions.md` on the clip, the threshold table and the interaction matrix: D2, D3, D4, D12 and I2 (§1 clip, G9, P4.3, P4.4, P5.3–P5.7); on the scored pose, the go-ahead items and ovRMSD above L_ov: D10, D16 and D11 (P5.1, A11, A12, P6.6, X6); and on "Proceed anyway" and editable energy thresholds: D13 (P5.7, X5); on assembly copies, ring normals, class granularity, gaps and fragment numbering: D7, D8, D9, D15, O2, O3 (§1, P2.1, P3.2, A2, A12, P6.3); and on where Gaussians are computed: O5 (P6.1–P6.3); on this document's status, restarts, racing tabs and stored decisions: O1, O6, O7, D17 and I7 (this paragraph, G9, P2, P3, P5, P11); and on the fit gate: I6 (P10).
 
-After the author's decisions come `final/contract-boundaries.md` and `final/state-transitions.md`, both finalized on 2026-10-29, and then the mini-plans listed in `INDEX.txt`. The author has adopted this document as the acceptance contract: its clauses are the requirements, and their oracles define the tests, at the precedence above (O1). Its own additions that the author has not yet ruled on are gathered in `contract-open-questions.md`.
+After the author's decisions come `final/contract-boundaries.md` and `final/state-transitions.md`, both finalized on 2026-10-29, and then the mini-plans listed in `INDEX.txt`. The author has adopted this document as the acceptance contract: its clauses are the requirements, and their oracles define the tests, at the precedence above (O1). The answered decisions and proposals are recorded in `final/contract-open-questions.md`; none remains open there.
 
 **Scope.**
 - **In:** stages 1–6, every crossing between preparic and Alaric during them, and the obligations of the export stage that are already fixed (§6).
@@ -45,9 +47,10 @@ After the author's decisions come `final/contract-boundaries.md` and `final/stat
 - The **clip** is (clip1, clip2). It is valid iff all three hold:
   - both are non-negative integers;
   - clip1 + clip2 ≤ n − 1;
-  - it does not reach beyond any selected stacking anchor: no candidate fragment of a selected anchor is clipped (P4.4; the strict reading, author, D2).
+  - at least one candidate fragment of every selected stacking anchor is kept (P4.4; author amendment, 2026-11-04, superseding the strict reading of D2).
 
   The kept fragments are clip1+1 … n−clip2. A pair is kept iff both of its fragments are kept. A candidate is unclipped iff its fragment is kept.
+  A two-candidate anchor may lose either candidate, but never both. An anchor with only one existing candidate must keep it. For a stacking on the second nucleotide, with candidates 1 and 2, clipping fragment 1 is allowed while fragment 2 remains; clipping both requires first deselecting that stacking in stage 3.
 - **R(x)** is the threshold rounding: the smallest multiple of 0.01 that is strictly greater than x. Here x is the value as delivered: the table's decimal text for RMSDs, and the shortest round-trip decimal of the float64 for energies.
 - The twelve **filter names** are `rrm50`, `rrm60`, `rrm70` and `rrm80`, plus `rrmN`, `rrmN-tilt30`, `rrmN-disp45` and `rrmN-tilt30-disp45` for N ∈ {90, 95}.
 - **L_ov** is the largest ovRMSD threshold for which Alaric guarantees that it misses no pose. Today it is √3 Å ≈ 1.7320508 (§3.11).
@@ -111,7 +114,7 @@ The 18 hand-copied 1b7f YAML thresholds are reproduced unchanged.
 - When the startup loader resets a malformed stored file, the file's diagnostics are kept first (author, I7).
 - Missing or mismatching installed data is an installation error, and the message names the command that produces the data.
 - Every failure reaches the user (P6).
-- **The only exception (author, D2):** Continue 3→4 clamps a clip that cuts a newly selected anchor (P4.4). This correction is automatic and may be silent.
+- **The only exception (author, D2 as amended):** Continue 3→4 clamps a clip that leaves a newly selected anchor with no kept candidate (P4.4). This correction is automatic and may be silent. A clip that keeps one candidate is not clamped merely because the other is clipped.
 
 ## 3. What Alaric must provide
 
@@ -225,7 +228,10 @@ One committed JSON at a stable path (`$ALARIC_DIR/gaussian_stacking_filter.json`
   - The cutoff of `rrmN` is the Gaussian-only RRM-N cutoff (rounded down to 1e-5) from `envelope-analysis-5-report.md`.
   - Every variant `rrmN-…` has exactly its parent's cutoff, with its prefilters added on top. Its recall is therefore below N, by definition.
   - The re-derived per-variant cutoffs (0.229, 0.270, 0.164, 0.029) MUST NOT appear.
+  - Achieved recall and positive/negative counts come from the report; variant counts come from its "Added filters at fixed Gaussian-only cutoffs" table. Five-decimal rounding changes none of those counts.
+- **provenance:** the model and cutoff report are identified by SHA-256. The JSON records the report's source path, SHA-256 `11f854aa8e4e8a3ade18dcde84394f770bed08dea175796ae20e3f8953722edc`, and the rows supplying the cutoffs and counts. Alaric does not re-derive cutoffs or require a descriptor dataset or derivation CLI.
 - **golden:** vectors mapping (d, φ°, θ°) to a score, plus accept/reject pairs on either side of every cutoff and at the 30° and 45° boundaries.
+  - Strict-prefilter fixtures at φ = 45° and 44.99999°, and θ = 30° and 29.99999°, lie inside the applied mask and score at least 0.27592, so only the tested prefilter decides for the rrm90/rrm95 families. The implemented construction places the other descriptors at their conditional mean, x_j = μ_j + Σ_ji/Σ_ii · (v − μ_i); any fixture satisfying those isolation conditions is sufficient (Gaussian boundary amendment and review verdict). Decisions for all twelve names are recorded; rrm80 accepts the conditional-mean θ fixtures.
 - **Legacy compatibility is a non-goal** (author, 2026-10-29, legacy r90/r95). No legacy model/metadata entry or support for existing legacy-filter projects/fixtures is required.
 
 *Oracle:*
@@ -248,9 +254,10 @@ One committed JSON at a stable path (`$ALARIC_DIR/gaussian_stacking_filter.json`
 - each 90 filter lies inside its 95 counterpart.
 
 ### 3.8 A8. Gaussian caches and their generator
-- **Generator:** an Alaric script, neither Seamless nor committed data, writes the four CSR arrays for each name to `<root>/precomputed-filters/gaussian/<name>/`.
+- **Generator:** an Alaric script, neither Seamless nor committed data, writes the four CSR arrays for each name to `<root>/precomputed-filters/gaussian/<name>/`; a wrapper builds all twelve names.
   - That folder is gitignored.
   - The arrays may be installed compressed (`.npy.zst`) or decompressed (`.npy`).
+  - `npy_sha256` is the authoritative content identity and enters downstream cache keys. A compressed file with different `sha256` bytes is accepted as `recompressed` if its decompressed content matches `npy_sha256`; a different zstd version alone must not invalidate identical content (Gaussian decisions §3.4).
 - **Content:** the Hopf rotation grid (98,304 cells) crossed with the 0.25 Å translation lattice in ±5 Å. A (rotation, translation) pair is kept iff:
   - its score is ≥ the cutoff;
   - it lies inside the mask (d < 5, φ < 60°);
@@ -259,7 +266,7 @@ One committed JSON at a stable path (`$ALARIC_DIR/gaussian_stacking_filter.json`
   All masks are strict and evaluated exactly on the lattice. Ties do occur there, so the boundary tests must not go through `arccos`.
 
 *Oracle:*
-- The generated files' checksums equal the JSON's.
+- The generated arrays match the JSON's `npy_sha256`; compressed-byte matches are verified with `sha256`, and recompressed files with the same decompressed content are accepted as above.
 - Random membership samples agree with the model.
 - Legacy r90 reproduction is not an acceptance requirement (author, 2026-10-29).
 - The CSR invariants hold.
@@ -277,18 +284,18 @@ The author's requirement: check a small list of anchor poses against all twelve 
   - `capacity`: the cell capacity the anchor action uses;
   - `fill` = count / capacity;
   - `emitted` ⇔ fill ≥ the minimum cell fraction;
-  - `pose_pass` ⇔ the actual, unsnapped pose scores ≥ the cutoff and the filter's prefilters hold;
+  - `pose_pass` ⇔ the actual, unsnapped pose scores ≥ the cutoff, lies inside the applied mask (d < 5 Å and φ < 60°), and the filter's strict prefilters hold;
   - `score`.
 - **Per job:** an `error` for an incomplete ring, or when the pose rebuilt from (conformer, rotamer, grid) differs from the best-fit PDB by more than 0.002 Å RMSD.
 - **Early cutoff:** when a containing filter does not emit a job's cell, the filters inside it are not evaluated. They are returned as `{emitted:false, implied_by:<that filter>}`. The hierarchy is derived from the JSON, never hard-coded.
 - **Out:** `{schema:1, filter_set_version, min_cell_fraction, jobs:[{key, fragment, nucleotide, error?, filters:{<name>:{count, capacity, fill, emitted, pose_pass, score, implied_by?}}}]}`.
-- **Installation check:** the step verifies the caches' checksums before use. A missing or mismatching cache is an installation error that names the generator command.
+- **Installation check:** the step verifies the caches' checksums before use, accepting recompressed files with the authoritative `npy_sha256` match (A8). A missing or content-mismatching cache is an installation error that names the generator command.
 
 *Oracle:*
 - **Parity with the anchor action:**
   - on 1b7f, a job's `emitted` equals whether an anchor run with that filter emits that cell;
   - every pose an anchor run emits has fill ≥ the minimum cell fraction;
-  - the existing Gaussian anchor fixture output stays bit-identical.
+  - the pure-move refactor preserves anchor output for the twelve current filters. Legacy r90/r95 fixture output is not an acceptance requirement (Gaussian decisions).
 - **Monotonicity:** `emitted` and `pose_pass` never go from false to true when moving from a filter to one it contains.
 - **Speed:** with about 20 jobs, the check finishes within a few seconds, not counting decompression.
 
@@ -389,7 +396,7 @@ Export is deferred, but these obligations on Alaric's actions are already fixed.
   - the same decision was changed remotely meanwhile.
 - **Concurrent edits** of one decision: the last accepted write wins. The losing tab adopts it and tells its user.
 - **Write granularity:** ranges are written per completed row, never per keystroke. The clip and the class table are debounced. Everything else is written per action.
-- **One decision per user action.** No user action changes two decisions, except committing a new PDB code with its structure (P1.1). A decision stays editable in a later stage only if no later stage decision would have to change with it. That is why the clip is editable in stage 4 only (P4.4).
+- **Write granularity across decisions.** Ordinary edits change one decision; committing a new PDB code with its structure changes both (P1.1). Continue first sets aside any later active stage decisions, then resets or clamps the clip before entering stage 4 (P4.4), or reconciles the energy-threshold table before entering stage 5 (P5.7), when needed. It waits for these prerequisite writes to be accepted before putting the next stage decision in force. A decision stays editable in a later stage only if no later stage decision would have to change with it. That is why the clip is editable in stage 4 only (P4.4).
 
 **P5. Freshness.** A result is shown or used as current only if it was computed from the decisions this tab now holds, its own unconfirmed edits included. Otherwise the tab shows the result's pending wording or its error. Gates use only fresh results.
 - Freshness covers every decision on the result's path. For example, energetics depend on the protein ranges, not only on the fragment keys.
@@ -430,7 +437,7 @@ Pending wording:
 - URL parameters act only at stage 1, and a PDB code from the URL only when no code is set. Opening a link therefore never resets a shared project.
 
 **P10. Cost of edits.**
-- A clip edit never re-runs a library step or scoring.
+- A clip edit never re-runs the fit, best-fit table generation or gridless energetics. Gaussian validation (A9) and Gaussian scores/computed classes may recompute for the changed set of kept candidates.
 - A class edit never re-runs the all-filter check (A9).
 - A matrix edit re-runs only the hand-off (P5.8). An energy-threshold edit re-runs only its validation (P5.7, P7).
 - The fit and everything downstream of it start when stage 3 is entered, never earlier (author). A committed range edit in stage 2 starts no library work while the stacking selection is not in force. An upstream change that lowers the stage without a Back (a stale tab's delayed write, a hand-edited file) leaves the selection in force, and the fit then restarts at stage 2 (author, I6).
@@ -493,7 +500,7 @@ Pending wording:
   The fit is not needed (author: the fit waits for stage 3, but stage 4 does not wait for the fit).
 
 ### Stage 4: best fit and RMSD thresholds
-- **P4.1** Preparic runs A1–A4 on the full RNA range, never on a clipped one. All four use the same RNA PDB, exclude code and library identity. Stage 4 opens as soon as the fragments are known (A2), without waiting for these results.
+- **P4.1** Preparic runs A1–A4 on the full RNA range, never on a clipped one. They use the full RNA PDB wherever required; every library-dependent step receives the same exclude code and library identity (G5). A2 needs no library, and A4 consumes the tables only. Stage 4 opens as soon as the fragments are known (A2), without waiting for these results.
 - **P4.2** The stage's main content is the cRMSD/ovRMSD threshold table (author). Shown alongside it:
   - the computed reference values, rounded;
   - per fragment: residues, sequence, conformer and `rmsd`;
@@ -521,14 +528,14 @@ Pending wording:
 - **P4.4** The clip (author):
   - **A parameter, always set.** The clip is a parameter of stage 4, never undecided; it starts at (0, 0). Like the table, it is tied to the PDB code and range 1. Continue into stage 4 resets a clip made for others to (0, 0).
   - **Where it can be edited.** It is editable in stage 4 only, and shown read-only in stages 5 and 6.
-  - **Never beyond a selected stacking anchor.** No candidate fragment of a selected anchor is ever clipped (the strict reading, author, D2). The clip control stops at the outermost anchors' candidates. To clip further, the user first deselects that anchor in stage 3.
-    - A stage 3 change can put a newly selected anchor inside the clipped region. Continue 3→4 then clamps the clip, before it puts the table in force: clip1 and clip2 are each reduced to the largest value that clips no candidate of a selected anchor (author, D2). The clamp is automatic and may be silent; it is the only exception to G9. Stage 4 therefore never opens with a clip that cuts an anchor.
+  - **Keep at least one candidate per selected stacking anchor** (author amendment, 2026-11-04). The clip may remove one of an anchor's two candidate fragments. The clip control stops before removing its last kept candidate. To remove all candidates, the user first deselects that stacking in stage 3. A terminal stacking with only one existing candidate cannot lose it.
+    - A stage 3 change can leave a newly selected anchor with no kept candidate. Continue 3→4 then clamps the clip before putting the table in force: each end is reduced only as far as needed to retain at least one candidate of every selected anchor. The 5′ limit is one less than the smallest, over selected anchors, of their largest candidate numbers; the 3′ limit is n minus the largest, over selected anchors, of their smallest candidate numbers. Each clip component is capped at its corresponding limit; the integer/count constraints still apply. A clip already keeping a candidate of every anchor stays unchanged. The clamp is automatic and may be silent; it is the only exception to G9. Stage 4 therefore never opens with a selected anchor lacking a kept candidate.
     - A clamp can uncover empty threshold rows; the gate 4→5 then waits for them to be filled.
   - **Greying.** Clipped fragments, and any pair that touches one, are greyed in every table.
-  - **Cost.** A clip edit re-runs no library step and no scoring. It never touches the interaction matrix, which is set aside whenever the clip can change and is adapted once, on Continue 4→5 (P5.6).
+  - **Cost.** A clip edit re-runs neither the fit, best-fit table generation nor gridless energetics (P10). It never touches the interaction matrix, which is set aside whenever the clip can change and is adapted once, on Continue 4→5 (P5.6).
 - **Gate 4→5:**
   - every value of the threshold table's kept rows is filled and valid, and its backend validator is not failing. Rows of clipped fragments, and pairs that touch one, need not be filled (author, D4); a clip reduction can therefore uncover empty rows, and the gate then stays closed until they are filled. The computed thresholds are not needed;
-  - the clip is valid: it fits the fragment count and cuts no selected anchor;
+  - the clip is valid: it fits the fragment count and keeps at least one candidate of every selected anchor;
   - the energetics are fresh. In practice this is the only place the user waits for the fit.
 
 ### Stage 5: energetics and interactions
@@ -543,7 +550,7 @@ Pending wording:
   - The threshold table and the energy-threshold table (P5.7) are editable here; the clip is read-only.
 - **P5.3 Anchors and columns.**
   - Each selected stacking gives an anchor (RNA residue r, protein range). Anchors with the same (r, range) collapse into one.
-  - An anchor locks its candidates. Under the strict reading (author, D2), none of them is ever clipped, so locks never change with the clip.
+  - An anchor locks exactly its unclipped candidates. There is always at least one, by P4.4. Clipping one candidate removes that candidate's lock; uncovering it restores the lock. The selected stacking and its column remain selected throughout.
   - There is one column per anchor, sorted along the RNA.
   - The **invariants:**
     1. Each column is one contiguous run that contains its lock.
@@ -570,17 +577,18 @@ Pending wording:
   - **Tied to its clip.** A matrix built for another clip than the current one is not valid (P3), so the stage is at most 4. This happens, for example, when Continue 4→5 in one tab races a clip edit in another. The next Continue 4→5 adapts the matrix; nothing needs repairing.
   - **Reuse on 5→4→5 (author).** Continue 4→5 restores a set-aside matrix whose selected anchors are unchanged, adapted to the current clip:
     - the matrix's own clip is read from its row keys;
-    - only the outer ends change. For each protein range, those are the 5' end of its 5'-most column and the 3' end of its 3'-most column. Every other cell, every lock and every "until next anchor" join stays as it was. This holds because the clip never reaches beyond an anchor;
+    - only the outer ends change. For each protein range, those are the 5' end of its 5'-most column and the 3' end of its 3'-most column. Locks are recalculated from the current unclipped candidates (P5.3): a clipped candidate loses its lock and an uncovered candidate regains it. Interior cells, caps and "until next anchor" joins stay as they were. No selected anchor loses its last lock;
     - rows that the new clip covers are dropped (the matrix is reduced);
-    - rows that the new clip uncovers are filled in by Recompute's growth rule (P5.4), applied to the new rows only, and only at an outer end that touched the old clip boundary. From there the run grows outwards while |E_refe| ≥ 1 or |E_bestfit| ≥ 1 for that range, and stops before the first row where both are < 1 and before a row with a scoring error. An outer end that stopped short of the old boundary stays as the user left it (author, D3).
+    - newly uncovered candidate locks are mandatory true cells, regardless of their energies. A scoring error on such a lock makes the matrix fail read validation; the lock is never silently omitted (D12);
+    - other rows that the new clip uncovers are filled in by Recompute's growth rule (P5.4), applied to the new rows only, and only at an outer end that touched the old clip boundary. From there the run grows outwards while |E_refe| ≥ 1 or |E_bestfit| ≥ 1 for that range, and stops before the first row where both are < 1 and before a row with a scoring error. An outer end that stopped short of the old boundary stays as the user left it (author, D3), subject to the mandatory locks above.
 
     Without such a matrix (none was set aside, or the anchors changed), Continue 4→5 runs Recompute.
   - **Read validation.** A read is refused unless:
     - the shape is kept fragments × ranges, with booleans only;
     - the matrix's extent equals the current clip;
     - every true run contains a lock of its range;
-    - every anchor cell is true;
-    - no true cell lies on a row with a scoring error (author, D12). If an anchor's own lock is such a row, no matrix can pass: the error names that anchor, and the remedy is to deselect it in stage 3. Nothing is deselected automatically (G9). This consequence is confirmed by the author.
+    - every current unclipped anchor cell is true, and each selected anchor has at least one such cell;
+    - no true cell lies on a row with a scoring error (author, D12). If an anchor's current lock is such a row, no matrix can pass: the error names that anchor. The user must deselect it in stage 3, or return to stage 4 and clip the failing candidate while retaining another candidate if possible under P4.4. Neither the lock nor the stacking is dropped automatically (G9).
   - **On a refused read:**
     - the editor is disabled;
     - an error names the failed check;
@@ -600,8 +608,9 @@ Pending wording:
     - **Basis.** The table is tied to the PDB code and range 1. Each range's values are also tied to that range's row, not to its index. A protein-range edit therefore resets only that range's values, when stage 5 is next entered (author, D13). If the computed values change for the same cells (after a refit or a code update), the values are kept and the differing cells are marked.
   - **The file** is `{"schema":1, "frag-N-SEQ":{"range-K":"-16.59"}, …}`: `schema` (G8) plus the threshold mapping at top level, with true cells only and no other key (author). Its values are the table's. The energy-filter parameters that the file no longer carries are written by the export (A12).
   - Every true cell has a best-fit energy, because read validation refuses a true cell on a row with a scoring error (P5.6, D12). Copy can therefore fill every true cell, and X5 can compare each with its best-fit energy.
-- **P5.8 Interaction hand-off.** It covers kept rows only:
-  `{clip1, clip2, kept_residues, ranges:[{index, chain, start, end}], runs:[{range, first_fragment, last_fragment, anchors:[{fragment, nucleotide}]}], interactions:{"frag-N-SEQ":[ranges]}}`.
+- **P5.8 Interaction hand-off.** `interactions.json` covers kept rows only:
+  `{schema:1, clip1, clip2, kept_residues, ranges:[{index, chain, start, end}], runs:[{range, first_fragment, last_fragment, anchors:[{fragment, nucleotide}]}], interactions:{"frag-N-SEQ":[ranges]}}`.
+  The `anchors` entries contain exactly the unclipped candidates belonging to the run; a clipped candidate is omitted without dropping its selected stacking.
   The backend checks the shape. Checking the anchor cells is deferred to the export (author).
 - **Gate 5→6:**
   - the matrix passes read validation against fresh energetics, a fresh fit and the current clip;
@@ -613,11 +622,13 @@ Pending wording:
 - Recompute's stop-row exclusion, clip stop, same-range joining, and independent overlapping ranges;
 - grid ↔ columns round trips;
 - each refused-read case, including a true cell on a row with a scoring error;
-- a Continue 3→4 that clamps a clip cutting a newly selected anchor;
+- a stacking on nucleotide 2 allows clipping fragment 1 while keeping fragment 2, but forbids clipping both while that stacking is selected; cover the symmetric 3′ case and a terminal stacking with only one existing candidate;
+- a Continue 3→4 preserves a retained clip that leaves one candidate and clamps one that leaves none, including multiple selected anchors;
 - reuse on 5→4→5:
   - with the clip unchanged, the identical matrix comes back;
-  - with the clip widened or narrowed, only the outer-end cells of P5.6 differ, and the result passes read validation;
-  - with a smaller clip, the uncovered rows are grown by Recompute's rule at an end that touched the old boundary, and stay false at an end that did not;
+  - with the clip widened or narrowed, only the outer-end cells and candidate locks of P5.6 differ, and the result passes read validation unless a required lock has a scoring error;
+  - a clipped candidate loses its lock without deselecting the stacking; uncovering it restores a mandatory true lock even with low energies, and a scoring error on that restored lock causes a refused read;
+  - with a smaller clip, uncovered non-lock rows are grown by Recompute's rule at an end that touched the old boundary, and stay false at an end that did not;
   - a Continue 4→5 that races a clip edit leaves the stage at 4.
 
 *Oracle for P5.7:*
@@ -631,7 +642,7 @@ Pending wording:
 - **P6.1 Model.**
   - Preparic's backend loads the model from A7. It requires `schema: 1` and all twelve names, and takes the names from the JSON, never from a hard-coded list.
   - Every Gaussian score and computed class is computed in the backend; the browser only reads them and computes no Gaussian (author, O5).
-  - The backend checks the golden vectors at 1e-12 whenever it scores. A failure disables stage 6.
+  - The backend checks the golden scores at relative tolerance 1e-12 and the accept/reject goldens whenever it scores. A failure disables stage 6.
   - A changed `filter_set_version` is shown as "model changed".
 - **P6.2 Descriptors.**
   - The best-fit candidates' descriptors, against the anchor's protein residue, are computed by the same code as stage 3's detection (author). The backend scores them with A7's model (author, O5).
@@ -659,7 +670,7 @@ Pending wording:
   - **Kept** across refits (differing rows are marked) and model-version changes. Back 6→5 sets it aside, and the next Continue restores it (D1).
 - **P6.5 Gaussian validation.**
   - A9 runs on its job list (§3.9), which does not depend on the class table, so it never re-runs on a class edit (P10). Merging its result with the classes is instant.
-  - Each row shows the worst case over its candidates:
+  - Each row shows the worst case over its unclipped candidates. A clipped candidate contributes no validation state:
 
     | State | Display |
     |---|---|
@@ -686,6 +697,8 @@ Pending wording:
   - The editable value is the threshold table's own cell (P4.3), not a second copy, so stages 4 and 6 always show the same number.
 - **Gate 6→export:** deferred. At least, every stage 6 result is fresh.
 
+*Oracle for candidate clipping (A9, P5.8, P6 and X3):* with one of a selected stacking's two candidates clipped, jobs and hand-off anchors contain only the kept candidate; computed classes, auto prefilters and both validation panels use that candidate alone, and both export modes retain it. A failing clipped candidate contributes no failure or action. Uncovering it restores its contribution. The selected stacking and its editable class row remain, with user class edits retained.
+
 ## 6. Export: obligations already fixed
 
 The export stage is deferred (author). These obligations are already fixed.
@@ -694,6 +707,7 @@ The export stage is deferred (author). These obligations are already fixed.
 - **X3. Both anchor modes.** Every selected anchor is exported in both modes, in parallel (author):
   - Gaussian `anchor` actions with `precomputed_filter_name: gaussian-rrm` and the row's filter name;
   - one `anchor-refe` action per unclipped candidate, with an explicit `ovrmsd` from the edited bases value (never `auto`), deduplicated.
+  A clipped candidate contributes no action in either mode. Clipping one candidate preserves the selected stacking, its class row and both modes for the remaining candidate(s).
 - **X4. Other inputs.**
   - `grow` thresholds come from the edited pairs values of kept pairs.
   - The energy filter reads P5.7's file, which holds the energy-threshold table's values for the true cells. Its other parameters, `epsilon: 15`, `cascade: auto` and `min_cascade: auto` among them, are written into each action as listed in A12.
@@ -713,74 +727,29 @@ The export stage is deferred (author). These obligations are already fixed.
   - any ovRMSD threshold it would emit exceeds L_ov (author), whether an `anchor-refe` bases value or a `grow` pairs value of a kept pair (author, D11). The remedy is to lower the value; if the best-fit pose then fails it, the export needs "Proceed anyway" (X5).
 - **X7. One consistent snapshot.** The export is computed from one consistent set of decisions. An edit made during the export leaves it visibly stale, never mixed.
 
-## 7. Decisions needed from the author
+## 7. Answered decisions
 
-Each item names what is open, the options, and the clause it changes. Where a plan made a recommendation, it is given. Every open item is now gathered, with this document's own proposals, in `contract-open-questions.md`; this list is kept for its IDs. Items the author has answered are marked **Answered**. Other decisions the author has already made are not repeated here; they appear as clauses above, marked "(author)". Those recorded in `final/state-transitions.md` and in the clarification on clip and matrix are now:
-- the fit waits for stage 3 (P10);
-- Continue is closed on an empty stacking table and on an empty selection (gates 2→3 and 3→4);
-- stage 4 is about the threshold table, filled by Copy and/or typing (P4.2, P4.3);
-- the clip is edited in stage 4 only and never beyond a selected anchor (P4.4);
-- on 5→4→5 the matrix is reused, with only its outer ends adapted to the clip (P5.6);
-- from stage 4 on, the viewer shows the backend's all-atom range PDBs, not the downloaded structure (P11).
+Every decision below is answered and applied. The IDs are retained for cross-references; `final/contract-open-questions.md` §5 records the author's answers and their application. Other author decisions appear in the clauses above and in the sources listed at the start of this document.
 
-1. **D1. Back keeps every stage decision** (P4; `final/state-transitions.md` §10.3, §11.3). **Answered:** yes, for every stage (author, §11.3). The matrix reuse requires this for the matrix. The draft applies it to every stage decision, so Back 4→3 keeps the threshold table, Back 6→5 keeps the class table, and Back 3→2 keeps the ticks. Confirm it for all stages, or limit it to the matrix. Limiting it would throw away the threshold table on every Back 4→3.
-2. **D2. The clip and the anchors** (§1 clip, P4.4, P5.3; `final/state-transitions.md` §11.4b). **Answered:** the strict reading, and Continue 3→4 clamps the clip (author, `contract-open-questions.md` D2a, D2b).
-   - **What "beyond a stacking anchor" means.** Options:
-     - **Strict (recommended):** no candidate fragment of any selected anchor may be clipped. Locks then never change with the clip, so the matrix reuse touches only the ends of runs. This matches the draft's "the control stops at the outermost anchor fragments".
-     - **By residue:** only the anchor's residue must stay among the kept residues. The anchor's outer candidate may then be clipped: the fragment with the anchor as `second` at the 5' end, or as `first` at the 3' end. That anchor's lock then shrinks to one fragment when the clip changes.
-   - **An anchor newly selected inside the kept clip.** The author ruled that clipping beyond an anchor is not allowed, and that the user should first disable the anchor in stage 3. That settles clip edits, but not this reverse case. Options:
-     - flag the clip in stage 4 and keep Continue 4→5 closed until the user reduces it (the draft); or
-     - have Continue 3→4 clamp the clip to the outermost anchor automatically, at the cost of one more awaited write.
-3. **D3. Filling uncovered rows when the matrix is reused** (P5.6; `final/state-transitions.md` §11.4a). **Answered:** (a) (author). When a smaller clip uncovers rows at an outer end, which of them become true? Options:
-   - **(a), recommended:** apply Recompute's growth rule to the new rows only (|E| ≥ 1, stopping at error rows). Do so only if the column's end touched the old clip boundary, that is, if the clip had cut the run. A run that ended before the boundary stays as the user left it. This gives what Recompute would have given at the cut ends, and keeps the user's caps elsewhere.
-   - **(b):** the end run simply extends to the new boundary, with every new row true.
-   - **(c):** leave the new rows false; the user extends the run by hand.
-4. **D4. Clipped rows and the 4→5 gate** (P4.3, gate 4→5; `final/state-transitions.md` §11.5). **Answered:** rows of clipped fragments are not required (author, confirming the draft). The draft requires only unclipped values to be filled. Should clipped rows be required too? If they are not, reducing the clip later in stage 4 uncovers empty rows, and the gate closes again until they are filled.
-5. **D5. The empty table on entering stage 4** (P4.3; `final/state-transitions.md` §11.6). **Answered:** explicit Copy, with the computed values clearly visible (author). Should the table start empty, with Copy one click away, or be prefilled from the computed values when those are already fresh? Prefilling makes the stored default depend on timing: two tabs racing Continue 3→4 could write different defaults.
-6. **D6. Opening stage 4 before the fit** (A2, P4.1; `final/state-transitions.md` §11.7). **Answered:** fragment keys from A2 are acceptable (author). The draft takes the fragment keys from the reference fragments (A2), which do not wait for the fit. A2 now must yield the same key set as the fit, so this is safe once A2 meets its clause. Confirm, or require the keys from the fit. With keys from the fit, stage 4 opens only after the fit, which takes minutes.
-7. **D7. Assembly copies and range atoms** (P2.1). **Answered:** (b), the backend applies the assembly operators (author). Original question (P2.1; this also answers the fact behind `final/state-transitions.md` §11.9, where the author kept `biounit` in M2's basis because chains may be duplicated). Found in preparic's code:
-   - The backend never receives the biounit. It extracts asymmetric-unit chains by label ids and strips copy suffixes, so `A`, `A-1` and `A-2` give the same atoms.
-   - The browser names chains, validates rows and highlights picks against the selected assembly.
+1. **D1. Back keeps every stage decision** (P4; ST §11.3). Back deactivates the stage decision and keeps its value, for every stage. Continue restores it when its basis still matches.
+2. **D2. The clip and the anchors** (§1, P4.4, P5.3; D2a, D2b; amended by the author, 2026-11-04). At least one candidate fragment of every selected anchor must remain kept; one of two candidates may be clipped. Continue 3→4 resets a clip with a stale basis or clamps a kept clip that leaves a newly selected anchor with no kept candidate, before putting the threshold table in force. A clip that retains one candidate stays unchanged. The automatic, possibly silent clamp is the only exception to G9.
+3. **D3. Filling uncovered rows when the matrix is reused** (P5.6; ST §11.4a). Recalculate locks from unclipped candidates and restore newly uncovered locks as mandatory true cells. Apply Recompute's growth rule to other new rows only, at outer run ends that touched the old clip boundary. Other caps, cells and joins stay as the user left them.
+4. **D4. Clipped rows and the 4→5 gate** (P4.3). Every value of the kept pair and base rows must be filled and valid. Clipped fragments and pairs touching them need not be filled. Uncovering an empty row closes the gate until it is filled.
+5. **D5. The empty table on entering stage 4** (P4.3; ST §11.6). A new table is an empty skeleton. Filling is by explicit Copy and/or typing; the computed values stay clearly visible alongside it.
+6. **D6. Opening stage 4 before the fit** (A2, P4.1; ST §11.7). Reference-fragment keys may supply the skeleton before the fit finishes. A2 and A1 must yield the same fragment-key set.
+7. **D7. Assembly copies and range atoms** (P2.1–P2.2). The backend applies the selected assembly's operators. A range picked on a copy is extracted, prepared and shown where it was picked, and browser and backend validate against the same assembly. Biounit is a real input of extraction and remains in the ranges' basis.
+8. **D8. Kabsch normals in stage 3** (A10, P3.2). Stage 3 and the best-fit descriptor computation use Kabsch normals fitted onto the same reference rings.
+9. **D9. Gaussian class granularity** (P6.3). One class per selected stacking anchor, scored on the worst of its unclipped candidates.
+10. **D10. Which pose stage 5 scores** (P5.1). The discrete best-fit library pose written by A1 is scored.
+11. **D11. ovRMSD above L_ov = √3 Å** (A11, A12, P6.6, X6). Export is blocked for any emitted bases or kept-pair ovRMSD threshold above the limit. The remedy is to lower the threshold, requiring explicit "Proceed anyway" if the best-fit pose then fails, or to deselect an offending anchor in stage 3. Alaric raises above the limit for both `grow` and `anchor-refe`; the tables are not extended.
+12. **D12. Interacting cells without an energy** (P5.5–P5.7). The editor forbids them and read validation refuses them. If an anchor's current unclipped lock is an error row, no matrix passes; the error names the anchor. The user must deselect it in stage 3 or explicitly clip the failing candidate in stage 4 while retaining another candidate under P4.4.
+13. **D13. What triggers "Proceed anyway"** (P5.7, X5). Amber and red states both trigger the checkbox. Energy thresholds are user-editable: the table starts empty, is filled by explicit Copy and/or typing, and needs a valid value in every true kept matrix cell before stage 6. For unchanged PDB code and RNA range, a protein-range edit resets only that range's values. A best-fit energy E ≥ the edited threshold T triggers "Proceed anyway".
+14. **D14. Persistent result cache and restart** (P2, P5, P11; ST §11.10; O6). Preparic runs without a persistent result cache. Every decision is mounted; results recompute after a backend restart. Correctness across that restart requires every browser tab to restart right afterwards; tabs kept open have undefined behaviour. Restart detection is outside the state-transition scope.
+15. **D15. Gaps and fragment numbering** (§1, P2.1, A12; O3). Preparic refuses an RNA range with any unobserved residue at stage 2. In Alaric, fragment N uses the Nth and (N+1)th residues present, regardless of residue numbering; a window across a gap is not a fragment. `Reference` must number ordinally and tools that assume absolute residue numbers, including `rmsd.py --fragment`, must be fixed. `sequence: auto` already counts positions among residues present.
+16. **D16. Go-ahead items** (A5, A12). Publish attract-jax `9453ee6` and `22b23e4` and their accuracy data, bump Alaric's submodule pointer from `12bba50`, and fix the 10-12 grid-node bug. They are implementation-plan work, not pending approvals. A12's `min_cascade` rule checks the whole action's undecided pose count before every grid step.
+17. **D17. Gate guarantee and transition admission** (P3; O7). Commit-time admission checks and activation tokens are rejected. The gate guarantee holds only when tabs do not race. When tab A presses Continue while tab B is not editing, B proceeds to the next stage as if it had pressed Continue too. Semantic bases and ordered orphan cleanup remain (P3–P4).
 
-   So the biounit changes which rows are valid, but not which atoms are used, and a picked symmetry copy is computed at its asymmetric-unit position. Options:
-   - (a) Ranges refer to asymmetric-unit chains only. Copy suffixes are refused, and rows are validated against the asymmetric unit. The biounit becomes display-only and no longer invalidates the ranges.
-   - (b) The backend applies the assembly operators. The biounit becomes a real input of range extraction, and the ranges stay tied to it.
-
-   Under P11, a range picked on a copy is shown from stage 4 on at the position the backend extracted. That makes the discrepancy visible, but does not settle D7.
-8. **D8. Kabsch normals in stage 3** (P3.2; `open-questions.md` stage 6 Q5). **Answered:** use Kabsch normals (author). Should stage 3 switch to Kabsch ring normals, so that its slip (φ) and tilt agree with stage 6? They differ by up to 0.7° today. If yes, the stage 3 numbers change and the reference rings become a stage 3 input (A10).
-9. **D9. Gaussian class granularity** (P6.3; stage 6 Q1). **Answered:** one class per stacking anchor, as recommended (author). Every plan assumes one class per stacking anchor, scored on the worse of its unclipped candidates. The alternative is one class per candidate, that is, per fragment × first/second.
-10. **D10. Which pose stage 5 scores** (P5.1; stage 4 Q3, adopted without confirmation). **Answered:** the discrete best-fit library pose, as recommended (author). The plans score the discrete best-fit library pose, which is what docking can sample and what the existing `.score` fixtures use. The alternative is an exact superposition.
-11. **D11. ovRMSD above L_ov = √3 Å** (A11, P6.6, X6). **Answered** (author): the block also covers `grow`'s pair ovRMSD; the remedy is to lower the threshold, with an explicit "Proceed anyway"; Alaric raises above √3. The author ruled that `anchor-refe` thresholds above the limit block the export. The three points were:
-    - **Scope.** Does the block also apply to `grow`'s pair ovRMSD? It clamps in exactly the same way.
-    - **Consequence.** Both anchor modes are always exported, so a single anchor candidate above √3 blocks the whole export. End fragments do reach such values (1b7f fragment 11, nucleotide 2: 2.246 Å). The clip can no longer remove an anchor's fragments, so the user's remedies are:
-      - lower the threshold, which fails the best-fit pose and requires "Proceed anyway"; or
-      - deselect the anchor in stage 3.
-
-      Is that the intended workflow?
-    - **Alaric's side.** Should Alaric raise on an `ovrmsd` above √3 instead of clamping silently, or extend its offset tables? Extending would move L_ov and lift the block.
-12. **D12. Interacting cells without an energy** (P5.7). **Answered:** the editor forbids it and read validation refuses it (author; P5.5, P5.6). Can a run cover a fragment whose scoring failed? Recompute never grows into one, but the editor does not forbid it, and such a cell has no energy to derive a threshold from. Options:
-    - the editor forbids it and read validation refuses it (recommended); or
-    - the export is blocked on such a cell.
-13. **D13. What triggers "Proceed anyway"** (X5). **Answered** (author): amber states trigger it like red ones. Energy thresholds are user-editable, in a table that works like stage 4's: it starts empty, is filled by explicit Copy and/or typing, and needs a value in every true cell before stage 6. One range's values reset only when that range changes (P5.7).
-    - Energy thresholds are computed only (P5.7), so the best-fit pose always meets them. Is the energetics trigger meant for user-editable energy thresholds, which no plan has? If so, should they be editable like the RMSD thresholds?
-    - Do amber states trigger the checkbox like red ones? These are fill < ⅓, a pose that fails, and a threshold inside the 1e-5 boundary zone.
-14. **D14. A persistent result cache** (P2; `final/state-transitions.md` §11.10). **Answered:** preparic runs with no persistent result cache (author's execution decision, `draft-implementation-plan.md` §1), and a restart is out of scope for state transitions (§11.10). Only mounted cells survive it, and the browser must restart right afterwards (author, O6; P2). Without one, every backend restart from stage 3 onwards re-runs the fit and the tables: minutes, with an 8 GB library load. Stage 4 stays editable meanwhile, but Continue 4→5 waits. Should preparic's Seamless configuration keep results across restarts?
-15. **D15. Gaps in the RNA range** (§1; A12 "one fragment numbering"). **Answered:** (a) for preparic. In Alaric, fragment N is the Nth and (N+1)th residue, whatever the residue numbers: tools that assume residues N and N+1 are fixed, and `Reference` renumbers ordinally (author, D15, O3). Original question: Alaric numbers fragments from the first residue present and leaves gaps where residues are unobserved. Preparic's plans number from the range's `start`. The two disagree when the range's first residue is unobserved, and the clip, pair and skeleton rules must cope with missing fragment numbers. 1b7f has no gap. Options:
-    - (a) Refuse, at the stage 2 gate, an RNA range with any unobserved residue (the simplest fit with "no lenient flags").
-    - (b) Support gaps throughout: fragment numbers with holes, clips by fragment number, and a residue mapping taken from the fragments.
-
-    Either way, Alaric's `sequence: auto` and `rmsd.py --fragment` must be fixed (A12), or the export must never rely on them.
-16. **Go-ahead items carried over from `open-questions.md`.** **Answered:** go ahead, and add them to the implementation plan (author). They are tasks of `draft-implementation-plan.md` W4 (publication and pointer bump) and W8 (the 10-12 fix).
-    - Push attract-jax `9453ee6` and `22b23e4`, commit its untracked accuracy data, and bump Alaric's submodule pointer from `12bba50`. A5 cannot run from Alaric's pinned attract-jax until then.
-    - Fix the 10-12 grid bug (a bead exactly on a grid node). It is a prerequisite of the energy-filter cascade.
-
-    The former question about "skip 10-12 if less than 1000 poses" is settled by `min_cascade` (A12): the count is checked before every step, against the poses still undecided.
-
-**Not decisions.**
-- `final/state-transitions.md` §11.4 (clip and matrix) is settled by the author's clarification (P4.4, P5.6). Its two remaining sub-points, D2 and D3, are now answered.
-- §11.8 (is the whole table editable in stages 4–6?) is answered by the author's own wording in `open-questions.md`: "the editable table remains visible and editable throughout". P4.3 follows it.
-- §11.10–11.13 have been answered by the author: a restart is out of scope for state transitions; no assumption is made about withdrawing queued writes, and a write of the correct state is always queued; Seamless guarantees that equal-value writes revoke nothing and that read-only Alaric mounts are polled. They affect how P3–P5 and P9 are met, not what they require.
-- The delivery form of each Alaric step (§3.0) is the implementer's choice, not the author's.
+**Other settled points.** The fit's gate remains the selection's active flag (P10, I6); browser validation suffices for navigation, with the retained backend failure checks at 4→5 and 5→6 (I4). Gaussian scores and computed classes are computed only in the backend (O5). Stored decisions without bases are never migrated; malformed-file diagnostics are kept before reset (G9, I7). Writes use `seamless-client.js` and its retries (I3): no assumption is made about withdrawing a queued write, and a write of the correct state is always queued. Equal-value writes revoke nothing, and read-only Alaric mounts are polled (ST §11.11–§11.13). The Alaric step's module/CLI form and whether to provide a factory remain implementation choices (§3.0).
 
 ## Appendix A. Where each clause comes from
 

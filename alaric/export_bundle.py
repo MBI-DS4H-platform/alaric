@@ -249,30 +249,34 @@ def build_export_bundle(snapshot: dict[str, Any]) -> dict[str, Any]:
         nucleotide = str(anchor["nucleotide"]).lower()
         if nucleotide not in {"first", "second"}:
             raise ValueError("anchor nucleotide must be first or second")
-        if f"frag-{fragment}-{sequence}" not in kept:
-            hard_blocks.append(
-                f"selected anchor fragment {fragment} {sequence} is missing from kept fragments"
-            )
-        required_anchor_candidates.add((fragment, nucleotide, sequence))
         residue_ordinal = fragment + (1 if nucleotide == "second" else 0)
-        for fragment_key in kept:
-            match = _FRAG_KEY.fullmatch(fragment_key)
-            assert match is not None
-            kept_fragment = int(match.group(1))
-            kept_sequence = match.group(2)
-            if kept_fragment == residue_ordinal - 1:
-                required_anchor_candidates.add((kept_fragment, "second", kept_sequence))
-            elif kept_fragment == residue_ordinal:
-                required_anchor_candidates.add((kept_fragment, "first", kept_sequence))
+        candidates = sorted(
+            (candidate_fragment, candidate_nucleotide, candidate_sequence)
+            for candidate_fragment, candidate_nucleotide in (
+                (residue_ordinal - 1, "second"), (residue_ordinal, "first")
+            )
+            for candidate_sequence in kept_sequences_by_fragment.get(candidate_fragment, ())
+        )
+        if not candidates:
+            hard_blocks.append(
+                f"selected anchor at RNA residue {residue_ordinal} has no kept candidate fragment"
+            )
+            continue
+        required_anchor_candidates.update(candidates)
+        action_fragment, action_nucleotide, action_sequence = next(
+            (candidate for candidate in candidates
+             if candidate == (fragment, nucleotide, sequence)),
+            candidates[0],
+        )
         anchor_actions.append(
             {
                 "action": "anchor",
-                "fragment": fragment,
-                "sequence": sequence,
+                "fragment": action_fragment,
+                "sequence": action_sequence,
                 "exclude": "auto",
                 "protein": str(anchor["protein"]),
                 "resid": int(anchor["resid"]),
-                "nucleotide": nucleotide,
+                "nucleotide": action_nucleotide,
                 "precomputed_filter_name": "gaussian-rrm",
                 "precomputed_filter_threshold": filter_name,
             }

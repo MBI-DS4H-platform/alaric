@@ -280,8 +280,17 @@ if __name__ == '__main__':
     case('fragment-unknown-candidate','fragments',bad,{'error':'candidate-membership'})
     bad=copy.deepcopy(fmap);bad['adjacent_pairs']=[]
     case('fragment-missing-adjacency','fragments',bad,{'error':'adjacency'})
-    for label,c1,c2,lo,hi in [('clamp-selected',3,3,2,4),('unchanged',0,0,2,4)]:
-        case('clip-'+label,'clip-clamp',dict(clip1=c1,clip2=c2,n=5,anchor_min=lo,anchor_max=hi),{'clip1':min(c1,lo-1),'clip2':min(c2,5-hi)})
+    # D2 amendment: candidate groups are independent selected stackings.
+    for label,c1,c2,n,groups,out in [
+        ('clamp-selected',3,3,5,[[2,3],[3,4]],(2,2)),
+        ('unchanged',0,0,5,[[2,3],[3,4]],(0,0)),
+        ('left-one-candidate',1,0,3,[[1,2]],(1,0)),
+        ('right-one-candidate',0,1,3,[[2,3]],(0,1)),
+        ('left-last-candidate',2,0,3,[[1,2]],(1,0)),
+        ('right-last-candidate',0,2,3,[[2,3]],(0,1)),
+        ('terminal-candidates',1,1,3,[[1],[3]],(0,0)),
+    ]:
+        case('clip-'+label,'clip-clamp',dict(clip1=c1,clip2=c2,n=n,anchor_candidates=groups),{'clip1':out[0],'clip2':out[1]})
     for label,new_rows,expected_grid in [('expanded',keys,[[True,False],[True,False],*matrix['grid'][2:]]),('reduced',keys[2:4],matrix['grid'][2:4])]:
         old=copy.deepcopy(five)
         case('matrix-adapt-'+label,'matrix-adapt',old,{'value':dict(old,rows=new_rows,grid=expected_grid)},full_rows=keys,new_rows=new_rows,growable={k:[True,True] for k in keys})

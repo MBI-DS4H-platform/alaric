@@ -168,7 +168,8 @@ def execute(case, definitions):
     elif op=='fragments':
         fragment_check(value)
     elif op=='clip-clamp':
-        return dict(clip1=min(value['clip1'],value['anchor_min']-1),clip2=min(value['clip2'],value['n']-value['anchor_max']))
+        groups=value['anchor_candidates']
+        return dict(clip1=min(value['clip1'],min(map(max,groups))-1),clip2=min(value['clip2'],value['n']-max(map(min,groups))))
     elif op=='matrix-adapt':
         full=case['full_rows']; new_rows=case['new_rows']; old_rows=value['rows']
         grid=[copy.deepcopy(value['grid'][old_rows.index(k)]) if k in old_rows else [False]*len(value['ranges']) for k in new_rows]

@@ -104,7 +104,7 @@ function execute(c: Json,defs: Json): Json {
     }
     case 'matrix': matrixCheck(value,c); break;
     case 'fragments': fragmentCheck(value); break;
-    case 'clip-clamp': return {clip1:Math.min(value.clip1,value.anchor_min-1),clip2:Math.min(value.clip2,value.n-value.anchor_max)};
+    case 'clip-clamp': return {clip1:Math.min(value.clip1,Math.min(...value.anchor_candidates.map((group: number[])=>Math.max(...group)))-1),clip2:Math.min(value.clip2,value.n-Math.max(...value.anchor_candidates.map((group: number[])=>Math.min(...group))))};
     case 'matrix-adapt': {
       const grid=c.new_rows.map((key: string)=>value.rows.includes(key) ? [...value.grid[value.rows.indexOf(key)]] : value.ranges.map(()=>false));
       for(let col=0;col<value.ranges.length;col++) for(const [boundary,direction] of [[0,-1],[value.rows.length-1,1]]) {
