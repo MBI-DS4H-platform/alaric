@@ -4,6 +4,7 @@ This is a contract, not a design. It says what preparic must do and what Alaric 
 
 **Sources and precedence.** The author's decisions win. They are recorded in these places:
 - the author's amendment of 2026-11-04: a clip may remove one candidate fragment of a selected stacking, provided at least one candidate remains. This supersedes the earlier strict reading of D2 and its assumption that matrix locks never change with the clip (§1, G9, P4.4, P5.3–P5.6, P6, X3);
+- the author's amendment of 2026-11-04 on `anchor-refe` thresholds. The per-nucleotide base ovRMSD values (A3/A4 `bases`) are computed, never edited. Each `anchor-refe` action uses A4's rounded value for its candidate, so the threshold table holds pairs only and stage 6 has no reference-anchor panel. A computed value above L_ov makes the export write a non-working action, with a sentinel and an explanatory comment, instead of blocking the export. No bases value triggers "Proceed anyway". This supersedes the editable bases, their stage 6 panel and the bases parts of D4 and D11 (A3, A4, P4.2, P4.3, gate 4→5, P6.6, X3, X5, X6, D4, D11);
 - `open-questions.md`;
 - `final/gaussian-precomputation-decisions.md`, including the accepted A7/A8 handoff, and `final/gaussian-boundary-goldens-amendment.md`, including its review verdict;
 - the "author decisions" list of `final/state-transitions.md` and the answers in its §11;
@@ -172,6 +173,8 @@ A factory that returns a ready transformer is optional. One exists for A1, and o
     - ovRMSD: the unaligned RMSD of the shared nucleotide as placed by the two best-fit poses.
     - cRMSD: the superposed (Kabsch) RMSD between the two conformers' versions of that nucleotide.
   - **Bases:** one row per fragment. For nucleotide 1 and for nucleotide 2, the unaligned RMSD of its base heavy atoms (two-character atom names) in the best-fit pose against the reference.
+    - They are used only as `anchor-refe` thresholds, and only for the candidates of selected anchors (X3). Computing them for every fragment is harmless.
+    - They are never edited (author amendment, 2026-11-04).
 - Values come from library coordinates, never from written PDBs. PDB precision flips one 1b7f threshold, so the library-free shortcut is not acceptable.
 
 *Oracle:*
@@ -182,7 +185,7 @@ A factory that returns a ready transformer is optional. One exists for A1, and o
 - **In:** A3's output.
 - **Out:** `{schema:1, pairs:[{down, up, sequence, ovrmsd, crmsd, ovrmsd_raw, crmsd_raw}], bases:[{fragment, sequence, nuc1_ovrmsd, nuc2_ovrmsd, nuc1_ovrmsd_raw, nuc2_ovrmsd_raw}]}`.
   - The rounded fields are R(raw) (G7).
-  - The `*_raw` fields carry the table values unchanged. They are contract: preparic validates edits against them (P6.6, X5).
+  - The `*_raw` fields carry the table values unchanged. They are contract: preparic validates pair edits against the pairs' raw values (X5), and the export quotes a candidate's bases raw value in the sentinel comment (X3).
 
 *Oracle:* G7's cases pass, together with an exact multiple, a negative value and a value just below a multiple. The 18 1b7f YAML values are reproduced.
 
@@ -353,7 +356,7 @@ Export is deferred, but these obligations on Alaric's actions are already fixed.
 - **`anchor-refe`** takes an explicit `ovrmsd` per action. It accepts a pose iff the ovRMSD of the selected nucleotide's base atoms against `DATA/reference.pdb` is < `ovrmsd`. It raises on an `ovrmsd` above L_ov (A11; author, D11).
 - **`grow`** takes per-pair `crmsd` and `ovrmsd` and accepts with strict `<`. It raises on an `ovrmsd` above L_ov (A11; author, D11); `crmsd` has no such limit.
 
-  *Oracle:* `grow` and `anchor-refe` raise with `ovrmsd: 1.74` and run with `ovrmsd: 1.73`.
+  *Oracle:* `grow` and `anchor-refe` raise with `ovrmsd: 1.74` and run with `ovrmsd: 1.73`. `anchor-refe` with the export's sentinel `ovrmsd: -1` fails with an error that names the invalid threshold, and no other action of the project is affected (X3).
 - **One fragment numbering.** Every Alaric component that maps a fragment number to residues MUST use the ordinal numbering of §1: fragment N is the Nth and (N+1)th residues present, whatever their residue numbers (author, O3). Today:
   - `Reference` (`reference.py:101-144`), and with it the fitter, the tables and `anchor-refe`, numbers by residue offset from the first residue present. That agrees on gap-free input, but after a gap the numbers jump: residues 1, 2, 4, 5 give fragment 4 instead of 3. It MUST number ordinally (author, O3);
   - `rmsd.py --fragment N` uses absolute residue numbers N and N+1, which is wrong whenever the first residue is not 1. Tools that assume fragment N is residues N and N+1 MUST be fixed (author, D15);
@@ -501,8 +504,13 @@ Pending wording:
 
 ### Stage 4: best fit and RMSD thresholds
 - **P4.1** Preparic runs A1–A4 on the full RNA range, never on a clipped one. They use the full RNA PDB wherever required; every library-dependent step receives the same exclude code and library identity (G5). A2 needs no library, and A4 consumes the tables only. Stage 4 opens as soon as the fragments are known (A2), without waiting for these results.
-- **P4.2** The stage's main content is the cRMSD/ovRMSD threshold table (author). Shown alongside it:
-  - the computed reference values, rounded;
+- **P4.2** Stage 4 involves three statistics, each with its own role (author amendment, 2026-11-04):
+  - **Per pair: the shared-nucleotide ovRMSD and cRMSD** (A3 pairs). They form the threshold table (P4.3): editable, and exported as the `grow` thresholds (X4).
+  - **Per fragment: the dinucleotide best-fit `rmsd`** (A1). It is read-only and shown, because it informs the clip. No threshold is derived from it.
+  - **Per anchor candidate: the base ovRMSD of nucleotide 1 or 2** (A3/A4 bases). It is computed, never edited, and used only as an `anchor-refe` threshold (X3). The stage need not show it.
+
+  The stage's main content is the threshold table (author). Shown alongside it:
+  - the computed pair thresholds, rounded;
   - per fragment: residues, sequence, conformer and `rmsd`;
   - per pair: down→up and trinucleotide;
   - raw values are never displayed;
@@ -510,17 +518,17 @@ Pending wording:
 - **P4.3** The threshold table, which is the stage 4 decision:
   - **Entering stage 4.** Continue 3→4 puts the table in force:
     - a table set aside by an earlier Back is restored if it is still valid for the PDB code and range 1;
-    - otherwise the table starts as a skeleton: one row per pair and one per base of the current fragments, with every value empty. It is never prefilled: Copy is an explicit action (author, D5). The computed values are clearly visible beside the table, so that it is clear what Copy does.
+    - otherwise the table starts as a skeleton: one row per pair of the current fragments, with both values empty. It is never prefilled: Copy is an explicit action (author, D5). The computed values are clearly visible beside the table, so that it is clear what Copy does.
   - **Filling.** The user fills it by Copy, by typing, or both (author).
     - Copy is enabled only while the computed thresholds are fresh.
     - Copy asks before it overwrites typed values.
-  - **Editability.** It stays visible and editable in stages 4–6 (author). Its bases part can also be edited from stage 6 (P6.6).
+  - **Editability.** It stays visible and editable in stages 4–6 (author).
   - **Revert.** Each cell has its own revert to the computed value.
   - **Marks.** Cells that differ from the computed value are marked, with a count.
   - **Values.**
     - Each value is finite, > 0, with at most two decimals. More decimals are rejected, not rounded.
     - A value above 10 Å gives a warning.
-  - **Keys** are exactly the pairs and bases of the fragments, by fragment number.
+  - **Keys** are exactly the pairs of the fragments, by (down, up) fragment number. The table has no bases part (author amendment, 2026-11-04). A stored table that has one is malformed: it loads as undecided and is never migrated (G9, I7).
   - **Basis.**
     - The table is tied to the PDB code and the range-1 row it was made for. A table made for others is never restored: Continue into stage 4 replaces it with a skeleton. If the PDB code and range 1 revert before that, the table comes back with its values.
     - If the computed values change for the same rows (after a code or library update), the values are kept and the differing cells are marked.
@@ -534,7 +542,8 @@ Pending wording:
   - **Greying.** Clipped fragments, and any pair that touches one, are greyed in every table.
   - **Cost.** A clip edit re-runs neither the fit, best-fit table generation nor gridless energetics (P10). It never touches the interaction matrix, which is set aside whenever the clip can change and is adapted once, on Continue 4→5 (P5.6).
 - **Gate 4→5:**
-  - every value of the threshold table's kept rows is filled and valid, and its backend validator is not failing. Rows of clipped fragments, and pairs that touch one, need not be filled (author, D4); a clip reduction can therefore uncover empty rows, and the gate then stays closed until they are filled. The computed thresholds are not needed;
+  - every value of the threshold table's kept pairs is filled and valid, and its backend validator is not failing. Pairs that touch a clipped fragment need not be filled (author, D4); a clip reduction can therefore uncover empty rows, and the gate then stays closed until they are filled;
+  - the computed thresholds (A4) are fresh. Pair values need not be copied from them, but `anchor-refe` takes its thresholds from their bases (X3; author amendment, 2026-11-04);
   - the clip is valid: it fits the fragment count and keeps at least one candidate of every selected anchor;
   - the energetics are fresh. In practice this is the only place the user waits for the fit.
 
@@ -681,23 +690,10 @@ Pending wording:
     | running or stale | grey "validating…" |
 
   - The UI may suggest the strictest filter that still emits each candidate's cell.
-- **P6.6 Reference-anchor validation.**
-  - The author ruled that both anchor modes are always exported, so there is no mode choice. Every unclipped candidate of every selected anchor is checked.
-  - thr is the editable bases value for that candidate; raw is the computed raw value.
-
-    | Condition | Status |
-    |---|---|
-    | thr − raw ≥ 1e-5 | green |
-    | \|thr − raw\| < 1e-5 | amber: inside Alaric's boundary zone |
-    | thr ≤ raw − 1e-5 | red: the best-fit pose is rejected |
-    | thr > L_ov (that is, thr ≥ 1.74) | the export is blocked (X6) |
-
-  - **Above L_ov (author, D11).** The remedy is to lower thr to at most L_ov (1.73 or less). If the best-fit pose then fails, the export needs an explicit "Proceed anyway" (X5).
-  - The panel shows, per candidate: sequence, computed threshold, editable value and status.
-  - The editable value is the threshold table's own cell (P4.3), not a second copy, so stages 4 and 6 always show the same number.
+- **P6.6 Reference anchors** (author amendment, 2026-11-04). `anchor-refe` is a positive control. Its computed thresholds are A4's bases values, strictly greater than their raw values (G7). Within L_ov they are emitted unchanged; above L_ov the export substitutes the deliberately failing sentinel (X3), which is not covered by G7's passing-pose guarantee. Stage 6 edits and validates nothing about them, and has no reference-anchor panel. The export writes one action per unclipped candidate (X3).
 - **Gate 6→export:** deferred. At least, every stage 6 result is fresh.
 
-*Oracle for candidate clipping (A9, P5.8, P6 and X3):* with one of a selected stacking's two candidates clipped, jobs and hand-off anchors contain only the kept candidate; computed classes, auto prefilters and both validation panels use that candidate alone, and both export modes retain it. A failing clipped candidate contributes no failure or action. Uncovering it restores its contribution. The selected stacking and its editable class row remain, with user class edits retained.
+*Oracle for candidate clipping (A9, P5.8, P6 and X3):* with one of a selected stacking's two candidates clipped, jobs and hand-off anchors contain only the kept candidate; computed classes, auto prefilters and the Gaussian validation panel use that candidate alone, and both export modes retain it. A failing clipped candidate contributes no failure or action. Uncovering it restores its contribution. The selected stacking and its editable class row remain, with user class edits retained.
 
 ## 6. Export: obligations already fixed
 
@@ -706,8 +702,17 @@ The export stage is deferred (author). These obligations are already fixed.
 - **X2. Same RNA file.** `DATA/reference.pdb` is byte-identical to the RNA all-atom PDB that was fitted and displayed (P11), and its checksum is recorded.
 - **X3. Both anchor modes.** Every selected anchor is exported in both modes, in parallel (author):
   - Gaussian `anchor` actions with `precomputed_filter_name: gaussian-rrm` and the row's filter name;
-  - one `anchor-refe` action per unclipped candidate, with an explicit `ovrmsd` from the edited bases value (never `auto`), deduplicated.
+  - one `anchor-refe` action per unclipped candidate, deduplicated, with an explicit `ovrmsd` (never `auto`). It is A4's rounded bases value for that candidate: `nuc1_ovrmsd` for `first`, `nuc2_ovrmsd` for `second` (author amendment, 2026-11-04). No edited value enters it.
+  - **Above L_ov.** If that value exceeds L_ov, the action is still written, but with `ovrmsd: -1`, so that it fails when run (A12). Its action file carries a comment that:
+    - states the computed value (raw and rounded) and L_ov;
+    - explains that the action cannot work with the required rounded positive-control threshold, because that threshold exceeds the ovRMSD that Alaric can search without misses. Only if the raw value also exceeds L_ov may it say that the best-fit pose itself lies beyond that limit;
+    - says that the action is kept on purpose, as a disabled positive control.
+
+    This neither blocks the export (X6) nor triggers "Proceed anyway" (X5).
+
   A clipped candidate contributes no action in either mode. Clipping one candidate preserves the selected stacking, its class row and both modes for the remaining candidate(s).
+
+  *Oracle:* every emitted `anchor-refe` `ovrmsd` equals A4's rounded value for its candidate when that value is at most L_ov, and equals `-1` otherwise, whatever was typed anywhere. On 1b7f the currently selected anchor candidates are below L_ov. A candidate whose rounded value is above it, such as a stacking on the 12th residue (candidate fragment 11, `second`, 2.25 Å) or a synthetic snapshot, gets `ovrmsd: -1` and the comment. This condition alone neither blocks export nor requires "Proceed anyway"; independent X5/X6 conditions retain their effect. The sentinel action deploys and fails when run, and every other action of the exported project deploys and runs.
 - **X4. Other inputs.**
   - `grow` thresholds come from the edited pairs values of kept pairs.
   - The energy filter reads P5.7's file, which holds the energy-threshold table's values for the true cells. Its other parameters, `epsilon: 15`, `cascade: auto` and `min_cascade: auto` among them, are written into each action as listed in A12.
@@ -715,7 +720,7 @@ The export stage is deferred (author). These obligations are already fixed.
   - The hand-off (P5.8) and the kept fragments travel with the export.
 - **X5. "Proceed anyway".** When the nearest-to-native structure fails anything the export would apply, one checkbox appears next to the red bold text "The nearest-to-native structure doesn't pass the filters. Proceed anyway". This covers:
   - a Gaussian validation that is not green, or a class below RRM-95;
-  - an edited ovRMSD or cRMSD threshold that does not exceed its raw value by at least 1e-5 (thr − raw < 1e-5): red, or amber inside Alaric's boundary zone (P6.6);
+  - an edited pair ovRMSD or cRMSD threshold that does not exceed its raw value by at least 1e-5 (thr − raw < 1e-5): red, or amber inside Alaric's boundary zone (A11). Bases values never trigger it, not even inside the boundary zone or above L_ov (author amendment, 2026-11-04);
   - an energy threshold of a true cell that the best-fit pose does not meet: E_bestfit ≥ T, because the filter keeps a pose iff E < T (author, D13). Energies have no boundary zone, so there is no amber state here.
 
   Amber states trigger it like red ones (author, D13): 0 < fill < ⅓, a pose that fails, and a threshold inside the 1e-5 boundary zone.
@@ -724,7 +729,7 @@ The export stage is deferred (author). These obligations are already fixed.
 - **X6. Blocking, with no override.** The export is blocked while:
   - any result it relies on is stale, running or failed;
   - a decision it needs is undecided or invalid;
-  - any ovRMSD threshold it would emit exceeds L_ov (author), whether an `anchor-refe` bases value or a `grow` pairs value of a kept pair (author, D11). The remedy is to lower the value; if the best-fit pose then fails it, the export needs "Proceed anyway" (X5).
+  - any `grow` ovRMSD threshold it would emit, that is, the edited value of a kept pair, exceeds L_ov (author, D11). The remedy is to lower the value; if the best-fit pose then fails it, the export needs "Proceed anyway" (X5). An `anchor-refe` value above L_ov does not block: it gets the sentinel (X3; author amendment, 2026-11-04).
 - **X7. One consistent snapshot.** The export is computed from one consistent set of decisions. An edit made during the export leaves it visibly stale, never mixed.
 
 ## 7. Answered decisions
@@ -734,14 +739,14 @@ Every decision below is answered and applied. The IDs are retained for cross-ref
 1. **D1. Back keeps every stage decision** (P4; ST §11.3). Back deactivates the stage decision and keeps its value, for every stage. Continue restores it when its basis still matches.
 2. **D2. The clip and the anchors** (§1, P4.4, P5.3; D2a, D2b; amended by the author, 2026-11-04). At least one candidate fragment of every selected anchor must remain kept; one of two candidates may be clipped. Continue 3→4 resets a clip with a stale basis or clamps a kept clip that leaves a newly selected anchor with no kept candidate, before putting the threshold table in force. A clip that retains one candidate stays unchanged. The automatic, possibly silent clamp is the only exception to G9.
 3. **D3. Filling uncovered rows when the matrix is reused** (P5.6; ST §11.4a). Recalculate locks from unclipped candidates and restore newly uncovered locks as mandatory true cells. Apply Recompute's growth rule to other new rows only, at outer run ends that touched the old clip boundary. Other caps, cells and joins stay as the user left them.
-4. **D4. Clipped rows and the 4→5 gate** (P4.3). Every value of the kept pair and base rows must be filled and valid. Clipped fragments and pairs touching them need not be filled. Uncovering an empty row closes the gate until it is filled.
+4. **D4. Clipped rows and the 4→5 gate** (P4.3). Every value of the kept pair rows must be filled and valid; the table has no base rows (author amendment, 2026-11-04). Pairs touching a clipped fragment need not be filled. Uncovering an empty row closes the gate until it is filled.
 5. **D5. The empty table on entering stage 4** (P4.3; ST §11.6). A new table is an empty skeleton. Filling is by explicit Copy and/or typing; the computed values stay clearly visible alongside it.
 6. **D6. Opening stage 4 before the fit** (A2, P4.1; ST §11.7). Reference-fragment keys may supply the skeleton before the fit finishes. A2 and A1 must yield the same fragment-key set.
 7. **D7. Assembly copies and range atoms** (P2.1–P2.2). The backend applies the selected assembly's operators. A range picked on a copy is extracted, prepared and shown where it was picked, and browser and backend validate against the same assembly. Biounit is a real input of extraction and remains in the ranges' basis.
 8. **D8. Kabsch normals in stage 3** (A10, P3.2). Stage 3 and the best-fit descriptor computation use Kabsch normals fitted onto the same reference rings.
 9. **D9. Gaussian class granularity** (P6.3). One class per selected stacking anchor, scored on the worst of its unclipped candidates.
 10. **D10. Which pose stage 5 scores** (P5.1). The discrete best-fit library pose written by A1 is scored.
-11. **D11. ovRMSD above L_ov = √3 Å** (A11, A12, P6.6, X6). Export is blocked for any emitted bases or kept-pair ovRMSD threshold above the limit. The remedy is to lower the threshold, requiring explicit "Proceed anyway" if the best-fit pose then fails, or to deselect an offending anchor in stage 3. Alaric raises above the limit for both `grow` and `anchor-refe`; the tables are not extended.
+11. **D11. ovRMSD above L_ov = √3 Å** (A11, A12, P6.6, X6). Export is blocked for any kept-pair ovRMSD threshold above the limit. The remedy is to lower the threshold, requiring explicit "Proceed anyway" if the best-fit pose then fails. As amended by the author on 2026-11-04, a computed bases value above the limit neither blocks the export nor can be lowered: its `anchor-refe` action is written with the sentinel `ovrmsd: -1` and an explanatory comment (X3). Alaric raises above the limit for both `grow` and `anchor-refe`; the tables are not extended.
 12. **D12. Interacting cells without an energy** (P5.5–P5.7). The editor forbids them and read validation refuses them. If an anchor's current unclipped lock is an error row, no matrix passes; the error names the anchor. The user must deselect it in stage 3 or explicitly clip the failing candidate in stage 4 while retaining another candidate under P4.4.
 13. **D13. What triggers "Proceed anyway"** (P5.7, X5). Amber and red states both trigger the checkbox. Energy thresholds are user-editable: the table starts empty, is filled by explicit Copy and/or typing, and needs a valid value in every true kept matrix cell before stage 6. For unchanged PDB code and RNA range, a protein-range edit resets only that range's values. A best-fit energy E ≥ the edited threshold T triggers "Proceed anyway".
 14. **D14. Persistent result cache and restart** (P2, P5, P11; ST §11.10; O6). Preparic runs without a persistent result cache. Every decision is mounted; results recompute after a backend restart. Correctness across that restart requires every browser tab to restart right afterwards; tabs kept open have undefined behaviour. Restart detection is outside the state-transition scope.
@@ -795,7 +800,7 @@ The third column names one way to meet each clause, using the T-, S- and B-numbe
 | A8 | CB §5.1; OQ Gaussian Q2–3; AG §1, §4 | `util/gaussian-precalc.py` |
 | A9 | CB §5.2; OQ stage 6 Q4; PG §7.1–7.2 | T21 `gaussian_check` over `alaric/anchor_precalc.py` |
 | A10 | PG §1; CB T4, T18, T21 | B16 `ring_refe` |
-| A11 | CB T23, §5.1; TA §4; AR §6; src | constants mirrored in T23, T21 |
+| A11 | CB T23, §5.1; TA §4; AR §6; src | constants mirrored in T21 and the export seam |
 | A12 | EF §4, §8; OQ energy Q1, Q4; AG §6; AR §1–3; src | `energy-filter` action; `anchor.py`/`resolve.py` name validation |
 | P1, P2 | ST §2, §8; CB §8.1, §8.5; author (O6) | file-authoritative mounted edit cells; mounted `cif`; browser restart after a backend restart |
 | P3 | ST §3, §7; author (O7, D17) | stage derived from marker cells with recorded bases; ordered orphan cleanup; no protection against racing tabs |
@@ -811,7 +816,7 @@ The third column names one way to meet each clause, using the T-, S- and B-numbe
 | Stage 3 | ST §4.2; PA; AG §5 | S7, S8 keyed by stacking key |
 | Stage 4 | S4; TH; OQ stage 4; ST author decisions, §3.4, §4.2–4.4, §9.1.5 | T5–T11; S9–S12; S22 `fragments` via T24; S11 as the stage-4 marker |
 | Stage 5 | EN; OQ stage 5; EF §6; CB T12–T16; ST §4.2 (4→5), §7.1; author clarification on clip and matrix | S13–S15, S24, B14; matrix adapted on Continue 4→5 |
-| Stage 6 | PG; TA; OQ stage 6, test-anchor; CB T18–T23, T28 | S17–S20, S25 |
+| Stage 6 | PG; TA; OQ stage 6, test-anchor; CB T18–T23, T28 | S17–S19, S25 |
 | X1–X7 | OQ stage 6 Q2–3, test-anchor Q1 and Q5; CB §5.1, §7.3, §8.6.4; TA §5; PG §5; ST §10.5 | deferred export stage |
 
 ## Appendix B. Facts checked in the source for this document

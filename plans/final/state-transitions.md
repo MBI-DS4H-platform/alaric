@@ -19,11 +19,12 @@ Author decisions taken in this session:
 - the fit waits for stage 3;
 - Continue closes when there is nothing to anchor on;
 - stage 4's main purpose is the cRMSD/ovRMSD threshold table, which the user may copy from the reference values and/or fill in themselves;
+- **amendment of 2026-11-04 on `anchor-refe` thresholds** (`oracle-contract.md` P4.2, P4.3, P6.6, X3, X5, X6). The threshold table holds pairs only; S11 has no `bases`. The per-nucleotide base ovRMSD values are computed (S9 `bases`), never edited, and go straight from S9 to the export's `anchor-refe` actions. T23 `validate_refe_anchors`, S20 `refe_validation` and the stage-6 refe panel are removed. The 4→5 gate also requires S9 to be fresh. This supersedes every mention below of S11 `bases`, T23, S20 or the refe panel;
 - the clip is changed in stage 4 and keeps at least one candidate of every selected stacking anchor (author amendment, 2026-11-04). On 5→4→5 the interaction matrix is reused: the clip it was built for is read from its extent (its fragment-row keys, I2), and the first and last runs and candidate locks are adapted.
 
 The author's answers to §11 (2026-10-29):
 - Back keeps the decision of every stage, by deactivating its marker (§11.3);
-- before stage 5 every value of the threshold table's kept rows must be filled; rows of clipped fragments are not required (§11.5, confirmed as D4);
+- before stage 5 every value of the threshold table's kept rows must be filled; rows of clipped fragments are not required (§11.5, confirmed as D4). Since the 2026-11-04 amendment those rows are pairs only;
 - the table starts as an empty skeleton, and Copy is explicit. S9 must be clearly visible, so that it is clear what Copy does (§11.6);
 - S22 may come from T6's output, so stage 4 opens before the fit (§11.7);
 - the table stays editable in stages 4–6 (§11.8);
@@ -126,7 +127,7 @@ Transformer state never feeds the derived stage. Continue uses content echoes fo
 | 1 | none; always reached | | |
 | 2 | S4 `ranges` | `pdbcode`, `biounit` | rows from the viewer's chains (browser-local) |
 | 3 | S8 `stacking_selection` | range rows (chain, start, end, normalised as by T0) | `{key: bool}` by the default rule (distance ≤ 5, slip/displacement φ < 60°) |
-| 4 | S11 `threshold_edits` | `pdbcode`, range-1 row | a skeleton: one row per pair and per base from S22 `fragments`, all values empty |
+| 4 | S11 `threshold_edits` | `pdbcode`, range-1 row | a skeleton: one row per pair from S22 `fragments`, all values empty |
 | 5 | S14 `interaction_matrix` | the selected stacking keys; the clip, as recorded by the matrix's fragment-row keys (I2) | Recompute |
 | 6 | S18 `gaussian_classes` | the selected stacking keys | the computed default classes |
 
@@ -155,7 +156,7 @@ Example: a tab that slept during stage 2 wakes up, and its queued `ranges` PUT l
 
 ### 3.4 Decisions that are not markers, and where decisions can be edited
 **The rule.** A decision may stay editable in later stages only if no later stage's decision has to be rewritten when it changes. Otherwise one user action becomes a multi-cell write (§1.5).
-- **S11 `threshold_edits`** (the stage-4 marker) passes this rule. Nothing decided later depends on it; only computed checks do (T23, and the export). By OQ:8 it stays visible and editable in stages 4–6, and the stage-6 refe panel edits its `bases`.
+- **S11 `threshold_edits`** (the stage-4 marker) passes this rule. Nothing decided later depends on it; only computed checks do (the export). By OQ:8 it stays visible and editable in stages 4–6.
 - **S12 `best_fit_clip`** is a stage-4 parameter, not a marker.
   - It always holds a value: `{clip1, clip2, basis}`, with loader default `{0,0}`.
   - Its basis is `pdbcode` plus the range-1 row, the same as S11's.
@@ -215,7 +216,7 @@ Per-ligand `error` entries in S13 do not block Continue: Recompute stops at thos
 - **Writes:** S8 := `{basis: rows, active, selected: {key: bool}}`.
 - **Cascade:**
   - The gate opens, and group B starts: T5 → T7 → T8 → S9; T9 → S10; T12 → T13×k → T14 → S13 → T16 → S15; T18 → S17 → T28 → S25.
-  - T15, T19, T20 and T23 rerun as sentinel or waiting.
+  - T15, T19 and T20 rerun as sentinel or waiting.
 
 **3→4**
 - **Gate:**
@@ -230,17 +231,18 @@ Per-ligand `error` entries in S13 do not block Continue: Recompute stops at thos
   - Otherwise, if S12 cuts a selected anchor: S12 := the clamped clip (below), awaited.
   - Then S11, kept or as a skeleton.
 - **Clip removing every candidate of an anchor (author, D2 as amended).** A selection change in stage 3 can leave a newly selected anchor with no kept candidate. Continue 3→4 minimally clamps the clip: over each selected anchor's candidate group C, clip1 := min(clip1, min_C(max(C) − 1)) and clip2 := min(clip2, min_C(n − min(C))). Integer/count constraints still apply. A clip already retaining one candidate per anchor stays unchanged. The clamp is automatic and may be silent. It is the only automatic correction of a decision: the author's one exception to G9 of `oracle-contract.md`. A clamp can uncover empty threshold rows; the 4→5 gate then waits for them (D4).
-- **Cascade:** T10 becomes real. T11 becomes real once S10 is fresh; it reads the edited thresholds, not S9. T23 becomes real once S10 and S9 are fresh. T20 → T21 runs once S10 is fresh. T15 runs as a sentinel.
+- **Cascade:** T10 becomes real. T11 becomes real once S10 is fresh; it reads the edited thresholds, not S9. T20 → T21 runs once S10 is fresh. T15 runs as a sentinel.
 
 **4→5**
 - **Gate:**
-  - every pair and base value of the kept rows in S11 is filled, and T10 is not failed (kept after the rejection of validation receipts, I4; author). Rows of clipped fragments, and pairs that touch one, need not be filled (author, §11.5, D4);
+  - every value of the kept pairs in S11 is filled, and T10 is not failed (kept after the rejection of validation receipts, I4; author). Pairs that touch a clipped fragment need not be filled (author, §11.5, D4);
   - S12 fits S22 and cuts no selected anchor;
-  - S13 is fresh.
+  - S13 is fresh;
+  - S9 is fresh: the export's `anchor-refe` thresholds come from its `bases` (amendment of 2026-11-04).
 
-  The values may come from Copy, from typing, or both. S9 is not needed.
-- **Input absent or computing:** S13 not fresh: "fitting…" or "scoring…". In practice the user waits for the fit only here, and can fill in thresholds meanwhile.
-- **Input failed:** a T5 failure, a T13 receptor failure or a T14 failure gives a banner.
+  The pair values may come from Copy, from typing, or both. S9 is not needed for typing, but must be fresh for Continue.
+- **Input absent or computing:** S9 not fresh: "computing reference thresholds…"; S13 not fresh: "fitting…" or "scoring…". In practice the user waits for the fit only here, and can fill in pair thresholds meanwhile.
+- **Input failed:** a T5, T7 or T8 failure, a T13 receptor failure or a T14 failure gives a banner.
 - **Writes:**
   - First S24, awaited, if it needs it (author, D13). If S24 is null, or its basis (`pdbcode`, range-1 row) is stale, S24 := a skeleton: one entry per current protein range, every value empty. Otherwise the entries whose row matches no current protein range are dropped, and each new protein range gets an empty entry. The entries of unchanged ranges are kept with their values.
   - Then S14 := `{basis: selected keys, active, rows, ranges, grid}`, in one of two ways. `rows` are the ordered keys of the fragments kept when the matrix was built, and `ranges` the ordered range ids of its columns (author, I2).
@@ -277,7 +279,7 @@ Back from stage k writes one cell: M_k with `active: false`, everything else unc
 | 6→5 | S18 | | the selected keys are unchanged |
 
 **Consequences of a kept decision, checked one by one:**
-1. **Transformers.** An inactive marker reads as null, so its consumers run as sentinels while it is inactive and come back from cache on return. Example: T10, T11 and T23 for S11. The clip stays active and stays consumed throughout, but every consumer of the clip also needs an active marker or a gated input.
+1. **Transformers.** An inactive marker reads as null, so its consumers run as sentinels while it is inactive and come back from cache on return. Example: T10 and T11 for S11. The clip stays active and stays consumed throughout, but every consumer of the clip also needs an active marker or a gated input.
 2. **Wrong data.** The basis catches a kept value that was made for another structure or another range 1, even when the fragment keys coincide (same RNA numbering under a different PDB code). Such a value is replaced by the default, never restored.
 3. **Computed drift while away.** A kept value can come back to changed computed values. Examples: a new fit after a restart with new code; energetics after a protein-range change; classes after a fit change. The plans already handle each case as "kept, differing rows marked" (S4:71, EN:89, S6:94), and the read checks catch shape changes. A restored value is shown with those marks, and the gates re-check it.
 4. **Gate.** A restored S11 must still pass the 4→5 gate. Only kept rows must be filled (D4), so a clip reduction can uncover empty rows; the gate then stays closed until they are filled. Likewise, a kept S24 must cover every true cell of the adapted matrix before 5→6 (D13).
@@ -292,9 +294,9 @@ The alternative (A), clearing the marker to null, was rejected (author, §11.3).
 | S3 + S1 | 1 | as a pair, in the same tick, only after a successful download (§8.6.1); arbiter rule (§7.1) | S21; everything else is a sentinel because M2 is null or inactive |
 | S2 | 1 | immediately | T0, and through `range_specs` everything downstream of the ranges (D7) |
 | S4 | 2 | on row commit (blur or Enter), only rows that pass frontend validation; never per keystroke | T0–T4, T6, T24 (group B gated) |
-| S8 | 3 | per toggle | T15, T19, T20, T23 (sentinel or waiting), T28 (computed class) |
-| S11 | 4–6 (OQ:8); `bases` also in the stage-6 refe panel | per committed table cell; Copy (enabled when S9 is fresh, with confirmation before overwriting typed values) | T10, T11, T23 |
-| S12 | 4 only (author); the control stops at the outermost anchors | debounced, about 300 ms | T11, T20 → T21 (seconds), T23, T28 (computed class). T15 runs as a sentinel, because S14 is inactive in stage 4. |
+| S8 | 3 | per toggle | T15, T19, T20 (sentinel or waiting), T28 (computed class) |
+| S11 | 4–6 (OQ:8) | per committed table cell; Copy (enabled when S9 is fresh, with confirmation before overwriting typed values) | T10, T11 |
+| S12 | 4 only (author); the control stops at the outermost anchors | debounced, about 300 ms | T11, T20 → T21 (seconds), T28 (computed class). T15 runs as a sentinel, because S14 is inactive in stage 4. |
 | S14 | 5 | per toggle | T15 |
 | S24 | 5–6 (D13) | per committed table cell; Copy (enabled when S15 is fresh, with confirmation before overwriting typed values) | T27 |
 | S18 | 6 | debounced, 500 ms (S6) | T19, T22 |
@@ -340,7 +342,6 @@ Steady state means after all computation has finished.
 | S17 `bestfit_stackings` | gated | gated | computing → F | F | F | F |
 | S25 `gaussian_scores` | gated | gated | computing → F | F | F | F |
 | S19 `gaussian_validation` | gated | gated | sentinel | sentinel¹ | sentinel¹ | F |
-| S20 `refe_validation` | gated | gated | sentinel | F | F | F |
 
 ¹ T21 already runs from stage 4. Only T22's merge with S18 waits for stage 6.
 
@@ -355,7 +356,6 @@ S9, S10 and S13 are often still computing at stage 4. Stage 4 does not wait for 
 | group B | gated | gated | real (minutes: library loading in T5 and T7) | complete, or still running | complete | complete |
 | T10 | sentinel | sentinel | sentinel | real | real | real |
 | T11 | gated | gated | sentinel | real once S10 is fresh | real | real |
-| T23 | gated | gated | sentinel | real once S9 and S10 are fresh | real | real |
 | T15 | gated | gated | sentinel | sentinel | real | real |
 | T16 | gated | gated | real once S13 is fresh | real | real | real |
 | T27 | sentinel, or real on a kept S24 | same | same | same | real | real |
@@ -374,7 +374,7 @@ T13 instances are added and removed with S5 already at stage 2 (contract-boundar
 | 3 | stacking table and selection | "detecting stackings…", "preparing all-atom structure…" | + T3, T4, T6, T24, T25 |
 | 4 | threshold table (editable, with S9's computed values clearly visible alongside so that it is clear what Copy does (§11.6), "differs from computed" marks), Copy, clip, best-fit overlays | "computing reference thresholds…" (Copy disabled), "fitting…" | + T5–T11 |
 | 5 | energetics, matrix, energy-threshold table (editable, with S15's computed values clearly visible alongside, Copy, "differs from computed" marks; D13), threshold table, clip (read-only) | "scoring…" | + T12–T16, T27 |
-| 6 | classes, validation, refe panel, threshold table, energy-threshold table, clip (read-only) | "validating…" | + T18–T23, T28 |
+| 6 | classes, validation, threshold table, energy-threshold table, clip (read-only) | "validating…" | + T18–T22, T28 |
 
 **Banner scope.** A stage shows the failures of its own transformers and of earlier stages' transformers, never of later ones. A later-stage transformer may legitimately fail on kept or orphaned decisions, and that must stay hidden. A failure is also hidden while this tab has a pending write on one of the transformer's inputs (contract-boundaries §8.5 rule 2). The first state graph arrives within about 0.5 s of the `shares` message; no banner is shown before it.
 
@@ -394,7 +394,6 @@ Example: S13's fragment keys stay the same when a protein range is edited. If th
 | S17 | S10's echo plus the protein range rows | S1; S4 |
 | S25 | S17's echo, the selected keys, S12 | S1; S4; selected keys; S12 |
 | S19 | S18 rows, S12, selected keys, S10's echo | the same |
-| S20 | S11 `bases`, S12, selected keys, S10's echo | the same |
 
 - **Comparisons use this tab's local values, pending writes included.** A tab that has just written therefore sees its dependents go stale at once, before any `update` arrives.
 - **A revert brings no `update`.** When the inputs return to values whose result was already delivered, no `update` follows (§1.7). The old value matches again and is fresh.
@@ -436,7 +435,7 @@ The gate guarantee holds only if tabs do not race (author, D17, O7). The rows be
    - T3 → B4 → T6 → T24 → S22;
    - T5 (the gate is open, since S8 is still active) → T7 → S9, and S10, recompute.
 2. In every tab, M3's basis no longer matches S4, so the stage is 2. M4 (S11) stays active, but it is beyond the valid prefix, so it is an orphan. If range 1 changed, S11 and S12 are also stale.
-3. Transformers run on the mix (new ranges with the old selection, thresholds and clip). T10, T11, T15, T20 and T23 may fail. They are out of scope at stage 2, so no banners appear.
+3. Transformers run on the mix (new ranges with the old selection, thresholds and clip). T10, T11, T15 and T20 may fail. They are out of scope at stage 2, so no banners appear.
 4. Resolution, either way:
    - The users review the ranges and Continue 2→3. That deactivates the orphan S11 first, then writes M3 merged by key. Continue 3→4 then restores S11 if range 1 did not change, and writes a skeleton if it did.
    - Or someone restores the old ranges. Then everything becomes valid again, the cached results return, and stage 4 reappears.
@@ -485,13 +484,13 @@ These changes were proposed here and applied to that document when both were fin
 3. **S3 `cif` is mounted with `authority="file"` (author decision).** "`cif` is the only unmounted edit cell", the re-upload, and the "pending after a restart until the browser re-uploads" case all go.
 4. **New computed shares.**
    - S21 `structure_id`: the entry id read from the CIF. It is the consistency check between S3 and S1.
-   - S22 `fragments`: the fragment keys (and so the pair and base rows) of range 1, from T6's output via a new cheap preparic transformer, T24 `list_fragments`. It is not gated, and it is ready in stage 2.
+   - S22 `fragments`: the fragment keys (and so the pair rows) of range 1, from T6's output via a new cheap preparic transformer, T24 `list_fragments`. It is not gated, and it is ready in stage 2.
 5. **Stage 4 (§8.1 "On entering a stage…", OQ:8).**
    - Entering stage 4 creates the threshold table as a skeleton.
    - Values come from Copy and/or typing.
    - Before stage 5 the table must be **complete** for its kept rows (rows of clipped fragments are not required; D4), not necessarily copied.
    - T10 validates S11 against S22 instead of S9, so it no longer waits for the fit.
-   - S9 still feeds Copy, the "differs from computed" marks, T23, and the export's raw-value comparison.
+   - S9 still feeds Copy, the "differs from computed" marks, the export's raw-value comparison for pairs, and the export's `anchor-refe` thresholds (amendment of 2026-11-04).
 6. **§8.5, resets.**
    - The stage-3 change no longer resets S14 and S18: they are inactive at stage 3 (§3.5).
    - The `best_fits` signature reset of S11 and S12 is replaced by their bases.

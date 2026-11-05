@@ -13,6 +13,9 @@ anchor-ring-ovrmsd-mode.md
 attract-jax-numpy-scoring.md
     Notes on attract-jax's new gridless, numpy-only scoring path (inputs, outputs, accuracy versus grid scoring, commit and environment status) as the basis for preparic's energetics stage. It also covers how to wrap it in Seamless and lists the gotchas.
 
+final/anchor-refe-thresholds-plan.md
+    Draft (2026-11-04). Work package W8b, a follow-up amendment to final/implementation-plan.md: anchor-refe thresholds come straight from the computed best-fit bases values (never edited). It removes the bases from the stage 4 threshold table, T23/S20 and the stage 6 refe panel, adds S9 freshness to the 4->5 gate, and replaces the export block above L_ov with a commented ovrmsd: -1 sentinel.
+
 final/contract-boundaries.md
     Final (2026-10-29). The preparic/Alaric boundary during project preparation: shared rules (Alaric delivers sandbox-tested modules or CLI tools with DEPS lists, factories decided case by case, identified-not-staged data, rounding in Alaric), an inventory of all existing and planned preparic Seamless transformers and what each takes from Alaric, the reduced DEPS file for gridless energetics, and the precomputed Gaussian filters plus the all-filter check tool. It also lists where the author's decisions override the mini-plans. A final section covers the frontend/backend boundary: every existing and planned Seamless shared cell (edit vs computed), which transformers it feeds or comes from, backend-only cells (stage decisions as null-or-marker cells with bases and an active flag), echoes for staleness, error signalling, and the one remaining multi-cell write. Open points are marked Unresolved and point to contract-open-questions.md.
 
