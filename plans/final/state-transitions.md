@@ -20,6 +20,7 @@ Author decisions taken in this session:
 - Continue closes when there is nothing to anchor on;
 - stage 4's main purpose is the cRMSD/ovRMSD threshold table, which the user may copy from the reference values and/or fill in themselves;
 - **amendment of 2026-11-04 on `anchor-refe` thresholds** (`oracle-contract.md` P4.2, P4.3, P6.6, X3, X5, X6). The threshold table holds pairs only; S11 has no `bases`. The per-nucleotide base ovRMSD values are computed (S9 `bases`), never edited, and go straight from S9 to the export's `anchor-refe` actions. T23 `validate_refe_anchors`, S20 `refe_validation` and the stage-6 refe panel are removed. The 4→5 gate also requires S9 to be fresh. This supersedes every mention below of S11 `bases`, T23, S20 or the refe panel;
+- **amendment of 2026-11-05: the active stage-4 nucleotide is shared.** S26 `stage4_active_nucleotide` (CB §8.2) holds the nucleotide whose pre and post fragments stage 4 shows. It exists only for collaborative viewing: it is not a decision, not a marker, not mounted (a restart resets it to null) and read by no transformer. It has meaning in stage 4 only, and each of the four transitions into or out of stage 4 resets it to null (§4.1, §4.3, §4.4);
 - the clip is changed in stage 4 and keeps at least one candidate of every selected stacking anchor (author amendment, 2026-11-04). On 5→4→5 the interaction matrix is reused: the clip it was built for is read from its extent (its fragment-row keys, I2), and the first and last runs and candidate locks are adapted.
 
 The author's answers to §11 (2026-10-29):
@@ -91,7 +92,7 @@ These are the points where an intuitive reading goes wrong.
 Every tab shows the same stage. There is no per-tab navigation, so Back and Continue are shared actions. Earlier decisions are shown read-only in the progress sidebar, so looking back never needs Back.
 
 ### 2.2 Cell state
-**Edit cells** (writable shares with no incoming edge): S1 `pdbcode`, S2 `biounit`, S3 `cif`, S4 `ranges`, S8 `stacking_selection`, S11 `threshold_edits`, S12 `best_fit_clip`, S14 `interaction_matrix`, S24 `energy_threshold_edits` and S18 `gaussian_classes`.
+**Edit cells** (writable shares with no incoming edge): S1 `pdbcode`, S2 `biounit`, S3 `cif`, S4 `ranges`, S8 `stacking_selection`, S11 `threshold_edits`, S12 `best_fit_clip`, S14 `interaction_matrix`, S24 `energy_threshold_edits` and S18 `gaussian_classes`. In addition, S26 `stage4_active_nucleotide` is shared view state (amendment of 2026-11-05): a writable, unmounted share that never affects the stage, a gate or a transformer.
 
 **Markers.** S4, S8, S11, S14 and S18 are the stage markers. Each holds:
 - null, if its stage was never entered;
@@ -190,6 +191,7 @@ Example: a tab that slept during stage 2 wakes up, and its queued `ranges` PUT l
 
   Deferred writes include debounced edits, a structure-download completion and the idle CIF flush. The last condition is the lost-update rule of §1.8: the server wins, as it would on a 409.
 - **Back never destroys a decision.** It only deactivates the marker (§4.3), and so needs no confirmation.
+- **Stage 4's active nucleotide is reset on the way in and out (amendment of 2026-11-05).** Continue 3→4, Continue 4→5, Back 4→3 and Back 5→4 each also write S26 := null. This is the one extra write a transition may make besides its prerequisite writes and its marker write. The transitioning tab sends it once the gate checks have passed, immediately before its first write of the transition (so before the marker write), and does not await it. Other tabs never write the reset; they show the default while S26 is null. S26 is ignored outside stage 4, so a lost reset can only make stage 4 reopen on the previous nucleotide.
 
 ### 4.2 Continue
 **On entering stage k, Continue writes M_k:**
@@ -296,6 +298,7 @@ The alternative (A), clearing the marker to null, was rejected (author, §11.3).
 | S4 | 2 | on row commit (blur or Enter), only rows that pass frontend validation; never per keystroke | T0–T4, T6, T24 (group B gated) |
 | S8 | 3 | per toggle | T15, T19, T20 (sentinel or waiting), T28 (computed class) |
 | S11 | 4–6 (OQ:8) | per committed table cell; Copy (enabled when S9 is fresh, with confirmation before overwriting typed values) | T10, T11 |
+| S26 | 4 only (amendment of 2026-11-05); the slider and the combobox | debounced, about 300 ms; the tab shows its own choice at once; a 409 or a remote update is adopted silently; reset to null by the four transitions into or out of stage 4 (§4.1) | nothing |
 | S12 | 4 only (author); the control stops at the outermost anchors | debounced, about 300 ms | T11, T20 → T21 (seconds), T28 (computed class). T15 runs as a sentinel, because S14 is inactive in stage 4. |
 | S14 | 5 | per toggle | T15 |
 | S24 | 5–6 (D13) | per committed table cell; Copy (enabled when S15 is fresh, with confirmation before overwriting typed values) | T27 |
@@ -325,6 +328,7 @@ Steady state means after all computation has finished.
 | S14 `interaction_matrix` (M5) | kept | kept | kept | kept | A | A |
 | S24 `energy_threshold_edits` | kept or null | kept or null | kept or null | kept or null | value, being filled | value |
 | S18 `gaussian_classes` (M6) | kept | kept | kept | kept | kept | A |
+| S26 `stage4_active_nucleotide` | ignored | ignored | ignored | null (default shown) or a nucleotide identity | ignored | ignored |
 
 ### 5.2 Computed shared cells
 "F" means fresh. A gated cell serves its last value (stale by echo) or 404.
@@ -453,7 +457,7 @@ The gate guarantee holds only if tabs do not race (author, D17, O7). The rows be
 ## 8. Load, reconnect and restart
 **Load** (a new tab or a reload):
 1. `connecting`: an overlay; nothing is editable.
-2. Wait until S1, S2, S4, S8, S11, S12, S14, S24 and S18 have been read. Edit cells answer 200 or 204, never 404, so each one arrives. S3 (`cif.cif`) is not auto-read by the share client; its mounted content stays backend-authoritative and is checked through S21. Computed cells may still be unread or 404.
+2. Wait until S1, S2, S4, S8, S11, S12, S14, S24 and S18 have been read. S26 is read like them but is not waited for: until it arrives, stage 4 shows its default nucleotide. Edit cells answer 200 or 204, never 404, so each one arrives. S3 (`cif.cif`) is not auto-read by the share client; its mounted content stays backend-authoritative and is checked through S21. Computed cells may still be unread or 404.
 3. Derive the stage and render it. Computed cells that are unread or 404 show the pending wording.
 4. Show banners only after the first state graph.
 5. In stages 1–3 the viewer loads the structure for S1. In stages 4–6 it shows only fresh S23 range PDBs with fragment overlays, or "preparing all-atom structure…" until S23 is fresh (CB §8.6.5; OC P11). There is no upload, because S3 is mounted (author decision).
@@ -465,7 +469,7 @@ The gate guarantee holds only if tabs do not race (author, D17, O7). The rows be
 - On reconnect the client re-reads every share, and loading continues from step 3.
 
 **Backend restart** (out of scope for state transitions, §11.10; recorded for information):
-- Edit cells, S3 included, reload from `deployment-mounts/`. The derived stage is unchanged, and nothing needs a browser.
+- Edit cells, S3 included, reload from `deployment-mounts/`. The derived stage is unchanged, and nothing needs a browser. The exception is S26, which is not mounted and starts null.
 - Computed cells are absent until recomputed.
   - From stage 3 on, the gate is open, so group B restarts at once.
   - Preparic runs without a persistent result cache (author's execution decision, 2026-10-29), so that means minutes of library loading. Meanwhile stage 4 stays editable, but Continue 4→5 and later are closed.

@@ -5,6 +5,7 @@ This is a contract, not a design. It says what preparic must do and what Alaric 
 **Sources and precedence.** The author's decisions win. They are recorded in these places:
 - the author's amendment of 2026-11-04: a clip may remove one candidate fragment of a selected stacking, provided at least one candidate remains. This supersedes the earlier strict reading of D2 and its assumption that matrix locks never change with the clip (§1, G9, P4.4, P5.3–P5.6, P6, X3);
 - the author's amendment of 2026-11-04 on `anchor-refe` thresholds. The per-nucleotide base ovRMSD values (A3/A4 `bases`) are computed, never edited. Each `anchor-refe` action uses A4's rounded value for its candidate, so the threshold table holds pairs only and stage 6 has no reference-anchor panel. A computed value above L_ov makes the export write a non-working action, with a sentinel and an explanatory comment, instead of blocking the export. No bases value triggers "Proceed anyway". This supersedes the editable bases, their stage 6 panel and the bases parts of D4 and D11 (A3, A4, P4.2, P4.3, gate 4→5, P6.6, X3, X5, X6, D4, D11);
+- the author's amendment of 2026-11-05: stage 4's active nucleotide is shared between tabs for collaborative viewing. It is not a decision and is not persisted, and every transition into or out of stage 4 resets it (P2, P4, P4.5);
 - `open-questions.md`;
 - `final/gaussian-precomputation-decisions.md`, including the accepted A7/A8 handoff, and `final/gaussian-boundary-goldens-amendment.md`, including its review verdict;
 - the "author decisions" list of `final/state-transitions.md` and the answers in its §11;
@@ -370,6 +371,7 @@ Export is deferred, but these obligations on Alaric's actions are already fixed.
 
 **P2. Durable decisions.** Every decision, the downloaded structure included, survives a backend restart, and after a restart the project is at the same stage. Results are recomputed.
 - Only mounted cells survive a restart, so every decision is mounted (author, O6).
+- Stage 4's active nucleotide (P4.5) is not a decision. It does not survive a restart (author amendment, 2026-11-05).
 - This clause, and every other, holds across a backend restart only if the browser is restarted right afterwards: every open tab reloads. A tab kept open across a backend restart has undefined behaviour (author, O6).
 
 **P3. The stage.** The stages are linear: 1 structure, 2 ranges, 3 stackings, 4 best fit and thresholds, 5 energetics, 6 Gaussian filter, then the export.
@@ -399,6 +401,7 @@ Export is deferred, but these obligations on Alaric's actions are already fixed.
   - the same decision was changed remotely meanwhile.
 - **Concurrent edits** of one decision: the last accepted write wins. The losing tab adopts it and tells its user.
 - **Write granularity:** ranges are written per completed row, never per keystroke. The clip and the class table are debounced. Everything else is written per action.
+- **Stage 4's active nucleotide** (P4.5) is reset by every transition into or out of stage 4: Continue 3→4, Continue 4→5, Back 4→3 and Back 5→4 (author amendment, 2026-11-05).
 - **Write granularity across decisions.** Ordinary edits change one decision; committing a new PDB code with its structure changes both (P1.1). Continue first sets aside any later active stage decisions, then resets or clamps the clip before entering stage 4 (P4.4), or reconciles the energy-threshold table before entering stage 5 (P5.7), when needed. It waits for these prerequisite writes to be accepted before putting the next stage decision in force. A decision stays editable in a later stage only if no later stage decision would have to change with it. That is why the clip is editable in stage 4 only (P4.4).
 
 **P5. Freshness.** A result is shown or used as current only if it was computed from the decisions this tab now holds, its own unconfirmed edits included. Otherwise the tab shows the result's pending wording or its error. Gates use only fresh results.
@@ -541,6 +544,16 @@ Pending wording:
     - A clamp can uncover empty threshold rows; the gate 4→5 then waits for them to be filled.
   - **Greying.** Clipped fragments, and any pair that touches one, are greyed in every table.
   - **Cost.** A clip edit re-runs neither the fit, best-fit table generation nor gridless energetics (P10). It never touches the interaction matrix, which is set aside whenever the clip can change and is adapted once, on Continue 4→5 (P5.6).
+- **P4.5** The active nucleotide (author amendment, 2026-11-05):
+  - **What it is.** Stage 4 has one active nucleotide N, chosen with a slider and a combobox among the nucleotides that two adjacent fragments share. Its pre fragment covers N−1 and N, and its post fragment covers N and N+1. The viewer and the sidebar show N and these two fragments. Where the stage 4 panel is shown embedded in stages 5 and 6, its chooser is per tab and does not change the shared value.
+  - **Shared, for collaboration only.** Every tab in stage 4 shows the same active nucleotide: a change in one tab reaches the others, and concurrent changes resolve as last-write-wins without telling the user. It is view state, not a decision. It never affects the stage, a gate, a computation or the export, and it is not validated beyond being shown as the default when it does not name a nucleotide of the current fragments.
+  - **Not persisted.** A backend restart forgets it.
+  - **Stage 4 only.** It has no meaning outside stage 4. Each of the four transitions into or out of stage 4 (Continue 3→4, Continue 4→5, Back 4→3, Back 5→4) resets it, so stage 4 always opens on its default nucleotide.
+
+  *Oracle:*
+  - With two tabs in stage 4, choosing a nucleotide in one shows the same nucleotide, pre/post fragments and sidebar values in the other.
+  - For each of the four transitions, choose a non-default nucleotide, make the transition (and, when leaving, come back): stage 4 shows the default nucleotide in every tab.
+  - After a backend restart and a browser restart in stage 4, the default nucleotide is shown, and no file under `deployment-mounts/` holds the active nucleotide.
 - **Gate 4→5:**
   - every value of the threshold table's kept pairs is filled and valid, and its backend validator is not failing. Pairs that touch a clipped fragment need not be filled (author, D4); a clip reduction can therefore uncover empty rows, and the gate then stays closed until they are filled;
   - the computed thresholds (A4) are fresh. Pair values need not be copied from them, but `anchor-refe` takes its thresholds from their bases (X3; author amendment, 2026-11-04);
