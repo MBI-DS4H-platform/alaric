@@ -585,7 +585,7 @@ Pending wording:
   - A range with no selected anchor never gets interactions (author).
 - **P5.4 Recompute.** The button is always enabled. It rebuilds every column from the energies, range by range, independently:
   1. Start from the lock and grow towards 5' and towards 3', one row at a time.
-  2. A row is added while |E_refe| ≥ 1 or |E_bestfit| ≥ 1 for that range. Growth stops before the first row where both are < 1.
+  2. A row is added while |E_refe| ≥ 3 or |E_bestfit| ≥ 3 for that range. Growth stops before the first row where both are < 3.
   3. Growth also stops before a clipped row, before a row with a scoring error, and at another same-range anchor's lock. If two same-range runs then touch or overlap, they are joined.
 
   Clashes (large positive energies) count as interacting (author).
@@ -602,7 +602,7 @@ Pending wording:
     - only the outer ends change. For each protein range, those are the 5' end of its 5'-most column and the 3' end of its 3'-most column. Locks are recalculated from the current unclipped candidates (P5.3): a clipped candidate loses its lock and an uncovered candidate regains it. Interior cells, caps and "until next anchor" joins stay as they were. No selected anchor loses its last lock;
     - rows that the new clip covers are dropped (the matrix is reduced);
     - newly uncovered candidate locks are mandatory true cells, regardless of their energies. A scoring error on such a lock makes the matrix fail read validation; the lock is never silently omitted (D12);
-    - other rows that the new clip uncovers are filled in by Recompute's growth rule (P5.4), applied to the new rows only, and only at an outer end that touched the old clip boundary. From there the run grows outwards while |E_refe| ≥ 1 or |E_bestfit| ≥ 1 for that range, and stops before the first row where both are < 1 and before a row with a scoring error. An outer end that stopped short of the old boundary stays as the user left it (author, D3), subject to the mandatory locks above.
+    - other rows that the new clip uncovers are filled in by Recompute's growth rule (P5.4), applied to the new rows only, and only at an outer end that touched the old clip boundary. From there the run grows outwards while |E_refe| ≥ 3 or |E_bestfit| ≥ 3 for that range, and stops before the first row where both are < 3 and before a row with a scoring error. An outer end that stopped short of the old boundary stays as the user left it (author, D3), subject to the mandatory locks above.
 
     Without such a matrix (none was set aside, or the anchors changed), Continue 4→5 runs Recompute.
   - **Read validation.** A read is refused unless:

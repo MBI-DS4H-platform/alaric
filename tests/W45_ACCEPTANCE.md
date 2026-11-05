@@ -89,22 +89,22 @@ anchor, sorted along RNA; its `ranges` list may repeat a range ID. A range
 without an anchor has no true cells. Joined anchors remain separate columns
 in grid↔columns round trips, including k columns for a k-anchor joined run. Resolve locks
 through the fragment map, never by subtracting residue labels. For these vectors
-explicitly map anchor A to lock `{f4}`. Energies below are `(refe,bestfit)`:
+explicitly map anchor A to lock `{f4}`. ATTRACT scores below are `(refe,bestfit)`:
 
 | Row | R2 | R3 |
 |---|---|---|
-| f1 | (2,0) | (0,0) |
-| f2 | (0.999,-0.999) | (0,0) |
-| f3 | (1,0) | (0,0) |
+| f1 | (4,0) | (0,0) |
+| f2 | (2.999,-2.999) | (0,0) |
+| f3 | (3,0) | (0,0) |
 | f4 | (0,0) | (0,0) |
-| f5 | (0,-1) | (20,0) |
+| f5 | (0,-3) | (20,0) |
 | f6 | (25,0) | (0,0) |
 | f7 | error | (0,0) |
 | f8 | (-4,0) | (0,0) |
 | f9 | (0,0) | (0,0) |
 
 M1: only A=(residue r,R2) selected, uncut clip. Recompute produces R2 true
-exactly `{f3,f4,f5,f6}`. f2 is excluded (strictly below magnitude 1), f1 is
+exactly `{f3,f4,f5,f6}`. f2 is excluded (strictly below magnitude 3), f1 is
 unreachable, f7 is excluded (error), f8 is unreachable. Positive f6 counts.
 All R3/R4 cells are false despite high R3 energy.
 
