@@ -28,7 +28,7 @@ The author's answers to §11 (2026-10-29):
 - before stage 5 every value of the threshold table's kept rows must be filled; rows of clipped fragments are not required (§11.5, confirmed as D4). Since the 2026-11-04 amendment those rows are pairs only;
 - the table starts as an empty skeleton, and Copy is explicit. S9 must be clearly visible, so that it is clear what Copy does (§11.6);
 - S22 may come from T6's output, so stage 4 opens before the fit (§11.7);
-- the table stays editable in stages 4–6 (§11.8);
+- active rule (author clarification, 2026-11-06): S11 is editable in stage 4, omitted from stage 5 and read-only in stage 6; S24 is editable in stage 5 only and read-only in stage 6. The earlier §11.8 answer is historical and superseded;
 - `biounit` stays in M2's basis, because chain naming depends on the assembly (§11.9);
 - a backend restart is out of scope for state transitions (§11.10);
 - no assumption is made about withdrawing a queued write; a write of the correct state is always queued (§11.11);
@@ -41,7 +41,7 @@ The author's answers in `contract-open-questions.md` (2026-10-29):
 - rows of clipped fragments need not be filled before stage 5 (D4);
 - no interacting matrix cell may lie on a row with a scoring error (D12);
 - S14 stores its ordered fragment-row keys and range ids beside the grid (I2);
-- energy thresholds are user-editable, in a table that works like stage 4's: it starts empty, is filled by explicit Copy and/or typing, and every true kept matrix cell must have a value before stage 6. Its values for one protein range reset only when that range changes (D13). Amber states trigger "Proceed anyway" like red ones (D13).
+- energy thresholds are editable in stage 5 only, in a table that works like stage 4's: it starts empty, is filled by explicit Copy and/or typing, and every true kept matrix cell must have a value before stage 6. Stage 6 may show those values read-only. Values for one protein range reset only when that range changes (D13; author clarification, 2026-11-06). Amber states trigger "Proceed anyway" like red ones (D13).
 
 Also from `contract-open-questions.md`: the backend applies the assembly operators, so a range picked on a copy is extracted where it was picked, and T0 carries `biounit` into `range_specs` (D7); stage 3 uses Kabsch ring normals (D8); every Gaussian score and computed class is computed in the backend (T28), and the browser computes no Gaussian (O5); an RNA range with any unobserved residue is refused in stage 2 (D15). Only mounted cells survive a backend restart, and correctness is required only if the browser restarts right afterwards (O6). The commit-time admission check is rejected as too complex: the gate guarantee holds only if tabs do not race, and when tab A presses Continue while tab B is not editing, B proceeds to the next stage as if it had pressed Continue too (D17, O7). A stored decision without a basis loads as undecided, with an explanation, and is never migrated; a malformed file's diagnostics are kept before the startup loader resets it (I7). The author rejected a separate write adapter: writes go through `seamless-client.js` and its retries, and §7.2a's mitigation applies (I3). The author also rejected gating group B on the valid stage-3 prefix: it stays gated on S8's `active` flag (I6, §5.3).
 
@@ -157,7 +157,7 @@ Example: a tab that slept during stage 2 wakes up, and its queued `ranges` PUT l
 
 ### 3.4 Decisions that are not markers, and where decisions can be edited
 **The rule.** A decision may stay editable in later stages only if no later stage's decision has to be rewritten when it changes. Otherwise one user action becomes a multi-cell write (§1.5).
-- **S11 `threshold_edits`** (the stage-4 marker) passes this rule. Nothing decided later depends on it; only computed checks do (the export). By OQ:8 it stays visible and editable in stages 4–6.
+- **S11 `threshold_edits`** (the stage-4 marker) is editable in stage 4. It is omitted from stage 5 and may be shown read-only in stage 6; it has no edit or Copy controls after stage 4 (author clarification, 2026-11-06).
 - **S12 `best_fit_clip`** is a stage-4 parameter, not a marker.
   - It always holds a value: `{clip1, clip2, basis}`, with loader default `{0,0}`.
   - Its basis is `pdbcode` plus the range-1 row, the same as S11's.
@@ -167,7 +167,7 @@ Example: a tab that slept during stage 2 wakes up, and its queued `ranges` PUT l
 - **S24 `energy_threshold_edits`** is a stage-5 parameter, not a marker (author, D13). It passes the rule: nothing decided later depends on it, only the export.
   - It is null until stage 5 is first entered, then `{schema:1, basis:{pdbcode, range-1 row}, ranges:[{row, values:{"frag-N-SEQ": "-16.59" or null}}]}`. There is one entry per protein range, and every fragment key of S22 appears in each.
   - An entry belongs to the protein range whose row (normalised as by T0) equals its `row`, not to an index. So editing one protein range invalidates only that range's values (author, D13).
-  - Like S11, it is filled by explicit Copy from S15 and/or by typing, and stays visible and editable in stages 5–6.
+  - It is filled by explicit Copy from S15 and/or by typing in stage 5. It may be shown read-only in stage 6; it has no S24 edit, Copy or Revert controls there (author clarification, 2026-11-06).
   - Whether every true kept matrix cell has a value is a gate condition (5→6), not a stage condition.
 - **S1 `pdbcode`, S2 `biounit` and S3 `cif`** are the stage-1 decisions and form the basis of M2.
 
@@ -377,8 +377,8 @@ T13 instances are added and removed with S5 already at stage 2 (contract-boundar
 | 2 | ranges table, viewer | none (S5 is not shown) | T0, T1 |
 | 3 | stacking table and selection | "detecting stackings…", "preparing all-atom structure…" | + T3, T4, T6, T24, T25 |
 | 4 | threshold table (editable, with S9's computed values clearly visible alongside so that it is clear what Copy does (§11.6), "differs from computed" marks), Copy, clip, best-fit overlays | "computing reference thresholds…" (Copy disabled), "fitting…" | + T5–T11 |
-| 5 | energetics, matrix, energy-threshold table (editable, with S15's computed values clearly visible alongside, Copy, "differs from computed" marks; D13), threshold table, clip (read-only) | "scoring…" | + T12–T16, T27 |
-| 6 | classes, validation, threshold table, energy-threshold table, clip (read-only) | "validating…" | + T18–T22, T28 |
+| 5 | energetics, matrix, energy-threshold table (editable, with S15's computed values clearly visible alongside, Copy, "differs from computed" marks; D13), no S11 pair-threshold table, clip (read-only) | "scoring…" | + T12–T16, T27 |
+| 6 | editable Gaussian classes and validation; S11/S24 threshold information and clip read-only | "validating…" | + T18–T22, T28 |
 
 **Banner scope.** A stage shows the failures of its own transformers and of earlier stages' transformers, never of later ones. A later-stage transformer may legitimately fail on kept or orphaned decisions, and that must stay hidden. A failure is also hidden while this tab has a pending write on one of the transformer's inputs (contract-boundaries §8.5 rule 2). The first state graph arrives within about 0.5 s of the `shares` message; no banner is shown before it.
 
@@ -429,7 +429,7 @@ The gate guarantee holds only if tabs do not race (author, D17, O7). The rows be
 | Continue k→k+1 | Back k→k−1 | Different cells: M_k is inactive and M_{k+1} is an active orphan, so every tab is at k−1. The next Continue into k deactivates the orphan first (§3.5). |
 | Continue 2→3 | edits S4 | M3's basis is the old rows, so M3 is invalid and the stage stays 2. A is told. The gate stays closed until S7 is fresh again. |
 | Back k→k−1 | edits M_k | Same cell: one 409. Either the edit or the Back is lost, and its tab is told. |
-| edits S11 at stage 5 | Back 5→4 | Different cells: stage 4, with A's threshold edit. |
+| historical: edits S11 at stage 5 (superseded 2026-11-06; S11 is omitted there) | Back 5→4 | Earlier design allowed a stage-5 S11 edit; current UI cannot make that write. |
 | Continue 4→5 (adapts the kept S14 to clip c) | edits S12 to c′ at stage 4 | Different cells. S14 lands built for c, but S12 = c′. M5's basis includes the clip read from its fragment-row keys, so M5 is invalid, and every tab stays at, or drops back to, stage 4. The next Continue 4→5 adapts the matrix to c′. Nothing needs repairing. |
 | new PDB code (S3 + S1) | new PDB code (S3 + S1) | Four PUTs; S1 decides (**arbiter rule**). The tab whose S1 was refused gives up and loads the winner's structure. The tab whose S1 was accepted but whose S3 got 409 resends S3. Until then S21 ≠ S1, and Continue 1→2 stays closed. |
 
@@ -552,7 +552,7 @@ These changes were proposed here and applied to that document when both were fin
 5. **Stage 4 gate.** Is "every unclipped threshold filled (copied and/or typed)" the right condition for 4→5, replacing OQ:8's "copied before stage 5"? Should rows of clipped fragments be required too? [Author: yes] Confirmed (D4): rows of clipped fragments are not required.
 6. **Stage 4 skeleton.** On entering stage 4, should the table start empty, with Copy as one click, or be prefilled from S9 when S9 happens to be fresh? Prefilling makes the default depend on timing: two tabs racing Continue could write different defaults. [Author: explicit copy. S9 must however be clearly visible in the browser, so that it is clear what Copy does]
 7. **S22 `fragments`.** Is it acceptable to take the fragment keys from T6's output, which is not gated, so that stage 4 opens before the fit? Or must the key rule come from the fit (`best-fits.tsv`)? [Author: It is acceptable]
-8. **Thresholds editable in stages 5–6 (OQ:8 "throughout").** I read this as the whole table staying editable in stages 4–6. Correct? [Author: yes]
+8. **Historical: thresholds editable in stages 5–6 (OQ:8 "throughout").** Earlier answer: [Author: yes]. Superseded by author clarification of 2026-11-06: S11 is stage-4 editable only (absent in stage 5 and read-only in stage 6); S24 is stage-5 editable only and read-only in stage 6. Gaussian classes are stage 6's only editable decision.
 9. **`biounit` in M2's basis.** Does the chain naming of the ranges depend on the biological assembly? If not, `biounit` can leave the basis and become pure display. [Author: it definitely does, because chains may be duplicated] Which atoms a range picked on a copy refers to is settled by D7: the backend applies the assembly operators, so they are that copy's atoms.
 10. **Restart detection and cache (§10.6b, d).** Does `seamless-client.js` expose a hook for "the server restarted", or should the app infer it? Is the result cache persistent in preparic's configuration? [Author: A server restart is out of scope for state transitions. The cache may or may not survive depending on the Seamless config; probably, it will not]
 11. **Withdrawing queued writes (§10.6c).** Can a write handed to `seamless-client.js` be cancelled before it is retried? [Author: make no assumptions here. Regardless if a cancel attempt succeeds/is supported or not, queue a write of the correct state for good measure]

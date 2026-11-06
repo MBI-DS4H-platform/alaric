@@ -3,6 +3,7 @@
 This is a contract, not a design. It says what preparic must do and what Alaric must provide during project preparation (stages 1–6), at the level a test oracle needs. Each clause states an observable property, and its **Oracle** line says how to decide whether an implementation meets it. How a clause is met is left open. Where a plan chose a mechanism (a factory, a shared cell, an echo, a marker), this document keeps only the property the mechanism was meant to secure. Appendix A points back to the plans that describe one way of meeting each clause.
 
 **Sources and precedence.** The author's decisions win. They are recorded in these places:
+- the author's clarification of 2026-11-06: stage 5 omits the S11 pair-threshold editor; stage 6 permits edits to Gaussian classes only. S11 pair thresholds and S24 energy thresholds are read-only in stage 6, and S24 is editable in stage 5 only. Stage 4 S11 editing and the 4→5 freshness/completeness gate remain unchanged. This supersedes earlier statements that S11 or S24 stays editable in stages 5–6 (P4.3, P5.2, P5.7, P6.4; ST §3.4, §5.4; DIP §6, §7);
 - the author's amendment of 2026-11-04: a clip may remove one candidate fragment of a selected stacking, provided at least one candidate remains. This supersedes the earlier strict reading of D2 and its assumption that matrix locks never change with the clip (§1, G9, P4.4, P5.3–P5.6, P6, X3);
 - the author's amendment of 2026-11-04 on `anchor-refe` thresholds. The per-nucleotide base ovRMSD values (A3/A4 `bases`) are computed, never edited. Each `anchor-refe` action uses A4's rounded value for its candidate, so the threshold table holds pairs only and stage 6 has no reference-anchor panel. A computed value above L_ov makes the export write a non-working action, with a sentinel and an explanatory comment, instead of blocking the export. No bases value triggers "Proceed anyway". This supersedes the editable bases, their stage 6 panel and the bases parts of D4 and D11 (A3, A4, P4.2, P4.3, gate 4→5, P6.6, X3, X5, X6, D4, D11);
 - the author's amendment of 2026-11-05: stage 4's active nucleotide is shared between tabs for collaborative viewing. It is not a decision and is not persisted, and every transition into or out of stage 4 resets it (P2, P4, P4.5);
@@ -525,7 +526,7 @@ Pending wording:
   - **Filling.** The user fills it by Copy, by typing, or both (author).
     - Copy is enabled only while the computed thresholds are fresh.
     - Copy asks before it overwrites typed values.
-  - **Editability.** It stays visible and editable in stages 4–6 (author).
+  - **Editability.** It is editable in stage 4 only. Stage 5 omits the S11 table; stage 6 may show the pair thresholds as read-only context (author clarification, 2026-11-06).
   - **Revert.** Each cell has its own revert to the computed value.
   - **Marks.** Cells that differ from the computed value are marked, with a count.
   - **Values.**
@@ -569,7 +570,7 @@ Pending wording:
 - **P5.2 Display.** For each fragment and range, preparic shows the reference and best-fit energies, colour-capped at about ±20.
   - Clipped rows are greyed, but their energies stay visible.
   - Per-ligand errors are shown on their row.
-  - The threshold table and the energy-threshold table (P5.7) are editable here; the clip is read-only.
+  - Stage 5 omits the S11 pair-threshold table. The energy-threshold table (P5.7) is editable here; the clip is read-only.
 - **P5.3 Anchors and columns.**
   - Each selected stacking gives an anchor (RNA residue r, protein range). Anchors with the same (r, range) collapse into one.
   - An anchor locks exactly its unclipped candidates. There is always at least one, by P4.4. Clipping one candidate removes that candidate's lock; uncovering it restores the lock. The selected stacking and its column remain selected throughout.
@@ -622,7 +623,7 @@ Pending wording:
       - values set aside earlier are restored for each protein range whose row is unchanged, as long as the PDB code and range 1 are unchanged too;
       - otherwise that range starts empty, and so does the whole table for another PDB code or range 1. It is never prefilled: Copy is an explicit action. The computed values are clearly visible beside the table, so that it is clear what Copy does.
     - **Filling.** By Copy, by typing, or both. Copy is enabled only while the computed values are fresh, fills every cell that has one, and asks before it overwrites typed values.
-    - **Editability.** It stays visible and editable in stages 5–6.
+    - **Editability.** It is editable in stage 5 only. Stage 6 may show its values as read-only context; it has no S24 edit, Copy or Revert controls (author clarification, 2026-11-06).
     - **Revert.** Each cell has its own revert to the computed value.
     - **Marks.** Cells that differ from the computed value are marked, with a count.
     - **Values.** Each value is finite, of either sign, with at most two decimals. More decimals are rejected, not rounded.
@@ -678,6 +679,7 @@ Pending wording:
   - **Filter name:** `rrmN` for N ≤ 80. For N ∈ {90, 95}, `rrmN` followed by `-tilt30` and/or `-disp45` for the ticked prefilters.
   - The reference score is shown but never sets the class.
 - **P6.4 Editable class table.**
+  - Gaussian classes are the only editable decision in stage 6. S11 pair thresholds and S24 energy thresholds, if shown, are read-only; no threshold Copy, Revert or input controls appear there (author clarification, 2026-11-06).
   - **Rows:** one per selected stacking.
   - **Validity:**
     - `rrm` is one of the six values;
@@ -761,7 +763,7 @@ Every decision below is answered and applied. The IDs are retained for cross-ref
 10. **D10. Which pose stage 5 scores** (P5.1). The discrete best-fit library pose written by A1 is scored.
 11. **D11. ovRMSD above L_ov = √3 Å** (A11, A12, P6.6, X6). Export is blocked for any kept-pair ovRMSD threshold above the limit. The remedy is to lower the threshold, requiring explicit "Proceed anyway" if the best-fit pose then fails. As amended by the author on 2026-11-04, a computed bases value above the limit neither blocks the export nor can be lowered: its `anchor-refe` action is written with the sentinel `ovrmsd: -1` and an explanatory comment (X3). Alaric raises above the limit for both `grow` and `anchor-refe`; the tables are not extended.
 12. **D12. Interacting cells without an energy** (P5.5–P5.7). The editor forbids them and read validation refuses them. If an anchor's current unclipped lock is an error row, no matrix passes; the error names the anchor. The user must deselect it in stage 3 or explicitly clip the failing candidate in stage 4 while retaining another candidate under P4.4.
-13. **D13. What triggers "Proceed anyway"** (P5.7, X5). Amber and red states both trigger the checkbox. Energy thresholds are user-editable: the table starts empty, is filled by explicit Copy and/or typing, and needs a valid value in every true kept matrix cell before stage 6. For unchanged PDB code and RNA range, a protein-range edit resets only that range's values. A best-fit energy E ≥ the edited threshold T triggers "Proceed anyway".
+13. **D13. What triggers "Proceed anyway"** (P5.7, X5). Amber and red states both trigger the checkbox. Energy thresholds are user-editable in stage 5 only: the table starts empty, is filled by explicit Copy and/or typing, and needs a valid value in every true kept matrix cell before stage 6. Stage 6 may display values read-only (author clarification, 2026-11-06). For unchanged PDB code and RNA range, a protein-range edit resets only that range's values. A best-fit energy E ≥ the edited threshold T triggers "Proceed anyway".
 14. **D14. Persistent result cache and restart** (P2, P5, P11; ST §11.10; O6). Preparic runs without a persistent result cache. Every decision is mounted; results recompute after a backend restart. Correctness across that restart requires every browser tab to restart right afterwards; tabs kept open have undefined behaviour. Restart detection is outside the state-transition scope.
 15. **D15. Gaps and fragment numbering** (§1, P2.1, A12; O3). Preparic refuses an RNA range with any unobserved residue at stage 2. In Alaric, fragment N uses the Nth and (N+1)th residues present, regardless of residue numbering; a window across a gap is not a fragment. `Reference` must number ordinally and tools that assume absolute residue numbers, including `rmsd.py --fragment`, must be fixed. `sequence: auto` already counts positions among residues present.
 16. **D16. Go-ahead items** (A5, A12). Publish attract-jax `9453ee6` and `22b23e4` and their accuracy data, bump Alaric's submodule pointer from `12bba50`, and fix the 10-12 grid-node bug. They are implementation-plan work, not pending approvals. A12's `min_cascade` rule checks the whole action's undecided pose count before every grid step.

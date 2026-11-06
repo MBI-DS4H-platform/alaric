@@ -63,7 +63,8 @@ None left; see §5.
 | I2: an addressed matrix extent | agreed: S14 stores ordered fragment-row keys and range ids beside the grid | ST §3.1, §4.2, §7.1, §10.4; CB §8.2 (S14); OC P5.6; DIP W0 |
 | ST §11.6, D5: the stage-4 skeleton | explicit Copy; S9 clearly visible beside the table | ST §5.4; CB §8.2 (S9); OC P4.3; DIP §12 |
 | ST §11.7, D6: S22 from T6's output | acceptable | CB T24; OC A2, §7; DIP §12 |
-| ST §11.8: the table editable in stages 4–6 | yes | ST §4.4 |
+| Historical ST §11.8: the table editable in stages 4–6 | yes (superseded by the 2026-11-06 author clarification below) | ST §4.4 |
+| Author clarification, 2026-11-06: stage-5/6 threshold editing | Stage 5 omits S11; S11 edits only in stage 4 and is read-only if shown in stage 6. S24 edits only in stage 5 and is read-only in stage 6. Gaussian classes are the only editable decision in stage 6. The stage-4 S11 edit and 4→5 gate stay unchanged. | OC P4.3, P5.2, P5.7, P6.4; ST §3.4, §5.4; CB §8.2; DIP §6, §7 |
 | ST §11.9: `biounit` in M2's basis | stays: chain naming depends on the assembly | ST §3.1 (unchanged); D7 |
 | ST §11.10, D14: restart and cache | restart out of scope for state transitions; the cache probably does not survive; no persistent cache (execution decision) | ST §1.11, §7, §8, §10.6; OC §7 |
 | ST §11.11: withdrawing queued writes | no assumption; always queue a write of the correct state | ST §7.2a, §10.6 |
