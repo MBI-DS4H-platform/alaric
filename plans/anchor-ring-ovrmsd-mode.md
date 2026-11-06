@@ -1,5 +1,7 @@
 # The `anchor-refe` action: anchor poses filtered by ovRMSD to a reference
 
+> **Historical.** An investigation of the code before W6–W8b. Since then the `anchor` action uses the twelve `rrm*` Gaussian filters instead of r90/r95/r99, `anchor-refe` and `grow` raise on an ovRMSD above √3 Å instead of clamping, and `anchor-refe` admits the export's `-1` sentinel. Current behaviour: `documents/middle-level.txt`; contract: [final/oracle-contract.md](final/oracle-contract.md).
+
 Paths are relative to `/home/agent/alaric`. The mode is named `anchor-refe`, not "test" or "demo". Three details of the brief differ from the code. It fits **nucleobase heavy atoms**, not the stacking ring sets. Its reference comes from the **RNA PDB**, not from `ring-refe/*.npy`. It is a separate **action**, not a flag on `anchor`.
 
 ## 1. Name and selection

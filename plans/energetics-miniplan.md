@@ -1,5 +1,7 @@
 # Stage 5 mini-plan: energetics (ATTRACT-JAX, gridless numpy) in preparic
 
+> **Historical.** Superseded where it differs by [final/oracle-contract.md](final/oracle-contract.md) (P5), [final/contract-boundaries.md](final/contract-boundaries.md) and [final/implementation-plan.md](final/implementation-plan.md) (W4/W5, W8a). Notably, energy thresholds are a user-edited table (D13), the matrix's locks are the anchor's kept candidate fragments (one of two may be clipped), and growth uses an absolute energy of at least 3. The implemented stage is summarized in preparic's `STAGES.md`.
+
 **Purpose:** decide which RNA dinucleotides interact with which protein ranges. Every dinucleotide is scored against each protein range on its own, never against a merged receptor. Both sets are scored: the reference dinucleotides (`refe`, bound) and the best-fit conformers (`bestfit`, library). The user then edits one contiguous interaction run per stage 3 stacking anchor, starting from an energy-based Recompute. The stage depends on stage 3 (`stackings` + `stacking_selection`) and stage 4 (`refe-fragments`, `best_fit`, `best_fit_clip`).
 
 ## Inputs (all checksums)

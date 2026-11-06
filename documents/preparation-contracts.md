@@ -5,8 +5,11 @@ with a deterministic [builder](../contracts/preparation-v1/build_artifacts.py),
 one shared [fixture corpus](../contracts/preparation-v1/fixtures.json),
 [golden references](../contracts/preparation-v1/golden-references.json), and
 [active inventory](../contracts/preparation-v1/inventory.json). These specify
-representations for the settled W0 boundaries. They do not install consumers
-in Preparic or implement Alaric's future scientific steps.
+representations for the settled W0 boundaries, as amended by the author on
+2026-11-04: one of two candidate fragments of a selected stacking may be clipped
+(W8a), and `anchor-refe` thresholds are computed, never edited (W8b). Preparic
+and Alaric's preparation steps consume these representations; the steps are
+described in [refe-best-fit-seamless.md](refe-best-fit-seamless.md).
 
 The bundle uses JSON Schema draft 2020-12. Select an entry with
 `schemas.json#/$defs/S14`, for example. Payloads have `schema: 1` and reject
@@ -47,7 +50,7 @@ snapshots carry assembly identity because normalized rows depend on it.
 | S8 `stacking_selection` | `basis: {pdbcode,biounit,rows}`, `active`, `selected: {stacking-key: boolean}`. |
 | S9 `best_fit_thresholds` | `echo: fit-echo`, `pairs`, `bases`; every threshold also has its numeric `_raw` field. |
 | S10 `best_fits` | `echo: fit-echo`, `rows: {key,fragment,sequence,conformer,rotamer,grid,pdb}[]`. |
-| S11 `threshold_edits` | `basis: RNA-basis`, `active`, `pairs`, `bases`; null means a blank individual threshold. |
+| S11 `threshold_edits` | `basis: RNA-basis`, `active`, `pairs`; null means a blank individual threshold. A stored S11 that still has `bases` is malformed. |
 | S12 `best_fit_clip` | `basis: RNA-basis`, `clip1`, `clip2`; counts are nonnegative integers. Startup only: `{schema:1,basis:null,clip1:0,clip2:0}`. It always exists and has no active flag. |
 | S13 `energetics` | `echo: energy-echo`, `rows: {fragment: fragment-key,range,refe: number/null,bestfit: number/null,error: string/null}[]`. |
 | S14 `interaction_matrix` | `basis: selected-key[]`, `active`, `rows: fragment-key[]`, `ranges: range-id[]`, `grid: boolean[][]`. |
@@ -55,7 +58,6 @@ snapshots carry assembly identity because normalized rows depend on it.
 | S17 `bestfit_stackings` | `echo: energy-echo`, `rows: stacking[]`; descriptors only. |
 | S18 `gaussian_classes` | `basis: selected-key[]`, `active`, `rows: class-edit[]`; persisted edits, distinct from S25. |
 | S19 `gaussian_validation` | `echo: {classes,clip,selected_keys,best_fits}`, `rows: {key,state,messages: string[]}[]`. States: `green`, `amber`, `red`, `blocked`. |
-| S20 `refe_validation` | `echo: {bases,clip,selected_keys,best_fits}`, same validation row shape. |
 | S21 `structure_id` | `structure_id: string`. |
 | S22 `fragments` | `echo: RNA-basis`, `residues`, `fragments`, `adjacent_pairs`, `candidates`; see below. |
 | S23 `range_pdbs_aa` | `pdb_code`, `range_specs: S5`, `pdbs: {range,name,pdb}[]`; PDB strings pass through byte-for-byte. |
@@ -74,8 +76,11 @@ job/result documents do not. `null`, an inactive marker, and an empty valid
 selection have separate fixtures. An empty shaped matrix is representable but
 fails consumption when it does not match the current extent.
 
-The inventory preserves T0–T16/T18–T28 and S1–S15/S17–S25 and their existing
-names, including T27/S24 and T28/S25. T17/S16, activation tokens, parent tokens,
+The inventory is T0–T16, T18–T22 and T24–T28, with S1–S15, S17–S19 and
+S21–S25, under their existing names, including T27/S24 and T28/S25. T23
+`validate_refe_anchors` and S20 `refe_validation` were removed by the
+amendment of 2026-11-04. Preparic's S26 `stage4_active_nucleotide` is unmounted
+view state, outside this bundle. T17/S16, activation tokens, parent tokens,
 validation receipts and extra cross-result model/ring identity envelopes are
 absent. T10/T19/T27 results stay unshared. `spec_digest` and `npy_sha256` keep
 their existing scientific model/cache roles; no new comparison gate is added.
@@ -94,12 +99,14 @@ residue IDs `[101,102,104,105]`, fragment numbers 1 and 3, and no window 2.
 Preparic stage 2 refuses ranges with unobserved residues. The small numbering
 check covers the corpus's integer-residue cases; it is not a general PDB
 connectivity inference algorithm. Production consumers use the canonical map's
-explicit adjacency and candidate membership. W8 must fix actual Reference
-numbering before gapped A2/A1 acceptance.
+explicit adjacency and candidate membership. Alaric's `Reference` numbering is
+ordinal as well, so A2 and A1 agree on the gapped case.
 
 Pair threshold rows are `{down,up,sequence,ovrmsd,crmsd}`. Base threshold rows
-are `{fragment,sequence,nuc1_ovrmsd,nuc2_ovrmsd}`. Stored RMSD thresholds are
-positive decimal strings with at most two decimal places, or null in S11.
+are `{fragment,sequence,nuc1_ovrmsd,nuc2_ovrmsd}` and occur only in computed S9;
+they are the `anchor-refe` thresholds and are never edited. Stored RMSD
+thresholds are positive decimal strings with at most two decimal places, or
+null in S11.
 S9 also requires `ovrmsd_raw`/`crmsd_raw` or
 `nuc1_ovrmsd_raw`/`nuc2_ovrmsd_raw`, respectively. Raw values remain numeric;
 they are never replaced by rounded values.
@@ -148,16 +155,20 @@ Shape validation does not establish freshness, completeness, current identity
 or scientific correctness. Separate pure checks cover fragment windows,
 ordered addressed matrix extent/columns, strict booleans, selection basis,
 locks, per-run lock coverage, scoring errors, class selection/basis membership,
-and duplicate candidate/class addresses. An error on a selected
-anchor's lock refuses the matrix and requires deselection in stage 3. The
+and duplicate candidate/class addresses. An anchor's locks are its candidate
+fragments that the clip keeps. An error on a lock refuses the matrix; the user
+deselects the anchor in stage 3, or clips that candidate in stage 4 while
+another candidate stays. The
 interaction handoff itself receives **shape validation only**; full anchor
 checks belong to matrix read validation and later export.
 
 The matrix adaptation fixtures preserve old interior cells, expand only at an
 outer end touching the saved boundary, use supplied growth eligibility for new
 rows, and leave a user-stopped end untouched. Growth eligibility stands for
-fresh per-range energies/errors; these tests do not call a scorer. Clip
-clamping protects all selected-anchor candidate fragments on Continue 3→4.
+fresh per-range energies/errors; these tests do not call a scorer. Newly
+uncovered locks are restored as true cells regardless of energy. A valid clip
+keeps at least one candidate fragment of every selected anchor; Continue 3→4
+clamps a retained clip only when an anchor has no kept candidate.
 The small clamp helper receives already resolved ordinal extrema.
 
 S24 starts empty. Explicit Copy requires fresh S15 values and confirmation
@@ -169,8 +180,8 @@ The export retains exactly two places. Range reconciliation keys by the full
 protein row, preserving values across reordering/refits and resetting only a
 changed range. A project/RNA-basis change empties the whole table.
 
-Threshold completeness checks expected base and adjacent-pair identities from
-the canonical map, requiring only kept rows. Missing kept rows cannot pass by
+Threshold completeness checks the expected adjacent-pair identities from the
+canonical map, requiring only kept pairs. Missing kept rows cannot pass by
 vacuous filtering. Energy completeness requires a valid stored value for every
 true matrix cell; false/clipped cells may stay blank. The gate fixtures express
 all other readiness requirements separately. Failed T10 vetoes 4→5, failed T27
@@ -181,6 +192,12 @@ required. Red and amber export conditions require explicit Proceed anyway,
 including a lowered energy threshold rejecting its best-fit energy.
 
 ## Running and evidence limits
+
+*Status, 2026-11-06.* The limits listed at the end of this section describe
+the W0 bundle as delivered on 2026-10-29. The consumers and steps it names as
+future work have since been delivered and tested in their own work packages
+(see [refe-best-fit-seamless.md](refe-best-fit-seamless.md) and Preparic's
+`STAGES.md`). The bundle itself remains a shape and semantic-fixture check.
 
 From the Alaric checkout:
 

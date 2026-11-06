@@ -1,5 +1,7 @@
 # Stage 6 mini-plan: Gaussian stacking filter in preparic
 
+> **Historical.** Superseded by [final/oracle-contract.md](final/oracle-contract.md) P6 and [final/implementation-plan.md](final/implementation-plan.md) §9. The browser computes no Gaussian: scores and computed classes come from the backend (T28, author O5), and the TypeScript geometry/model below was not built. The cutoffs quoted below are four-decimal approximations; the applied values are the five-decimal cutoffs in `alaric/gaussian_stacking_filter.json`. The reference-anchor validation (T23) was removed on 2026-11-04.
+
 > **Author decision, 2026-10-29:** installed Gaussian caches are under `precomputed-filters/gaussian/`, confirming the directory rename from `gaussian-rrm/`. Legacy-filter compatibility (r90, r95) is a non-goal; see [final/gaussian-precomputation-decisions.md](final/gaussian-precomputation-decisions.md).
 
 Plan only; nothing is implemented. Builds on `alaric-gaussian-miniplan.md` (AlaGaussian, the "JSON contract"), `stage4-best-fit-miniplan.md` and `energetics-miniplan.md`. Numbers were checked in scratch with the `alaric` env; line numbers refer to the current `alaric/anchor.py`.

@@ -1,5 +1,7 @@
 # attract-jax: gridless, numpy-only scoring (input for preparic "energetics")
 
+> **Historical.** The commit, publication and environment status below is outdated: the numpy path and its accuracy data are published and pinned by Alaric's submodule (W4). The delivered A5 step is described in `documents/refe-best-fit-seamless.md`.
+
 ## Entry points
 - CLI: `attract-jax/util/minfor.py --oracle numpy --score --energy-only --no-grid ...`
 - Python: `util/jax_scorer.py: JaxScoreOracle(backend="numpy", grid_free=True, energy_only=True, ...)`, then `score_batch(ens, dofs)`. Kernel: `util/numpy_grid_score.py` (`_direct_energies`). Docs: `attract-jax/docs/numpy-scoring.md`.

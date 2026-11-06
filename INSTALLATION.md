@@ -180,7 +180,23 @@ This file must exist on any machine that runs Alaric code. If you use remote
 execution, create `~/.alaric/fraglib.yaml` on the remote machine too, with paths
 that are valid from the remote machine.
 
-## 9. Quick verification
+## 9. Install the Gaussian stacking-filter caches
+
+The `anchor` action's precomputed filters, and Preparic's stage 6, read twelve
+caches under `precomputed-filters/gaussian/`. They are not in git. Build them
+once per checkout, in the `alaric` environment (about 1–3 minutes, about
+1.5 GB peak memory):
+
+```bash
+python util/gaussian-precalc-all.py
+```
+
+See [documents/gaussian-filter.md](documents/gaussian-filter.md) §6 for
+single-filter builds, `--decompress` and `--check`. Nothing generates the caches
+automatically: a missing or corrupt cache is reported as an installation error
+that names this command.
+
+## 10. Quick verification
 
 In a fresh shell:
 

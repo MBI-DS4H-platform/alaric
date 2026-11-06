@@ -9,7 +9,7 @@ A project consists of:
 
 
 Every fragment folder contains an alaric.yaml .
-Every alaric.yaml contains one field "type", which can be anchor, grow, etc.
+Every alaric.yaml contains one field "action" (legacy: "type"), which can be anchor, grow, etc.
 The other parameters are shown below per action type, with examples. 
 For "auto", the parentheses explain how it is determined.
 
@@ -45,6 +45,13 @@ exclude: 1b7f or auto (read from ../DATA/pdbcode.txt)
 nucleotide: first or second
 ovrmsd: 0.75, or auto (read from ../DATA/anchor.yaml)
 reference: reference.pdb (default). Read from ../DATA
+
+ovrmsd must be positive and at most L_OV = sqrt(3) (alaric/anchor_constants.py): the action
+raises above it instead of clamping (1.73 runs, 1.74 raises). The one exception at schema
+time is the sentinel ovrmsd: -1, which a Preparic export writes, with an explanatory comment,
+for a positive control whose computed threshold exceeds L_OV. Such an action deploys, but
+fails when it runs, without affecting the project's other actions. Zero and other negative
+values are rejected by the schema.
 
 ## rmsd
 
@@ -94,6 +101,10 @@ direction: fwd or forward or bwd or backward, or auto (read from dirname "fragX-
 crmsd: 0.25 or auto (read the corresponding pair from constraints.json)
 ovrmsd: 0.75 or auto (read the corresponding pair from constraints.json)
 restrict_input: frag5-anchor-filtered [optional]. Name of a pose action dir.
+
+ovrmsd may not exceed L_OV = sqrt(3); larger values raise instead of being clamped. A Preparic
+export writes explicit crmsd/ovrmsd values from the edited stage 4 pair thresholds; it never
+relies on constraints.json being filled from the best-fit tables.
 
 Restriction keeps only those generated poses whose (conformer, rotamer, translation) also
 occurs in the restrict pool. Target conformers and rotamers absent from it are dropped

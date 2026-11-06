@@ -1,5 +1,7 @@
 # How Alaric derives ovRMSD / cRMSD thresholds (for preparic stage 4)
 
+> **Historical.** The settled rounding rule is strictly above (G7): the smallest multiple of 0.01 greater than the raw value, so an exact cent value advances to the next cent. It is implemented once in `alaric/threshold_rounding.py` and documented in `documents/refe-best-fit-seamless.md` (A4/A6).
+
 Paths are relative to `/home/agent/alaric`. I re-ran all commands in the `alaric` conda env and got byte-identical output.
 
 ## 1. Command chain (tests/1b7f)

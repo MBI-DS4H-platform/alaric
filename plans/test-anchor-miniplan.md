@@ -1,5 +1,7 @@
 # Test-anchor mini-plan: `anchor-refe` (reference ovRMSD) mode in preparic
 
+> **Historical.** Superseded by [final/oracle-contract.md](final/oracle-contract.md) X3 and [final/anchor-refe-thresholds-plan.md](final/anchor-refe-thresholds-plan.md). Both anchor modes are always exported, so there is no `anchor_modes` cell. `anchor-refe` thresholds are the computed bases values, never edited, there is no stage-6 reference validation (T23), and a value above √3 Å is exported as the `-1` sentinel with a comment.
+
 This is a plan only; nothing is implemented. It builds on `anchor-ring-ovrmsd-mode.md`, `stage4-best-fit-miniplan.md` (S4), `stage4-thresholds-howto.md` and `preparic-gaussian-miniplan.md` (S6). The mode is Alaric's `anchor-refe` action. It is an alternative to the Gaussian filter, chosen per anchor. Despite the brief's wording, it fits **nucleobase heavy atoms** (2-character names) of one nucleotide against `DATA/reference.pdb`. It does not use the ring sets or `ring-refe/`.
 
 ## 1. The threshold, and how much stage 4 already covers

@@ -5,7 +5,7 @@ alaric-gaussian-miniplan.md
     Plan for a Python generator of the 12 precomputed Gaussian stacking filters (rrm50..rrm95, with tilt30/disp45 variants) that reproduces the report's cutoffs and writes the CSR caches plus the JSON contract (gaussian_stacking_filter.json) that preparic reads. It also covers the RRM-95 fallback, the Seamless factory, shipping and the anchor.py/resolve.py changes.
 
 alaric-project-layout.md
-    Description of an Alaric project directory as a frontend sees it: DATA inputs, action dirs, the sigil/CACHE lifecycle, the action types, the downstream chain tools, and where the Seamless best-fit step fits. It still carries one claim, that the best-fit tables feed the DATA thresholds, which open-questions.md says to correct.
+    Description of an Alaric project directory as a frontend sees it: DATA inputs, action dirs, the sigil/CACHE lifecycle, the action types, the downstream chain tools, and where the Seamless best-fit step fits. Updated 2026-11-06: nothing fills DATA thresholds from the best-fit tables; a Preparic export will write the edited preparation thresholds explicitly.
 
 anchor-ring-ovrmsd-mode.md
     Investigation of Alaric's "anchor-refe" action, which keeps anchor poses whose unaligned base-atom RMSD to the reference nucleotide is below a per-(fragment, nucleotide) ovrmsd threshold. It covers what is computed, how thresholds are derived from the best-fit bases table, grids, tests and limits such as MAX_OVERLAP_RMSD.

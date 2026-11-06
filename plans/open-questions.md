@@ -1,5 +1,7 @@
 # Preparic roadmap — open questions
 
+> **Historical.** The author's answers here were carried into the final documents. [final/contract-open-questions.md](final/contract-open-questions.md) records the final answers, and [final/oracle-contract.md](final/oracle-contract.md) governs where they differ.
+
 Collected 2026-10-28 from the planning session. Stage numbering: 1 PDB code, 2 ranges, 3 stacking selection, 4 best-fit conformers, 5 energetics, 6 Gaussian stacking filter, then a later export stage. The subagent's recommendation is given in brackets where it made one.
 
 Questions here that bear on the contract documents and are still open are gathered in [contract-open-questions.md](contract-open-questions.md), marked below with their ID there.

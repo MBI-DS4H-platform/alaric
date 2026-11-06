@@ -1,5 +1,7 @@
 # Alaric: merged energy score+filter, one threshold per (dinucleotide, range)
 
+> **Historical.** Implemented in W8 as the `energy-filter` action. Where this plan differs, [final/oracle-contract.md](final/oracle-contract.md) (A12) and [final/implementation-plan.md](final/implementation-plan.md) §10 govern; for example, energy thresholds are edited by the user (D13) and the thresholds file carries no metadata. Current behaviour: `documents/middle-level.txt` and `documents/refe-best-fit-seamless.md` (A12).
+
 Spin-off for preparic stage 5 (`energetics-miniplan.md`). Plan only; nothing is implemented.
 
 ## 1. Current state

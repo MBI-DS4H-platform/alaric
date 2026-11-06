@@ -1,5 +1,7 @@
 # Preparic architecture summary
 
+> **Historical.** A snapshot of preparic before the preparation work (stages 1–3 only). Preparic now implements stages 1–6 with eight local spawn workers; see preparic's `README.md` and `STAGES.md`, and [final/contract-boundaries.md](final/contract-boundaries.md) for the inventory.
+
 Preparic (`/home/agent/preparic`, GPL, "Phase 1") is a browser app for preparing Alaric runs: pick a PDB entry and biological assembly, define residue ranges, review RNA-protein stacking interactions. It is a Svelte frontend over a Seamless `Context` that acts as the backend.
 
 ## Frontend

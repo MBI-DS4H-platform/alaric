@@ -1,5 +1,7 @@
 # Gaussian filter: source description
 
+> **Historical.** A survey of the source material. The applied model, mask (d < 5 Å, φ < 60°), five-decimal cutoffs and filter names are in `documents/gaussian-filter.md` and `alaric/gaussian_stacking_filter.json`; the old r90/r95/r99 arrays are not supported.
+
 Sources: `~/shared/stacking-prediction-plots` (same directory as `/srv/shared/stacking-prediction-plots`, via `readlink -f`) and `~/shared/stacking-interactions-classifying` (branch `gaussian-filter-precalculation`). Nothing was checked out, modified or run in either repository. Branch `.npy.zst` files were extracted to the scratchpad and read only for headers and statistics.
 
 ## Part 1. `*gauss*` in stacking-prediction-plots

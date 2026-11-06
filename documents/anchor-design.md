@@ -1,5 +1,7 @@
 # Anchor Action Design Notes
 
+> **Historical design notes.** The brute-force angle/dihedral anchoring described under "Current anchor action" has been removed: `anchor` now uses only the twelve precomputed Gaussian filters (`documents/gaussian-filter.md`, `documents/middle-level.txt`). The shared cache and cell logic lives in `alaric/anchor_precalc.py`.
+
 ## Current anchor action
 
 The anchor action creates an initial pose pool for one dinucleotide fragment by

@@ -1,5 +1,7 @@
 # Stage 4 mini-plan: best-fit statistics, thresholds and RNA clipping in preparic
 
+> **Historical.** Superseded where it differs by [final/oracle-contract.md](final/oracle-contract.md) (P4) and [final/implementation-plan.md](final/implementation-plan.md) (W3, W8a, W8b). Notably, base thresholds are computed and never edited (only pair thresholds are), and the clip must keep at least one candidate fragment of each selected stacking rather than all of them. The implemented stage is summarized in preparic's `STAGES.md`.
+
 **Scope.** Stage 4 does four things:
 1. Fit every dinucleotide of the RNA range to its best library conformer.
 2. Derive the ovRMSD/cRMSD threshold values (the pairs and bases tables).

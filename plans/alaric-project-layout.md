@@ -1,5 +1,7 @@
 # Alaric project layout (as a frontend sees it)
 
+> **Updated 2026-11-06 (W9).** Corrected for the delivered preparation work: retired score/filter actions, the twelve Gaussian filters, the √3 Å ovRMSD limit, and where thresholds come from. The actions are specified in `documents/middle-level.txt`.
+
 An Alaric project is a plain directory. Its root is whichever directory holds `DATA/` (CLIs search upward from the cwd). It is a DAG of **action dirs** over shared inputs, with a content-addressed cache.
 
 ```
@@ -19,15 +21,15 @@ myproject/
 ```
 
 ## DATA
-`<protein>.pdb` (original numbering, for anchoring) and `<protein>-aa.pdb` (all-atom, for scoring); `reference.pdb` (bound RNA); `rna.pdb` (best-fit input); `pdbcode.txt` (PDB code excluded from the fragment library); `anchor.yaml` (`angle`, `dihedral`, `ovrmsd`); `constraints.json` (per-fragment `sequence` and `scores{protein}`, and `pairs[{down,up,crmsd,ovrmsd}]`). These supply the defaults behind `auto`.
+`<protein>.pdb` (original numbering, for anchoring) and `<protein>-aa.pdb` (all-atom, for scoring); `reference.pdb` (bound RNA); `rna.pdb` (best-fit input); `pdbcode.txt` (PDB code excluded from the fragment library); `anchor.yaml` (`ovrmsd`); `constraints.json` (per-fragment `sequence`, and `pairs[{down,up,crmsd,ovrmsd}]`); `energy-thresholds.json` (`schema: 1` plus `frag-N-SEQ` → `range-K` → two-decimal threshold) and `score-filter.yaml` (`cascade`, `min_cascade`) for `energy-filter`. These supply the defaults behind `auto`. Nothing fills `constraints.json` from the best-fit tables: it is a legacy, hand-authored file. A Preparic export will instead write explicit thresholds from the preparation's edited values (see below).
 
 ## Actions
 `alaric.yaml` is strict (`action:` key; legacy `type:`). Dir names follow `frag<N>-<role>`: N is the dinucleotide at residues N and N+1, and a `-fwd`/`-bwd` suffix sets the grow direction. Dependency fields accept only the matching output kind.
-- **Pose pools**: `anchor` (stack on protein `resid`/`nucleotide`; `angle`+`dihedral` or a precomputed gaussian r90/r95/r99 filter), `anchor-refe` (poses within `ovrmsd` of the reference nucleobase), `grow` (`input`, `restrict_input`, `crmsd`, `ovrmsd`), `filter` (`score_input`+`threshold`, or `mask_input`), `identity` (merge/dedup). `anchor-test`/`grow-test` are single-conformer variants.
-- **Scores** (`score.npy`): `score` (ATTRACT), `rmsd`, `score_add`.
+- **Pose pools**: `anchor` (stack on protein `resid`/`nucleotide` through one of the twelve precomputed Gaussian filters `rrm50` … `rrm95-tilt30-disp45`; see `documents/gaussian-filter.md`), `anchor-refe` (poses within `ovrmsd` of the reference nucleobase), `grow` (`input`, `restrict_input`, `crmsd`, `ovrmsd`), `energy-filter` (one protein range, keep energy < `threshold`; ranges chain as AND), `identity` (merge/dedup). `anchor-test`/`grow-test` are single-conformer variants. `grow` and `anchor-refe` raise on an `ovrmsd` above √3 Å; `anchor-refe` admits `-1` as an export's disabled-control sentinel, which fails when run.
+- **Scores** (`score.npy`): `rmsd`. The `score`, `filter` and `score_add` actions are retired (`tests/legacy-middle-actions/`).
 - **Masks**: `mask`, `mask-common-conformer`.
 
-Pool dirs hold `poses-N.arc.zst`, plus `provenance.npy.zst` (grow/filter) or `map-1/2.npy.zst` (identity).
+Pool dirs hold `poses-N.arc.zst`, plus `provenance.npy.zst` (grow/energy-filter) or `map-1/2.npy.zst` (identity).
 
 ## Lifecycle and caching
 1. `alaric-sigil` writes `sigil.txt` = `<10hex>-<10hex|null>`: hash of resolved parameters (DATA files by SHA-256), then hash of dependency sigils (`null` for roots). Editing `alaric.yaml` makes it stale and aborts unless `--force`/`--delete`.
@@ -41,7 +43,7 @@ Pool dirs hold `poses-N.arc.zst`, plus `provenance.npy.zst` (grow/filter) or `ma
 ## Seamless and best-fit
 - The project cache is Alaric's own sigil/checksum scheme. Seamless only computes checksums and canonical JSON; there is no `seamless-run` in project actions.
 - `refe-best-fit` (`util/refe-best-fit-SEAMLESS.sh`, or the `seamlessify_refe_best_fit` Transformer factory) is a standalone step, not an action dir. It reads `rna.pdb` and writes `--output` (default `./best-fits`): `best-fits.tsv` and `pdbs/frag-*-bestfit.pdb`. Seamless caches it via `SEAMLESS_CACHE` or a cluster config. Its identity is the inputs, the fitter arguments, and the `fraglib/**/*.CHECKSUM` sidecars.
-- The `refe-best-fit*.tsv` pairs and bases tables look like the source of the `DATA` thresholds. That link is inferred; no code enforces it.
+- The best-fit pairs and bases tables are **not** copied into `DATA/constraints.json` or `DATA/anchor.yaml`, and no code populates them from those tables. In Preparic, the tables become the computed thresholds of stage 4 (`documents/refe-best-fit-seamless.md`, A3/A4). The planned export input is the user's **edited** pair thresholds (for `grow`), the computed base thresholds (for `anchor-refe`) and the edited energy thresholds (for `energy-filter`), written as explicit action values (`plans/final/oracle-contract.md` X3/X4; `alaric/export_bundle.py`).
 
 ## Outside the project
 `~/.alaric/fraglib.yaml` and the env vars `ALARIC_DIR` and `ALARIC_REMOTE_{HOST,DEPLOYMENT_DIR,ALARIC_DIR,RESULT_DIR}`, which must also be set up on the remote machine.

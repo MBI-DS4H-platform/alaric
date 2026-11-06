@@ -2,6 +2,8 @@
 
 Draft, 2026-11-04. **Relation:** this is an amendment work package that follows [implementation-plan.md](implementation-plan.md), in the same way as its W8a section (§12). It implements the author's amendment of 2026-11-04 on `anchor-refe` thresholds, which is recorded in [oracle-contract.md](oracle-contract.md): the sources list, P4.2, P4.3, the 4→5 gate, P6.6, X3, X5, X6, D4 and D11. The amendment has also been applied to [state-transitions.md](state-transitions.md) and [contract-boundaries.md](contract-boundaries.md). The amendment also clarifies P4.2. W8b follows W8a and supersedes the earlier packages' requirements for editable bases, T23/S20 and reference-anchor validation; their other requirements and evidence remain in force. Its evidence feeds W9's documentation work (implementation-plan §13). The document edit changes no code: W8b is not yet implemented.
 
+Status, 2026-11-06: implemented (Alaric `bb592b4`, preparic `c26a14a`) and documented in W9 (preparic `STAGES.md`, Alaric `documents/refe-best-fit-seamless.md`).
+
 ## 1. The amendment in brief
 
 Stage 4 has three statistics:
