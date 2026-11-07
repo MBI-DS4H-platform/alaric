@@ -2,7 +2,7 @@
 
 Draft, 2026-11-04. **Relation:** this is an amendment work package that follows [implementation-plan.md](implementation-plan.md), in the same way as its W8a section (§12). It implements the author's amendment of 2026-11-04 on `anchor-refe` thresholds, which is recorded in [oracle-contract.md](oracle-contract.md): the sources list, P4.2, P4.3, the 4→5 gate, P6.6, X3, X5, X6, D4 and D11. The amendment has also been applied to [state-transitions.md](state-transitions.md) and [contract-boundaries.md](contract-boundaries.md). The amendment also clarifies P4.2. W8b follows W8a and supersedes the earlier packages' requirements for editable bases, T23/S20 and reference-anchor validation; their other requirements and evidence remain in force. Its evidence feeds W9's documentation work (implementation-plan §13). The document edit changes no code: W8b is not yet implemented.
 
-Status, 2026-11-06: implemented (Alaric `bb592b4`, preparic `c26a14a`) and documented in W9 (preparic `STAGES.md`, Alaric `documents/refe-best-fit-seamless.md`).
+Status, 2026-11-07: W8b was implemented (Alaric `bb592b4`, preparic `c26a14a`) and documented in W9. Its export-seam proposal below is historical and superseded by E0–E7 in [export-gens-plan.md](../export-gens-plan.md); E7 retired the synthetic bundle API and transferred its useful assertions to real pin fixtures and rendered trees.
 
 ## 1. The amendment in brief
 
@@ -16,14 +16,7 @@ Stage 4 has three statistics:
 
 `anchor-refe` is a positive control. Its computed thresholds are A4's rounded bases values, strictly greater than their raw values (G7). Nothing edited enters them. A threshold within L_ov is emitted unchanged; one above L_ov is replaced by the deliberately failing sentinel described below. The sentinel is not a rounded threshold and is not covered by G7's passing-pose guarantee.
 
-The wiring is short-circuited:
-
-- **Today:** A (S9 `bases`) and B (S11 `bases`, written by the browser) ⇒ C. C is:
-  - T10, which validates B;
-  - T11, which writes B's kept bases into `clipped-fragments/thresholds.json`;
-  - T23, which compares B with A's raw values into S20;
-  - the export seam, whose `reference_candidates[].ovrmsd` comes from B under the old X3.
-- **After, for bases:** A ⇒ export. The browser's only role for bases is the 4→5 gate, which requires S9 to be fresh. For pairs, S9 still supplies Copy and the computed-value display/difference marks, and S11 still supplies edits and the stage marker.
+The W8b plan originally described a short-circuit from S9 `bases` through browser-edited S11 bases and T23/S20 to a synthetic export seam. That wiring is historical: E0–E7 removed editable bases and T23/S20. In the delivered flow, fresh S9 bases feed T29's same-snapshot admission and export snapshot; S11 retains editable pairs, while S9 still supplies their Copy values and computed-value display/difference marks.
 
 A candidate whose rounded computed value exceeds L_ov no longer blocks the export (X6). Instead its action is written with `ovrmsd: -1` and an explanatory comment (X3). Bases values never trigger "Proceed anyway" (X5). `grow` pair values above L_ov still block (D11).
 
@@ -34,7 +27,7 @@ A candidate whose rounded computed value exceeds L_ov no longer blocks the expor
    - Update the exact-key sets and the startup loader in `backend.py` (`_MARKER_KEYS`, the `threshold_edits` branch of the marker validator) and `stage4.py`'s `_validate_threshold_edits` (T10).
    - A stored file that still has `bases` is malformed. It loads as undecided with its diagnostics kept and is never migrated (G9, I7).
    - **S11 version (author clarification, 2026-11-04).** Keep `schema: 1`. This is unreleased code, and the author has deleted the existing S11 JSON files. This is an explicit exception to G8's version-bump rule for this change only; record the exception in this plan and nowhere else. I7 still governs refusal and diagnostics if a legacy-shaped file is supplied, but is not the reason for retaining schema 1.
-2. **T11 `clip_fragments`.** Retain T11 in W8b, as required by the amended boundary contract. Write `thresholds.json` as `{schema:1, pairs:[...]}`, containing only the edited pairs whose two fragments are kept. The kept PDBs and `clip.json` are unchanged. T11 does not acquire an S9 dependency. Any later removal of T11 belongs to the deferred export design.
+2. **T11 `clip_fragments`.** Retain T11, as required by the amended boundary contract. It writes `thresholds.json` as `{schema:1, pairs:[...]}`, containing only the edited pairs whose two fragments are kept. The kept PDBs and `clip.json` are unchanged. T11 does not acquire an S9 dependency and remains an input to the delivered T29/T30 export.
 3. **T23 and S20.**
    - Remove `_stage6_validate_refe_anchors`, its wiring (`context.validate_refe_anchors`), the `refe_validation` cell, its mount and its share.
    - Remove `validate_refe_anchors` from `stage6.py`, and the `refe-validation.json` mount path.
@@ -65,12 +58,14 @@ The functional change is to remove the bases from the stage 4 table. The layout 
 5. **`src/App.svelte`.** Pass S9 freshness wherever `canContinueStage4` is called. Skeleton creation on Continue 3→4 follows the new shape.
 6. **`src/components/Stage6Gaussian.svelte`.** Remove the reference-anchor validation section and its derived state. The Gaussian validation and class table are unaffected.
 
-## 4. Alaric export seam (`alaric/export_bundle.py`)
+## 4. Historical Alaric export-seam proposal — superseded
+
+> This section records the W8b proposal for a synthetic `alaric/export_bundle.py` interface. It was never the production Preparic API. E2/E4 now validate and render the explicit cell-pin snapshot in `export_snapshot.py` and `export_tree.py`; E7 removed the synthetic module after transferring its useful assertions. For the current contract see [export-gens-plan.md](../export-gens-plan.md) and [oracle-contract.md](oracle-contract.md) §6.
 
 1. **Candidate input.**
    - Each `reference_candidates` entry retains its candidate identity and carries `ovrmsd` (A4's rounded threshold) and `ovrmsd_raw` (A4's raw value). For `first`, take `nuc1_ovrmsd` and `nuc1_ovrmsd_raw`; for `second`, take the corresponding `nuc2_*` fields from the matching S9 bases row. Copy these values without re-rounding. Require both values; missing or malformed computed evidence is still refused under X6, not converted to a sentinel.
    - The emitted `ovrmsd` is that rounded value unless the sentinel rule below applies.
-   - The browser supplies no edited bases value. The snapshot producer is not written yet (export deferred), so this fixes the seam's input contract. The future producer must use fresh S9 from the same consistent snapshot (X6, X7); freshness at an earlier Continue 4→5 is not a permanent export receipt.
+   - In the original W8b proposal, the snapshot producer was not yet written. E0–E7 now implement this contract: export admission requires fresh S9 from the same consistent snapshot (X6, X7); freshness at an earlier Continue 4→5 is not a permanent export receipt.
    - Require explicit S9 freshness evidence in `validations.results.thresholds`, alongside the existing fit, energetics and Gaussian results. Missing, stale, running or failed S9 evidence blocks the seam under X6. The separate `validations.decisions.thresholds` entry continues to describe S11's validity, not S9 freshness.
    - Preserve candidate deduplication and completeness checks. Duplicate candidate entries must agree on both original computed values before sentinel substitution; two different over-limit values must not become indistinguishable merely because both emit `-1`.
 2. **Sentinel.**
@@ -103,13 +98,17 @@ Regenerate `schemas.json` and `fixtures.json`. Remove T23/S20 from the generated
 
 ## 7. Evidence
 
+The W8b test-name list below is historical. E7 transferred the export assertions
+to real Preparic input-pin fixtures and rendered-tree tests; the retired bundle
+tests and their synthetic fixture are no longer part of the active suite.
+
 Update the existing tests that encode the editable bases, rather than adding parallel ones:
 - preparic `tests/frontend/{w3-stage4,w1-project-state,w45-stage5,w7-class-state,w7-stage6-editor,w1-energy-threshold-read}.test.ts`;
 - preparic `tests/backend/{test_w3_stage4,test_w1_project,test_w7_stage6_backend,test_w7_runtime_bindings,test_result_backups}.py`;
 - preparic `tests/W7_ACCEPTANCE.md` and `tests/browser/w1/README.md`;
-- Alaric `tests/test_w8_{export_seam_contract,contract_followup,export_completeness}.py` and `tests/fixtures/w8/export-seam-cases.json`.
+- Alaric's useful schema, deployment and runtime action checks in `tests/test_w8_actions_contract.py`, `tests/test_w8_energy_filter_integration.py` and the retained non-export tests in `tests/test_w8_contract_followup.py`.
 
-Also extend the existing middle-layer schema/deployment coverage for the sentinel, and retain the admission/staleness checks in `tests/test_w8_export_admission_followup.py`.
+The transferred export admission/digest assertions are in Preparic's `tests/backend/test_export_e7_acceptance.py`; selected catalogue graphs and Alaric resolution/deployment are in `tests/backend/test_export_e7_selected_projects.py`.
 
 The tests must then establish:
 

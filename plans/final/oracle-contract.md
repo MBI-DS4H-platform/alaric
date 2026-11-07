@@ -22,7 +22,7 @@ After the author's decisions come `final/contract-boundaries.md` and `final/stat
 
 **Scope.**
 - **In:** stages 1–6, every crossing between preparic and Alaric during them, and the obligations of the export stage that are already fixed (§6).
-- **Out** (deferred or excluded by the author): the design of the export stage, unbound protein structures, modified nucleotides, remote workers, deployment, authentication, and more than one project per backend.
+- **Out** (deferred or excluded by the author): unbound protein structures, modified nucleotides, remote workers, deployment, authentication, and more than one project per backend. Export behavior is now specified in §6 and the implementation plan.
 
 **Conventions.**
 - MUST, MUST NOT and SHOULD are normative.
@@ -319,13 +319,12 @@ Alaric defines each of these in one place. Preparic mirrors it, and a test check
 - **The boundary-recompute tolerance:** 1e-5 Å. Values within it of a threshold are recomputed exactly.
 - **The minimum cell fraction:** ⅓. Alaric lets `ALARIC_ANCHOR_MIN_CELL_FRACTION` override it, and an exported project MUST NOT set that variable.
 
-### 3.12 A12. What an exported project will run
-Export is deferred, but these obligations on Alaric's actions are already fixed.
+### 3.12 A12. Actions used by exported projects
 - **`energy-filter`** is new. It replaces `score`, `filter` and `score_add`, which are removed. Alaric's score scripts either move to the gridless path, using A5's dependency list, or go.
   - One action handles one fragment against exactly one protein range.
   - The threshold is a number, or comes from the energy-thresholds file (P5.7). A missing cell is an error.
   - **Parameters the export must write.** The file carries thresholds only, so everything else is an action parameter:
-    - `protein: range-K`: exactly one range per action; one action per true matrix cell.
+    - `protein: range-K`: exactly one range per action. Fixed-mode recipes may chain successive filters for all required ranges; each unfixed range-rooted recipe scores only against its own range. Catalogue alternatives may repeat actions, but the user selects a compatible set for one run.
     - `threshold: auto` (or a number).
     - `epsilon: 15`: the ε that A5 scored with. A threshold is valid only for the ε its energy was computed with.
     - `cascade: auto` and `min_cascade: auto`, which read `DATA/score-filter.yaml` (below).
@@ -333,7 +332,7 @@ Export is deferred, but these obligations on Alaric's actions are already fixed.
 
     The provenance that the old file carried (`source: "bestfit"`, the rounding rule) is fixed by P5.7 and G7, and no action needs it.
   - A pose is kept iff its gridless energy E < T.
-  - A fragment that interacts with several ranges is filtered against each in turn (AND). Energies are never summed.
+  - Fixed-mode recipes filter a scored pool against each required interacting range in turn (AND). Unfixed recipes use independent range-rooted chains and never score a pool in another range's frame. Energies are never summed. An already-scored anchor pool used as a restriction does not need another energy filter.
   - **Cascade (author).** `cascade` is a list of grid steps `{plateau_distance, neighbour_distance, max_error}` (Å, Å, energy units), or `[]` for all-gridless. `min_cascade` is an integer. `auto` for either reads `DATA/score-filter.yaml`, which the export writes (X4) and which must be:
     ```yaml
     min_cascade: 1000
@@ -634,7 +633,7 @@ Pending wording:
 - **P5.8 Interaction hand-off.** `interactions.json` covers kept rows only:
   `{schema:1, clip1, clip2, kept_residues, ranges:[{index, chain, start, end}], runs:[{range, first_fragment, last_fragment, anchors:[{fragment, nucleotide}]}], interactions:{"frag-N-SEQ":[ranges]}}`.
   The `anchors` entries contain exactly the unclipped candidates belonging to the run; a clipped candidate is omitted without dropping its selected stacking.
-  The backend checks the shape. Checking the anchor cells is deferred to the export (author).
+  The backend checks the shape. T29 admission also re-derives the selected anchors and verifies every lock against the current matrix and hand-off before export (author).
 - **Gate 5→6:**
   - the matrix passes read validation against fresh energetics, a fresh fit and the current clip;
   - the backend's Gaussian scores and computed classes are fresh, and its golden check passes (O5);
@@ -706,46 +705,109 @@ Pending wording:
 
   - The UI may suggest the strictest filter that still emits each candidate's cell.
 - **P6.6 Reference anchors** (author amendment, 2026-11-04). `anchor-refe` is a positive control. Its computed thresholds are A4's bases values, strictly greater than their raw values (G7). Within L_ov they are emitted unchanged; above L_ov the export substitutes the deliberately failing sentinel (X3), which is not covered by G7's passing-pose guarantee. Stage 6 edits and validates nothing about them, and has no reference-anchor panel. The export writes one action per unclipped candidate (X3).
-- **Gate 6→export:** deferred. At least, every stage 6 result is fresh.
+- **Gate 6→export.** The export controls are part of stage 6. Download is enabled only in stage 6 with a connected tab, no pending or debounced project writes, fresh stage-6 echoes, a complete current `export_admission` result with no hard blocks, and a complete `export_tree`. If an upstream producer or validator is pending or failed, the state graph supplies that status and an old admission value is not presented as current. The frontend uses the state-graph node checksum and the `export_admission` share checksum together; the ZIP manifest is the final digest check.
 
 *Oracle for candidate clipping (A9, P5.8, P6 and X3):* with one of a selected stacking's two candidates clipped, jobs and hand-off anchors contain only the kept candidate; computed classes, auto prefilters and the Gaussian validation panel use that candidate alone, and both export modes retain it. A failing clipped candidate contributes no failure or action. Uncovering it restores its contribution. The selected stacking and its editable class row remain, with user class edits retained.
 
-## 6. Export: obligations already fixed
+## 6. Export: snapshot, catalogue and download
 
-The export stage is deferred (author). These obligations are already fixed.
-- **X1. Same parameters.** The export uses the same exclude code and minimum cell fraction as the computations above. It does not set `ALARIC_ANCHOR_MIN_CELL_FRACTION`.
-- **X2. Same RNA file.** `DATA/reference.pdb` is byte-identical to the RNA all-atom PDB that was fitted and displayed (P11), and its checksum is recorded.
-- **X3. Both anchor modes.** Every selected anchor is exported in both modes, in parallel (author):
-  - Gaussian `anchor` actions with `precomputed_filter_name: gaussian-rrm` and the row's filter name;
-  - one `anchor-refe` action per unclipped candidate, deduplicated, with an explicit `ovrmsd` (never `auto`). It is A4's rounded bases value for that candidate: `nuc1_ovrmsd` for `first`, `nuc2_ovrmsd` for `second` (author amendment, 2026-11-04). No edited value enters it.
-  - **Above L_ov.** If that value exceeds L_ov, the action is still written, but with `ovrmsd: -1`, so that it fails when run (A12). Its action file carries a comment that:
-    - states the computed value (raw and rounded) and L_ov;
-    - explains that the action cannot work with the required rounded positive-control threshold, because that threshold exceeds the ovRMSD that Alaric can search without misses. Only if the raw value also exceeds L_ov may it say that the best-fit pose itself lies beyond that limit;
-    - says that the action is kept on purpose, as a disabled positive control.
+Preparic implements export as two graph transformations. The shared plain
+`export_admission` cell publishes `ready`, addressed hard blocks, X5 warnings
+and the canonical snapshot digest. The unshared `export_tree` folder validates
+the same input pins again, requires ready admission and an equal digest, then
+renders the archive members. The existing Seamless share server exposes a GET
+at `/preparic/export.zip`; it packs one consistent `export_tree` cut into a
+ZIP whose top-level folder is `alaric_project/`. There is no export job file,
+write trigger, custom callback or filesystem target directory.
 
-    This neither blocks the export (X6) nor triggers "Proceed anyway" (X5).
+`DATA/` contains the byte-exact prepared inputs, schema-1 constraints and
+energy thresholds, fixed `score-filter.yaml`, kept reference/best-fit PDBs,
+and `export-manifest.json`. The manifest records the snapshot and reference
+SHA-256 digests, normalized ranges, hand-off, class table, and catalogue
+inventory. Generator folders are nested alternatives; they are not loaded as
+project actions until a user moves selected action directories beside `DATA/`.
+The exporter does not select a merge point or perform run-final dead-end
+removal. The catalogue is not one combined runnable DAG.
 
-  A clipped candidate contributes no action in either mode. Clipping one candidate preserves the selected stacking, its class row and both modes for the remaining candidate(s).
+- **X1. Same parameters.** The snapshot uses the same lower-cased exclude code
+  and canonical minimum cell fraction (⅓) as the computations above. The
+  exporter does not set `ALARIC_ANCHOR_MIN_CELL_FRACTION`. A mismatch is a
+  hard block.
+- **X2. Same RNA file.** `DATA/reference.pdb` is byte-identical to the full
+  all-atom RNA PDB used by the fit and displayed by the viewer (P11). The
+  manifest records the SHA-256 of those exact bytes; clipping never rewrites
+  them. Prepared range PDBs are copied byte-for-byte as well.
+- **X3. Both anchor trees.** Within each Gaussian anchor gen, every selected
+  stacking in that run contributes a raw `anchor` action for each kept
+  candidate, using that stacking's current class filter. The alternative
+  `anchor-refe` tree has one action per distinct
+  unclipped candidate `(fragment, nucleotide)`, deduplicated within each gen;
+  each uses A4's rounded base value (`nuc1_ovrmsd` for `first`,
+  `nuc2_ovrmsd` for `second`), never an edited value. The full descendants of
+  both trees are emitted. Repeated candidate actions in separate directional
+  or mode-specific generator variants are alternatives in the catalogue, not
+  duplicate actions required together in one run. The two trees can differ
+  internally while providing the same final pool choices.
 
-  *Oracle:* every emitted `anchor-refe` `ovrmsd` equals A4's rounded value for its candidate when that value is at most L_ov, and equals `-1` otherwise, whatever was typed anywhere. On 1b7f the currently selected anchor candidates are below L_ov. A candidate whose rounded value is above it, such as a stacking on the 12th residue (candidate fragment 11, `second`, 2.25 Å) or a synthetic snapshot, gets `ovrmsd: -1` and the comment. This condition alone neither blocks export nor requires "Proceed anyway"; independent X5/X6 conditions retain their effect. The sentinel action deploys and fails when run, and every other action of the exported project deploys and runs.
-- **X4. Other inputs.**
-  - `grow` thresholds come from the edited pairs values of kept pairs.
-  - The energy filter reads P5.7's file, which holds the energy-threshold table's values for the true cells. Its other parameters, `epsilon: 15`, `cascade: auto` and `min_cascade: auto` among them, are written into each action as listed in A12.
-  - The export writes `DATA/score-filter.yaml` with exactly A12's default content.
-  - The hand-off (P5.8) and the kept fragments travel with the export.
-- **X5. "Proceed anyway".** When the nearest-to-native structure fails anything the export would apply, one checkbox appears next to the red bold text "The nearest-to-native structure doesn't pass the filters. Proceed anyway". This covers:
-  - a Gaussian validation that is not green, or a class below RRM-95;
-  - an edited pair ovRMSD or cRMSD threshold that does not exceed its raw value by at least 1e-5 (thr − raw < 1e-5): red, or amber inside Alaric's boundary zone (A11). Bases values never trigger it, not even inside the boundary zone or above L_ov (author amendment, 2026-11-04);
-  - an energy threshold of a true cell that the best-fit pose does not meet: E_bestfit ≥ T, because the filter keeps a pose iff E < T (author, D13). Energies have no boundary zone, so there is no amber state here.
+  If a rounded reference threshold exceeds `L_ov`, that candidate's action is
+  still emitted with numeric `ovrmsd: -1`, with a YAML comment stating the raw
+  and rounded values and the limit, explaining the disabled positive control,
+  and claiming the best-fit pose lies beyond coverage only when the raw value
+  also exceeds the limit. It deploys and fails at runtime by design. A clipped
+  candidate has no action. A sentinel neither blocks export nor creates an X5
+  warning.
 
-  Amber states trigger it like red ones (author, D13): 0 < fill < ⅓, a pose that fails, and a threshold inside the 1e-5 boundary zone.
+  *Oracle:* a supported rounded value is emitted unchanged; an over-limit
+  rounded value becomes `-1`. Clipping one candidate preserves its selected
+  stacking, editable class and the other candidate's action. The sentinel
+  action deploys and fails with the invalid-threshold message while unrelated
+  actions remain usable.
+- **X4. Other inputs and scoring.** Kept pair thresholds populate schema-1
+  `constraints.json`; only adjacent kept pairs are included, with edited
+  values serialized as decimal strings. True kept matrix cells populate
+  `energy-thresholds.json`. `score-filter.yaml` contains exactly A12's defaults.
+  `energy-filter` uses `epsilon: 15`, `threshold: auto`,
+  `cascade: auto`, `min_cascade: auto`, an explicit fragment and protein range,
+  and `sequence: auto` and `exclude: auto`. A scored pool is filtered against the ranges
+  required by its recipe: fixed-mode chains apply all required range filters
+  successively as an AND; an unfixed chain is rooted in one independent range
+  and scores only against that range. R12 restrictions on an already-scored
+  anchor pool do not add redundant scoring. Thresholds are never summed.
+  The archive carries the kept reference and best-fit PDBs. The manifest
+  carries the hand-off, class table and generator final pools/external input choices.
+- **X5. Proceed anyway.** `export_admission` is the single owner of warning
+  calculation. It reports Gaussian validation that is not green or a class
+  below RRM-95; edited kept-pair cRMSD/ovRMSD values whose `threshold - raw`
+  is below `1e-5`; and true-cell energy thresholds with
+  `E_bestfit >= threshold`. Amber cases trigger the same warning as red cases:
+  Gaussian fill below ⅓, pose failure, and the RMSD boundary zone. Bases,
+  clipped pairs and an `anchor-refe` sentinel alone do not warn.
 
-  The browser computes this condition (author). When the checkbox is shown, the export proceeds only once it is ticked.
-- **X6. Blocking, with no override.** The export is blocked while:
-  - any result it relies on is stale, running or failed;
-  - a decision it needs is undecided or invalid;
-  - any `grow` ovRMSD threshold it would emit, that is, the edited value of a kept pair, exceeds L_ov (author, D11). The remedy is to lower the value; if the best-fit pose then fails it, the export needs "Proceed anyway" (X5). An `anchor-refe` value above L_ov does not block: it gets the sentinel (X3; author amendment, 2026-11-04).
-- **X7. One consistent snapshot.** The export is computed from one consistent set of decisions. An edit made during the export leaves it visibly stale, never mixed.
+  When warnings exist, Stage 6 displays the exact red bold text
+  **“The nearest-to-native structure doesn't pass the filters. Proceed anyway”**,
+  a digest-bound local checkbox and inspectable backend reasons. Acknowledgment
+  applies only to that snapshot digest. The browser sends no consent to the
+  backend; a direct GET of a valid tree has no consent semantics. The browser
+  checks the returned schema-1 manifest digest before saving the ZIP.
+- **X6. Blocking, with no override.** Admission blocks when a required
+  decision or evidence is missing, malformed, stale or inconsistent; when a
+  true matrix cell lacks a finite best-fit energy or valid threshold; when a
+  kept pair threshold is invalid or its ovRMSD exceeds `L_ov`; or when an
+  install/job error appears in required evidence. X5 acknowledgment cannot
+  override a hard block. If an upstream node is pending, blocked or failed,
+  the current state graph explains it; a previous complete share value is not
+  treated as fresh. `export_tree` raises unless current admission is ready.
+- **X7. One consistent snapshot.** Both transformers consume only their
+  explicit graph pins. The download takes a single Seamless read cut of
+  `export_tree`; a pending, failed or blocked cell returns `409`, and a missing
+  leaf buffer may return `503`, never a successful mixed or empty archive. A
+  changed accepted write invalidates downstream values before a later cut.
+  The browser remembers the click-time digest, checks that the request remains
+  active, uncancelled, ready and in stage 6 after the response, and releases no
+  ZIP if the manifest digest or current decision signature has changed. Back,
+  disconnect, a local class edit or an observed relevant change cancels the
+  request; a late response cannot resume after reconnect or revert. A later
+  edit marks a previously downloaded digest stale.
 
 ## 7. Answered decisions
 
@@ -832,7 +894,7 @@ The third column names one way to meet each clause, using the T-, S- and B-numbe
 | Stage 4 | S4; TH; OQ stage 4; ST author decisions, §3.4, §4.2–4.4, §9.1.5 | T5–T11; S9–S12; S22 `fragments` via T24; S11 as the stage-4 marker |
 | Stage 5 | EN; OQ stage 5; EF §6; CB T12–T16; ST §4.2 (4→5), §7.1; author clarification on clip and matrix | S13–S15, S24, B14; matrix adapted on Continue 4→5 |
 | Stage 6 | PG; TA; OQ stage 6, test-anchor; CB T18–T23, T28 | S17–S19, S25 |
-| X1–X7 | OQ stage 6 Q2–3, test-anchor Q1 and Q5; CB §5.1, §7.3, §8.6.4; TA §5; PG §5; ST §10.5 | deferred export stage |
+| X1–X7 | OQ stage 6 Q2–3, test-anchor Q1 and Q5; CB §7.3, §8.6.4; TA §5; PG §§4–7; ST §10.5 | Preparic `export_admission`/`export_tree`, Seamless `export.zip` download and Stage 6 UI |
 
 ## Appendix B. Facts checked in the source for this document
 

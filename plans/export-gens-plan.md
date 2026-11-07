@@ -1,10 +1,10 @@
 # Export: DATA and fragment pool generators ("gens")
 
-Implementation plan, 2026-11-06. §3 retains the generator rules; §§4–9 specify the archive, snapshot, backend/frontend integration, Alaric prerequisites, delivery order and acceptance checks. §10 retains the 1B7F example. This document plans the work; it does not claim that export is implemented.
+Implementation record and contract specification, 2026-11-07. §3 retains the generator rules; §§4–7 specify the archive, snapshot, backend/frontend integration and Alaric prerequisites; §§8–9 retain delivery and acceptance evidence; §10 is the independent 1B7F catalogue oracle. E0–E7 are implemented and verified; E7 acceptance is recorded in [export-gens-e7-results.md](export-gens-e7-results.md).
 
-**Handoff scope.** Implement this plan in the Alaric and Preparic checkouts. Read §8 for the work order, §4.5 for the function contracts and §7 for the wiring and UI states. The generator rules in §3 are requirements, not suggestions. Keep the two export transformers, the small manifest and Seamless-owned download packing. Do not reintroduce custom GET callbacks, backend capture hooks, polling generations or an exporter-written ZIP. Only change Seamless if E0 demonstrates a violation of its documented download contract; report that finding before designing a workaround.
+**Scope.** This specification describes the implementation in the Alaric and Preparic checkouts. The generator rules in §3 are requirements. Keep the two export transformers, the small manifest and Seamless-owned download packing. Do not reintroduce custom GET callbacks, backend capture hooks, polling generations or an exporter-written ZIP. Only change Seamless if E0 demonstrates a violation of its documented download contract; report that finding before designing a workaround.
 
-**Relation to existing documents.** [final/oracle-contract.md](final/oracle-contract.md) §6 (X1–X7) defers the design of the export stage. This document supplies that design. Its obligations still apply: same exclude code and minimum cell fraction (X1), byte-identical reference (X2), the anchor-refe sentinel (X3), proceed-anyway (X5), hard blocks (X6) and one consistent snapshot (X7). [final/contract-boundaries.md](final/contract-boundaries.md) supplies the cell and ownership boundaries. §8 lists the contract amendments needed alongside implementation. [alaric/export_bundle.py](../alaric/export_bundle.py) is superseded, not an API to extend or call from Preparic.
+**Relation to existing documents.** [final/oracle-contract.md](final/oracle-contract.md) §6 records the delivered export behavior and X1–X7 protections. This document supplies the detailed archive and generator contract. [final/contract-boundaries.md](final/contract-boundaries.md) records the cell and ownership boundaries. E7 updated both finalized contracts and the usage documentation to reflect the implementation. The old `alaric/export_bundle.py` API is retired; it is not an API to extend or call from Preparic.
 
 **Transport decision.** The export is computed inside Preparic's Seamless graph and served by a Seamless **download** ([Seamless shares contract](../../seamless1/seamless/docs/agent/contracts/shares.md), *Downloads*). Two Preparic transformers compute it: `export_admission` (a shared plain cell holding readiness, hard blocks, X5 reasons and the snapshot digest) and `export_tree` (a `folder` cell holding every archive member). `build_context()` registers `ctx.shares.add_download({"alaric_project": "export_tree"}, path="export.zip", format="zip")`. A GET packs the buffers of one consistent cut and runs no Preparic code. The earlier `register_get_endpoint` callback was rejected in Seamless and is not used. No other web server, writable export-trigger cell or filesystem export destination is added.
 
@@ -23,17 +23,14 @@ Implementation plan, 2026-11-06. §3 retains the generator rules; §§4–9 spec
 | Gen type | Anchor, grow, merge or common-conformer (R2). |
 | Mode | Fixed or unfixed: whether the relative orientation of the range PDBs is assumed known (R6). |
 
-## 2. What exists today
+## 2. Delivered implementation
 
-- `build_export_bundle(snapshot)` returns a Python dict:
-  - validation, hard blocks and the `ready` flag;
-  - the reference bytes and their checksum;
-  - one `anchor` per selected anchor and the `anchor-refe` actions;
-  - a chained `energy-filter` per true matrix cell, starting from `frag-N-bestfit`;
-  - `energy_thresholds` and the grow thresholds.
-- It writes no files, produces no grow actions, and has no notion of gens.
-- Nothing in Preparic calls it, and Preparic has no export code.
-- The middle layer reads `DATA/` plus the action dirs directly under the root ([middle/project.py](../alaric/middle/project.py) `action_dirs`). A gen in a nested folder is therefore ignored until it is moved, as intended.
+- Preparic's pure `export_snapshot.py` normalises the transformer pins, performs admission checks, calculates backend-owned warning records and computes the canonical snapshot digest.
+- `export_gens.py` plans the generator catalogue. `export_tree.py` verifies admission and digest agreement, then renders the DATA files, schema-1 manifest and action YAML into an unshared folder mapping.
+- The shared plain `export_admission` cell and unshared `export_tree` folder are wired in `backend.py` from the same explicit pin registry and attached source modules. The existing Seamless share server serves `export.zip` from one consistent cut; it does not run an exporter callback for the GET.
+- Stage 6 shows readiness and backend-supplied warnings, binds acknowledgment to the snapshot digest, verifies the manifest before releasing a ZIP, cancels invalidated requests and marks an earlier download stale.
+- The Alaric action contract includes `apply-mask`, one-input `identity`, and schema-1 `constraints.json` resolution. The old synthetic bundle API is superseded and is removed after its remaining useful assertions transfer to real input fixtures and export trees.
+- The archive has `DATA/` and nested generator folders under `alaric_project/`. Alaric loads only action directories at the project root; users choose compatible gens and move their action dirs beside `DATA/` before running a project.
 
 ## 2a. DATA, as the actions resolve it
 
@@ -207,7 +204,7 @@ Put export configuration generation in **Preparic**, as two transformers in its 
 
 Alaric owns action schemas, resolution, execution and cache identities (§6). Preparic emits configuration for those actions; it does not execute them during export. No exporter imports `alaric`, dynamically loads installed Alaric source into the backend, calls a library/scoring tool, recomputes Gaussian values, or reimplements threshold rounding. This preserves G2 and the boundary document's ownership rule. Constants mirrored in Preparic remain covered by parity tests against Alaric's definitions.
 
-`alaric/export_bundle.py` is retired after its useful acceptance assertions have been transferred. Its synthetic `selected_anchors`, `reference_candidates`, `handoff.fragment_rows`, browser-consent fields and `ready` result are not the new backend input API. No compatibility wrapper or second export path is needed: Preparic has no caller today.
+E7 retired `alaric/export_bundle.py` after transferring its useful acceptance assertions to tests of real input pins, rendered archive members and selected generator trees. Its synthetic `selected_anchors`, `reference_candidates`, `handoff.fragment_rows`, browser-consent fields and `ready` result are not the backend input API. No compatibility wrapper or second export path remains.
 
 ### 4.2 Input inventory
 
@@ -397,7 +394,7 @@ For two-input identity with distinct dependency result sigils, preserve the exis
 
 **C3. Version and validate `constraints.json`.** Centralise its load/validation in `middle/resolve.py` so both `sequence:auto` and pair-threshold resolution reject absent/unsupported schemas and malformed keys/pairs/values. Accept the canonical lowercase `crmsd`/`ovrmsd` written by the exporter; retain documented uppercase aliases only with unambiguous, nonconflicting values. Validate adjacency, duplicate pair addresses and agreement between sequence entries and pair sequences. Missing requested entries remain errors. Update existing constraints fixtures/docs to schema 1 rather than silently migrating them. This implements G8 for the newly specified boundary file.
 
-**C4. Supersede the old bundle.** Find every caller/import with `rg 'export_bundle|build_export_bundle|bundle_is_stale' alaric tests`. Transfer the X1/X2/X3/X6/digest assertions from those tests, including `tests/test_w8_export_seam_contract.py`, `tests/test_w8_contract_followup.py` and the later W8 completeness/admission tests, into tests of real input fixtures and export trees. Only then remove obsolete imports, synthetic fixtures and the unused module. Keep the useful W8 energy-filter/action tests. Do not retain its impossible `frag-N-bestfit` pool inputs or copy its generic `validations: fresh` dictionaries into production admission.
+**C4. Supersede the old bundle (E7 complete).** E7 audited every caller/import, transferred X1/X2/X3/X6/digest assertions to real input pins, rendered archive members and selected catalogue trees, then removed `export_bundle.py`, its synthetic fixture and export-only tests. The useful W8 energy-filter/action and backbone checks remain. The impossible `frag-N-bestfit` pool inputs and generic `validations: fresh` dictionaries are absent from production admission.
 
 ## 7. Backend wiring and browser behavior
 
@@ -527,7 +524,7 @@ Use the existing test layout. Add Preparic `tests/backend/test_export_snapshot.p
 
 For each step, deliver its implementation, the applicable §9 tests and a short record of the exact command/result. Run targeted Python tests in the repository's declared environment; in Preparic also run `npm test -- tests/frontend/export.test.ts tests/frontend/export-download.test.ts`, `npm run check` and `npm run build` after UI integration. Do not delete existing acceptance tests simply because their old bundle API was removed: transfer the assertions first, then remove obsolete bindings. Do not report a probe or runtime test as passed if only its pure helper was tested.
 
-Contract amendments belong in the implementation, alongside tests; this planning edit does not rewrite the finalized contracts:
+E7 updated the finalized contracts and usage documentation to match these delivered behaviors:
 
 - Oracle scope/§6 and gate 6→export: replace the deferred design with the export cells, the download and the admission rules, retaining X1/X2/X5/X6/X7 protections. X3 specifies raw actions per stacking/candidate in Gaussian gens, deduplicated reference candidates, both alternative trees and all descendants. Clarify that repeated variants are alternatives, not one action per candidate globally across the ZIP.
 - A12/X4 and the boundary's T16/T27 export wording: replace “one energy-filter per true matrix cell” with “score each scored pool against its mode's required ranges”: fixed tandem AND filters; unfixed root-range-only; repeated gen alternatives; no redundant scoring after restricting to a scored pool. Keep the exact energy-threshold file, ε=15 and cascade defaults. Document explicit fragment fields, grow directions and protein ranges according to supported action schemas.
@@ -536,7 +533,7 @@ Contract amendments belong in the implementation, alongside tests; this planning
 - Boundary §7.3/§8.6.4: replace deferred export with the input inventory (§4.2) and consistency rules (§4.3). Add `export_admission`/`export_tree` and their transformers to the cell and transformer tables. §8.1's “no custom routes” now permits one Seamless download, `export.zip`, on the existing share server, without a callback, writable trigger or new persistent decision. Export blocks are reported in `export_admission`, distinct from transformer errors in the state graph (§8.4); `export_tree`'s failure while blocked is expected.
 - Add the browser digest/consent checks, including that the GET carries no consent. Update Preparic `STAGES.md` and the Alaric action/project-layout docs to explain that exported gens are a catalogue to move into a run; there is no bundled README.
 
-Resolved draft ambiguities are recorded explicitly: a Seamless download of `alaric_project/` supersedes target-directory writing; protein ranges are explicit; fragment/direction fields are limited to schemas that accept them; `-pass` names the non-final first pruning pass regardless of direction; extra binary folds have numbered intermediate names; reference candidates are deduplicated independently of Gaussian stackings. These are implementation clarifications of the contracts and R0–R12, not pending user choices. The Seamless download behaviour probed in E0 is the remaining integration dependency.
+Resolved draft ambiguities are recorded explicitly: a Seamless download of `alaric_project/` supersedes target-directory writing; protein ranges are explicit; fragment/direction fields are limited to schemas that accept them; `-pass` names the non-final first pruning pass regardless of direction; extra binary folds have numbered intermediate names; reference candidates are deduplicated independently of Gaussian stackings. These are implementation clarifications of the contracts and R0–R12, not pending user choices. E0 probed the Seamless download behavior and confirmed the selected transport.
 
 ## 9. Acceptance and completion checks
 

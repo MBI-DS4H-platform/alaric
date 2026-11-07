@@ -1,11 +1,11 @@
 # Preparic stage state: browser, cells and transformers
 
-Final, 2026-10-29. This document describes preparic's state over stages 1–6 in three layers:
+Final, 2026-10-29; export amendment 2026-11-07. This document describes Preparic's state over stages 1–6 and the export gate that follows them in three layers:
 - the browser: which stage is shown and what the user sees;
 - the shared cells: which are defined and which are empty;
 - the transformers: which run, which wait and which are blocked.
 
-It then defines every stage transition, and what happens when an input changes from elsewhere while a transition is under way. It builds on `final/contract-boundaries.md` (§8 in particular) and uses that document's S-, B- and T-numbers. The changes it proposed to that document (§9) were applied there when both were finalized. The export stage is only sketched.
+It then defines every stage transition, and what happens when an input changes from elsewhere while a transition is under way. It builds on `final/contract-boundaries.md` (§8 in particular) and uses that document's S-, B- and T-numbers. The changes it proposed to that document (§9) were applied there when both were finalized. The stage-6 export gate, admission, download and digest-bound browser checks are recorded in §10.5 and the export contract in `oracle-contract.md` §6.
 
 Questions that are still open are marked **Unresolved**, with their ID in `contract-open-questions.md`. Until they are answered, the text gives the provisional behaviour. Other plan documents are named by their path under `plans/`.
 
@@ -267,7 +267,7 @@ Per-ligand `error` entries in S13 do not block Continue: Recompute stops at thos
 - **Writes:** S18 := `{basis: selected keys, active, rows}`, kept or by the computed default from S25.
 - **Cascade:** T19; T22 → S19.
 
-**6→export:** deferred (§10.5).
+**6→export:** the stage-6 export button is enabled only when its connection, pending-write, stage-6 freshness, `export_admission` checksum and `export_tree` state gates pass (§10.5).
 
 ### 4.3 Back
 Back from stage k writes one cell: M_k with `active: false`, everything else unchanged. Earlier markers stay active, and later ones are already inactive.
@@ -532,10 +532,11 @@ These changes were proposed here and applied to that document when both were fin
    - The kept matrix is adapted on Continue 4→5 from the clip recorded in its fragment-row keys (I2): the first and last runs are filled in or reduced.
    - Uncovered rows are filled by Recompute's growth rule, only at run ends that touched the old clip boundary (D3).
    - A newly selected anchor with no kept candidate makes Continue 3→4 minimally clamp the clip (D2 as amended).
-5. **Export (deferred).**
-   - The trigger is an edit cell, `export_request`, carrying the basis: every decision value plus the "proceed anyway" checkboxes.
-   - The export runs only if that basis still matches when it executes, and its result echoes it.
-   - An edit made while the export runs then leaves a stale export, never a mixed one.
+5. **Export after stage 6.** Export is a read-only service over the current Seamless graph, not a stage marker or writable `export_request` cell. T29 `export_admission_transformer` receives explicit pins for the decisions, prepared bytes and computed evidence; it reports readiness, hard blocks, backend-computed warning reasons and a canonical digest in shared read-only S27. T30 `export_tree_transformer` repeats normalization, requires ready admission and a matching digest, and writes the DATA files, manifest and nested generator catalogue into unshared folder B19. A required validator's successful `None` result is only a dependency gate, not an export report.
+   - Stage 6 shows **Download export ZIP** and keeps it disabled until the tab is connected, there are no pending or debounced decision writes, the stage-6 echoes are fresh, the `export_admission` node is complete with a checksum matching S27's share checksum, and the `export_tree` node is complete. Admission must be ready and any warnings acknowledged for that digest. A pending or failed upstream producer/validator is shown from the state graph; the last complete admission share is never treated as current.
+   - The exact Proceed anyway warning and its reasons come from S27. Its acknowledgment is local to the tab and bound to the displayed digest. The GET carries no consent; T30 still refuses every hard block when called directly.
+   - On click, the browser fetches the Seamless `export.zip` download with cache bypass, remembers the admission digest, and checks the ZIP's schema-1 manifest before saving it. The download packs one consistent `export_tree` read cut: a pending, failed or blocked cut returns `409`, and a missing member buffer may return `503`. A changed accepted write invalidates the graph before a subsequent cut, so the archive is never a mix of old and new inputs.
+   - If a relevant decision changes, the digest changes, the user leaves stage 6, the tab disconnects, or a class edit is made while fetch is pending, the browser cancels that request and discards a late reply. A cancelled request stays cancelled through reconnect or change→revert. Later edits show that an already downloaded digest is stale. None of these export operations writes a project decision or a persistent job file.
 6. **Seamless points: answered (author).**
    - (a) An equal-checksum PUT does not revoke downstream (§1.7): guaranteed by Seamless.
    - (b) The result cache may or may not survive a restart, depending on the Seamless configuration; probably it will not. Preparic runs with none (§8).

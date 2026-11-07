@@ -1,6 +1,6 @@
 # Preparic ↔ Alaric contract boundaries during project preparation
 
-Final, 2026-10-29. This document fixes where preparic stops and Alaric starts while an Alaric project is being prepared (stages 1–6; the export stage is deferred). It lists every existing and planned preparic Seamless transformer and says, for each, what it takes from Alaric. §8 covers the second boundary, between preparic's browser frontend and its Seamless backend, through shared cells. The stage model built on those cells is `final/state-transitions.md`, whose proposed changes to §8 were applied here when both documents were finalized.
+Final, 2026-10-29; export amendment 2026-11-07. This document fixes where preparic stops and Alaric starts while an Alaric project is being prepared, including the delivered export. It lists every preparic Seamless transformer and says, for each, what it takes from Alaric. §8 covers the second boundary, between preparic's browser frontend and its Seamless backend, through shared cells. The stage model built on those cells is `final/state-transitions.md`.
 
 It applies the author's decisions, which override the mini-plans where they disagree (§6 lists those overrides). They come from:
 - `open-questions.md`;
@@ -8,7 +8,7 @@ It applies the author's decisions, which override the mini-plans where they disa
 - `final/gaussian-precomputation-decisions.md`;
 - the author's amendment of 2026-11-04 on `anchor-refe` thresholds (`oracle-contract.md` P4.2, P4.3, P6.6, X3, X5, X6). The per-nucleotide base ovRMSD values (T8/S9 `bases`) are computed, never edited, and go from S9 straight to the export's `anchor-refe` actions. S11 holds pairs only. T23 `validate_refe_anchors`, S20 `refe_validation` and the stage 6 refe panel are removed. A value above L_ov gets a sentinel at export instead of a block. This supersedes every remaining mention of S11 `bases`, T23 or S20 in older text.
 
-**Final inventory, 2026-11-06 (W9).** Every active transformer and cell in §2, §8.2 and §8.3 is implemented in preparic's `backend.py` under the names given here, and their Status columns record that. Where §3 and §8 say "planned", "new", "today" or "exists; becomes …", they describe the design that was then carried out. Preparic's internal helper cells (`fit_rna_pdb`, `first_rna_range`, `fit_echo`, `gaussian_semantic_identity`, `gaussian_check_job_json` and the write-only disk backups of B8/B9) are not boundary cells. Beyond the tables, the backend shares two read-only plain results: `reference_fragment_pdbs` (the reference fragment texts for the stage 4–6 overlays) and B14 `interactions`. The stage behaviour as implemented is summarized in preparic's `STAGES.md`.
+**Final inventory, 2026-11-07 (E7).** Every active transformer and cell in §2, §8.2 and §8.3 is implemented in preparic's `backend.py` under the names given here, and their Status columns record that. Where §3 and §8 say "planned", "new", "today" or "exists; becomes …", they describe the design that was then carried out. Preparic's internal helper cells (`fit_rna_pdb`, `first_rna_range`, `fit_echo`, `gaussian_semantic_identity`, `gaussian_check_job_json` and the write-only disk backups of B8/B9) are not boundary cells. Beyond the tables, the backend shares read-only plain results for reference-fragment overlays, B14 `interactions` and S27 `export_admission`. The unshared B19 `export_tree` folder is the source of the Seamless ZIP download. The stage behaviour as implemented is summarized in preparic's `STAGES.md`.
 
 Questions that are still open are marked **Unresolved**, with their ID in `contract-open-questions.md`. Until they are answered, the text gives the provisional behaviour. Other plan documents are named by their path under `plans/`.
 
@@ -71,7 +71,7 @@ CLI-form and factory-built bash transformers can name a worker env, usually cond
 
 ## 2. Inventory
 
-"Alaric side" names what preparic consumes from Alaric. Owner = whose code runs. The Status column records the implemented state of 2026-11-06 and its delivery form.
+"Alaric side" names what preparic consumes from Alaric. Owner = whose code runs. The Status column records the implemented state of 2026-11-07 and its delivery form.
 
 | # | Preparic cell | Stage | Owner | Alaric side | Status |
 |---|---|---|---|---|---|
@@ -104,6 +104,8 @@ CLI-form and factory-built bash transformers can name a worker env, usually cond
 | T26 | `structure_id` | 1 | preparic (py) | none | implemented |
 | T27 | `validate_energy_threshold_edits` | 5 | preparic (py) | none | implemented |
 | T28 | `gaussian_scores` | 3 (shown in 6) | preparic (py) | delivered Gaussian scoring module, `gaussian_stacking_filter.json` | implemented: attached `alaric/gaussian_filter.py` |
+| T29 | `export_admission_transformer` | export (stage 6) | preparic (py) | attached Gaussian filter helper already used by T19; explicit export inputs ([export plan §4.2](../export-gens-plan.md#42-input-inventory)) | implemented: schema-1 readiness, blocks, X5 reasons and snapshot digest in S27 |
+| T30 | `export_tree_transformer` | export (stage 6) | preparic (py) | same helper as T29; emits the action contract without importing or calling Alaric's schemas/resolvers | implemented: checks T29 and the digest, renders DATA, manifest and nested generator catalogue in unshared B19 |
 
 "Form open" means module or CLI + DEPS, with or without a factory, as decided by the implementer (§1, §7). Not preparic transformers, and outside this boundary: Alaric's energy-grid Seamless wrapper (grids serve only the `energy-filter` action; preparic's thresholds are gridless) and the Gaussian cache generator (§5.1).
 
@@ -126,7 +128,7 @@ CLI-form and factory-built bash transformers can name a worker env, usually cond
 - **T8 `best_fit_thresholds` (new Alaric code; form open).** Stdlib-only `util/refe-thresholds.py`, which holds the RMSD rounding rule (§1). It is a natural module-form candidate. Input: T7's folder. Output: plain JSON `{schema, pairs:[{down,up,sequence,ovrmsd,crmsd,*_raw}], bases:[{fragment,sequence,nuc1_ovrmsd,nuc2_ovrmsd,*_raw}]}`. The `*_raw` fields are contract: the export compares pair edits with them and quotes a candidate's bases raw value in the sentinel comment (OC X3, X5). The rounded `bases` values are the `anchor-refe` thresholds, unedited.
 - **T9–T11.** Preparic only. They parse T5/T8 output and apply edits and clips.
   - Before stage 5 the threshold table must be complete for its kept rows: every value of a kept pair filled, by Copy and/or typing. Pairs touching a clipped fragment are not required (author; `open-questions.md` stage 4 Q2, `final/state-transitions.md` §11.5, D4). The table has no bases, and S9 must also be fresh (author amendment, 2026-11-04).
-  - T10 validates S11 against S22, not S9, so it does not wait for the fit. S9 still feeds Copy, the "differs from computed" marks, the export's raw-value comparison for pairs and the export's `anchor-refe` thresholds.
+  - T10 validates S11 against S22, not S9, so it does not wait for the fit. S9 still feeds Copy, the "differs from computed" marks, T29's raw-value comparison for pairs and its `anchor-refe` thresholds.
   - T11 reads S10, S11 and S12, validates the clip, and writes B11: the kept reference/best-fit PDBs, the kept edited pairs in `thresholds.json` (no bases), and `clip.json`. A pair is kept only when both fragments are kept. It consumes no S9; clipping filters the full results and never re-runs the fit, table generation or energetics.
 
 ### Stage 5: energetics
@@ -141,15 +143,15 @@ CLI-form and factory-built bash transformers can name a worker env, usually cond
 - **T14 `merge_energetics`, T15 `interaction_handoff`.** Preparic only. T14 collects the per-range `energies.json` files into the `energetics` rows.
   - T15 reads S10, S12, S14 and S5, plus S7 and S8 to derive the anchors. It checks the matrix shape and writes B14 `interactions.json`, covering kept rows only:
     `{schema:1, clip1, clip2, kept_residues, ranges:[{index, chain, start, end}], runs:[{range, first_fragment, last_fragment, anchors:[{fragment, nucleotide}]}], interactions:{"frag-N-SEQ":[ranges]}}`.
-    Backend checking of the anchor cells is deferred to export (OC P5.8); the browser's matrix read validation still requires every lock and refuses true cells with scoring errors (D12).
+    T29 independently re-derives candidate anchors and locks from S7/S8 and checks the hand-off against the actual matrix (OC P5.8); the browser's matrix read validation still requires every lock and refuses true cells with scoring errors (D12).
 - **T16 `energy_thresholds` (reshaped: the computed values; author, D13).** Preparic transformer, Alaric code: it attaches `$ALARIC_DIR/energy_threshold.py` (stdlib only: `decimal`, `json`) as a Seamless module (`.modules`), so the module source is part of the checksum, and calls its rounding function. A Python transformer with modules runs in the `preparic` env (in-process by Seamless's default; on the spawn workers, see §1 Execution). Being stdlib-only, `energy_threshold.py` fits there without extending the env; keep it that way. Inputs: `energetics` and `best_fits`. The matrix and the clip are no longer inputs, so a matrix edit does not re-run it. Output S15: the **computed** threshold, R(best-fit energy), for every (fragment, protein range) cell that has a best-fit energy, as two-decimal strings, with S13's echo. Thresholds come from **best-fit** energies (author decision); refe energies are shown only. S15 is the Copy source of the editable energy-threshold table S24, and what its "differs from computed" marks compare against (T27).
-  - **The exported file.** The export writes `energy-thresholds.json` from S24, not from S15: `{"schema":1, "frag-N-SEQ":{"range-K":"-16.59"}, …}`. It holds the schema key of §1 plus the threshold mapping at top level, true kept matrix cells only, with the user's values as two-decimal strings. There is no other key (author decision). Every true cell has an energy: the matrix editor forbids, and read validation refuses, a true cell on a row with a scoring error (author, D12). This file is the input to Alaric's planned `energy-filter` action (`threshold: auto`), so its shape is a two-way contract. Alaric raises unless `schema` is 1, every other key is `frag-N-SEQ`, every inner key is `range-K`, and every value is a two-decimal string.
+  - **The exported file.** T30 writes `energy-thresholds.json` from S24, not from S15: `{"schema":1, "frag-N-SEQ":{"range-K":"-16.59"}, …}`. It holds the schema key of §1 plus the threshold mapping at top level, true kept matrix cells only, with the user's values as two-decimal strings. There is no other key (author decision). Every true cell has an energy: the matrix editor forbids, and read validation refuses, a true cell on a row with a scoring error (author, D12). This file is the input to Alaric's `energy-filter` action (`threshold: auto`), so its shape is a two-way contract. Alaric raises unless `schema` is 1, every other key is `frag-N-SEQ`, every inner key is `range-K`, and every value is a two-decimal string.
 - **T27 `validate_energy_threshold_edits` (new; author, D13).** Preparic only: the stage-5 counterpart of T10.
   - It validates S24 against S22 and S5. It accepts null, and leaves stale parts to Continue 4→5: a whole S24 whose basis is not S22's echo, and an entry whose `row` matches no current protein range. Otherwise every key must be a fragment key of S22, and every value null or a two-decimal string (any sign). It does not wait for scoring.
   - Before stage 6 the energy-threshold table must have a value for every true cell of the matrix, by Copy and/or typing. In stage 5, false and clipped cells need not be filled; they are greyed but stay editable. Stage 6 has no S24 edit controls (author clarification, 2026-11-06).
   - Its result is not shared. Gate 5→6 needs it not failing.
   - **Energy-filter parameters added at export time.** The former wrapper fields (`method`, `epsilon`, `source`, `rounding`) no longer travel in the file. The export writes these parameters into each `energy-filter` action instead:
-    - `protein: range-K`: one action per true cell (fragment, range). A fragment with several ranges gets one action per range, chained (AND).
+    - `protein: range-K`: one range per action. Fixed-mode recipes chain successive filters for each required range (AND); an unfixed range-rooted recipe scores only against its own range. Alternative gens may contain repeated filters, but a selected run chooses compatible recipes. Already-scored anchor pools used as restrictions are not scored again.
     - `threshold: auto`: the action reads its cell from `DATA/energy-thresholds.json`. A missing cell is an error.
     - `epsilon: 15`: the ε that T13 scored with. The thresholds are valid only for that ε.
     - `cascade: auto` and `min_cascade: auto`: both read `DATA/score-filter.yaml`, which the **export stage** writes (it is not a preparic cell in stages 1–6). Its content must be `min_cascade: 1000` and `cascade: [{plateau_distance: 5, neighbour_distance: 7, max_error: 1.0}, {plateau_distance: 10, neighbour_distance: 12, max_error: 0.05}]`. Each cascade step scores the undecided poses with that grid: grid energy < T − `max_error` accepts a pose, ≥ T + `max_error` rejects it, and anything in between leaves it undecided. Before every grid step, including the first, the cascade is exited if fewer than `min_cascade` undecided poses remain in the whole action (counted over all chunks). Every pose still undecided is then decided gridless with T13's kernel, which replaces `method: "gridless"`.
@@ -261,18 +263,18 @@ Stage 4 lines 3 and 42 (energetics consumes clipped fragments) were already flag
 
    T5 has its factory already. T13 is suggested as a factory but is not bound to it. Every form must pass the Seamless sandbox test.
 2. **Stage 3 Kabsch** (author, D8; stage 6 Q5): T4/T18 use Kabsch normals and pin `ring-refe/`, and the stage 3 numbers change.
-3. **Export stage** (deferred): it will consume T3's PDB, T8 edits via `clipped_fragments`, `interactions.json`, the S24 energy-threshold edits (written as `energy-thresholds.json`), the class table, T21 results and S9's bases values, and write `DATA/` and the actions, including `DATA/score-filter.yaml` and the `energy-filter` parameters listed under T16. It must use the same `exclude_pdb_code` and `min_cell_fraction` as the transformers above. Its red-text "proceed anyway" checkbox is computed in the frontend.
+3. **Export stage** (implemented by T29/T30; see §4.2 of [the export plan](../export-gens-plan.md)): no delivery form remains open. T29 checks a pinned snapshot of decisions, prepared files and computed evidence, publishes addressed blocks, X5 warning reasons and a digest as S27 `export_admission`; T30 rebuilds that snapshot, checks ready admission and the digest, then produces B19 `export_tree`. One Seamless download serves the folder as `export.zip`. The browser displays backend-supplied reasons and binds the local acknowledgment to the digest; it does not send consent with the GET. T30 reads no mounted files outside its pins and no custom route or persistent job is added.
 
 ## 8. Frontend ↔ backend boundary: shared cells
 
-§§1–7 cover where preparic's backend calls Alaric. This section covers the other boundary in preparic: the one between its Svelte frontend and its Seamless backend. It lists every shared cell that exists or is planned for stages 1–6, and what each one is to the transformers of §2. Existing facts come from preparic HEAD `5c85f67` (`backend.py`, `src/lib/seamless.svelte.ts`). Seamless behaviour comes from `seamless/docs/agent/contracts/shares.md` and `guides/seamless-web-server.md`. How the stage is derived from these cells, and every transition, is `final/state-transitions.md`.
+§§1–7 cover where preparic's backend calls Alaric. This section covers the other boundary in preparic: the one between its Svelte frontend and its Seamless backend. It lists every shared cell, including the delivered stage-6 export admission result, and every backend-only cell needed by the transformers of §2. Existing facts come from preparic's implementation (`backend.py`, `src/lib/seamless.svelte.ts`). Seamless behaviour comes from `seamless/docs/agent/contracts/shares.md` and `guides/seamless-web-server.md`. How the stage is derived from these cells, and every transition, is `final/state-transitions.md`.
 
 ### 8.1 Rules
-- **Mechanism.** Preparic uses the Seamless share server only, with no custom routes.
+- **Mechanism.** Preparic uses the Seamless share server. The only download endpoint is Seamless's `export.zip` download (§8.6.4); there are no custom route callbacks.
   - The namespace is `preparic`, and the server listens on 127.0.0.1:5813. Vite proxies `/preparic` (including the websocket) and `/seamless-client.js` to it.
   - The browser reads values with GET. The websocket announces changes as checksums and markers, never as values.
   - Writes are conditional PUTs (`?marker=`), sent by `seamless.svelte.ts`, which also handles pending writes, revisions and loop avoidance. A `409` means the browser drops its value and takes the server's.
-  - The share key is the cell's path, so cell names in the table below are part of the contract.
+  - The share key is the cell's path, so cell names in the table below are part of the contract. The `export.zip` GET uses `ctx.shares.add_download` over the unshared `export_tree` folder and reads one consistent cut; it is not a writable share or browser trigger.
 - **Edit cells and computed cells are disjoint.**
   - An *edit cell* is a writable share with no incoming edge. Seamless enforces this: `readonly=False` on a connected cell raises `AuthorityError`.
   - A *computed cell* is a read-only share of a transformer's result.
@@ -318,32 +320,33 @@ T-numbers refer to §2.
 
 | # | Cell (celltype) | Share | Mount | Output of | Input to | Frontend | Status |
 |---|---|---|---|---|---|---|---|
-| S1 | `pdbcode` (text) | rw | `pdbcode.txt`, file | none | B5 `exclude_pdb_code` | stage 1 writes it only after the CIF download succeeds, together with S3 (§8.6.1), and reads it back on load | implemented |
-| S2 | `biounit` (plain int) | rw | `biounit.json`, file | none | T0 (D7) | stage 1 | implemented |
-| S3 | `cif` (text), key `cif.cif` | rw, not auto-read | file (author decision) | none | T1, T26 | stage 1 writes it after Mol*'s RCSB download, together with S1 (§8.6.1) | implemented |
-| S4 | `ranges` (yaml; marker `{basis:{pdbcode,biounit}, active, rows}`) | rw | `ranges.yaml`, file, loader → null | none | T0 | stage 2 reads and writes it; this is the only range cell the frontend writes | implemented |
-| S5 | `range_specs` (plain) | ro | none | T0 | T1, T9, T14, T15, T20, T25, T27 | not read | implemented |
+| S1 | `pdbcode` (text) | rw | `pdbcode.txt`, file | none | B5 `exclude_pdb_code`, T29, T30 | stage 1 writes it only after the CIF download succeeds, together with S3 (§8.6.1), and reads it back on load | implemented |
+| S2 | `biounit` (plain int) | rw | `biounit.json`, file | none | T0 (D7), T29, T30 | stage 1 | implemented |
+| S3 | `cif` (text), key `cif.cif` | rw, not auto-read | file (author decision) | none | T1, T26, T29, T30 | stage 1 writes it after Mol*'s RCSB download, together with S1 (§8.6.1) | implemented |
+| S4 | `ranges` (yaml; marker `{basis:{pdbcode,biounit}, active, rows}`) | rw | `ranges.yaml`, file, loader → null | none | T0, T29, T30 | stage 2 reads and writes it; this is the only range cell the frontend writes | implemented |
+| S5 | `range_specs` (plain) | ro | none | T0 | T1, T9, T14, T15, T20, T25, T27, T29, T30 | not read | implemented |
 | S6 | `range_pdbs` (plain `list[str]`) | unshared | none | T1 | T2, T4, T18 | not read | implemented; unshared |
-| S7 | `stackings` (plain) | ro | `stackings.json`, cell→file | T4 | T15¹, T19, T20, T28 | stage 3 table; stages 5–6 derive anchors from it | implemented |
-| S8 | `stacking_selection` (plain; marker `{basis: range rows, active, selected:{key: bool}}`, keyed by stacking key) | rw | `stacking-selection.json`, file, loader → null | none | T5 (group B starts only while it is active, author); T15¹, T19, T20, T28 | stage 3 writes it; Back 3→2 deactivates it; stages 5–6 read it | implemented |
-| S9 | `best_fit_thresholds` (plain) | ro | `best-fit-thresholds.json`, cell→file | T8 | export (`anchor-refe` thresholds) | stage 4: the computed pair thresholds, clearly visible beside the editable table so that it is clear what Copy does (author), the copy source and the "differs from computed" marks; the 4→5 gate requires it fresh | implemented |
-| S10 | `best_fits` (plain rows, PDB texts included) | ro | none | T9 | T11, T14, T15, T16, T18, T20 | stages 4–6: row order, Mol* overlays | implemented |
-| S11 | `threshold_edits` (plain; marker `{schema:1, basis:{pdbcode, range-1 row}, active, pairs}`) | rw | `best-fit-threshold-edits.json`, file, loader → null | none | T10, T11 | stage 4 creates it as a skeleton and fills it by Copy and/or typing; its kept pairs must be complete before stage 5 (D4); editable in stage 4, omitted in stage 5 and read-only if shown in stage 6; a stored marker with `bases` is malformed (I7; author clarification 2026-11-06) | implemented |
-| S12 | `best_fit_clip` (plain `{clip1, clip2, basis}`) | rw | `best-fit-clip.json`, file, loader → `{0,0}` | none | T11, T15, T20, T28 | edited in stage 4 only, where the control keeps at least one candidate per selected anchor (author); read-only in stages 5 and 6; Continue 3→4 resets it when its basis is stale, and minimally clamps it only when a selected anchor has no kept candidate (author, D2 as amended) | implemented |
-| S13 | `energetics` (plain rows) | ro | none | T14 | T16 | stage 5 display and Recompute | implemented |
-| S14 | `interaction_matrix` (plain; marker `{basis: selected keys, active, rows, ranges, grid}`: `rows` are the ordered keys of the fragments kept when it was built, so they record its clip, and `ranges` the ordered range ids of its columns (author, I2)) | rw | `interaction-matrix.json`, file, loader → null | none | T15; export | stage 5 editor; written by Continue 4→5, kept and adapted or by Recompute | implemented |
+| S7 | `stackings` (plain) | ro | `stackings.json`, cell→file | T4 | T15¹, T19, T20, T28, T29, T30 | stage 3 table; stages 5–6 derive anchors from it | implemented |
+| S8 | `stacking_selection` (plain; marker `{basis: range rows, active, selected:{key: bool}}`, keyed by stacking key) | rw | `stacking-selection.json`, file, loader → null | none | T5 (group B starts only while it is active, author); T15¹, T19, T20, T28, T29, T30 | stage 3 writes it; Back 3→2 deactivates it; stages 5–6 read it | implemented |
+| S9 | `best_fit_thresholds` (plain) | ro | `best-fit-thresholds.json`, cell→file | T8 | T29, T30 | stage 4: computed pair/base thresholds beside the editable table, the copy source and the "differs from computed" marks; the export compares kept pairs with raw values and emits candidate-specific `anchor-refe` thresholds | implemented |
+| S10 | `best_fits` (plain rows, PDB texts included) | ro | none | T9 | T11, T14, T15, T16, T18, T20, T29, T30 | stages 4–6: row order, Mol* overlays | implemented |
+| S11 | `threshold_edits` (plain; marker `{schema:1, basis:{pdbcode, range-1 row}, active, pairs}`) | rw | `best-fit-threshold-edits.json`, file, loader → null | none | T10, T11, T29, T30 | stage 4 creates it as a skeleton and fills it by Copy and/or typing; its kept pairs must be complete before stage 5 (D4); editable in stage 4, omitted in stage 5 and read-only if shown in stage 6; a stored marker with `bases` is malformed (I7; author clarification 2026-11-06) | implemented |
+| S12 | `best_fit_clip` (plain `{clip1, clip2, basis}`) | rw | `best-fit-clip.json`, file, loader → `{0,0}` | none | T11, T15, T20, T28, T29, T30 | edited in stage 4 only, where the control keeps at least one candidate per selected anchor (author); read-only in stages 5 and 6; Continue 3→4 resets it when its basis is stale, and minimally clamps it only when a selected anchor has no kept candidate (author, D2 as amended) | implemented |
+| S13 | `energetics` (plain rows) | ro | none | T14 | T16, T29, T30 | stage 5 display and Recompute | implemented |
+| S14 | `interaction_matrix` (plain; marker `{basis: selected keys, active, rows, ranges, grid}`: `rows` are the ordered keys of the fragments kept when it was built, so they record its clip, and `ranges` the ordered range ids of its columns (author, I2)) | rw | `interaction-matrix.json`, file, loader → null | none | T15, T29, T30 | stage 5 editor; written by Continue 4→5, kept and adapted or by Recompute | implemented |
 | S15 | `energy_thresholds` (plain; the computed values) | ro | `computed-energy-thresholds.json`, cell→file | T16 | none | stage 5: the computed values beside the editable S24 table, Copy source and "differs from computed" marks; stage 6 may display values read-only (D13; author clarification 2026-11-06) | implemented |
 | S16 | `gaussian_model` | | | | | | implemented |
-| S17 | `bestfit_stackings` (plain) | ro | none | T18 | T28 | stage 6 computed table: descriptors | implemented |
-| S18 | `gaussian_classes` (plain; marker `{basis: selected keys, active, rows}`) | rw | `gaussian-classes.json`, file, loader → null | none | T19, T22 (not T20, so class edits never re-run T21) | stage 6 editor, with writes debounced by 500 ms | implemented |
-| S19 | `gaussian_validation` (plain) | ro | `gaussian-validation.json`, cell→file | T22 | none | stage 6 validation column; export gate | implemented |
+| S17 | `bestfit_stackings` (plain) | ro | none | T18 | T28, T29, T30 | stage 6 computed table: descriptors | implemented |
+| S18 | `gaussian_classes` (plain; marker `{basis: selected keys, active, rows}`) | rw | `gaussian-classes.json`, file, loader → null | none | T19, T22 (not T20, so class edits never re-run T21), T29, T30 | stage 6 editor, with writes debounced by 500 ms | implemented |
+| S19 | `gaussian_validation` (plain) | ro | `gaussian-validation.json`, cell→file | T22 | T29, T30 | stage 6 validation column and X5 warning evidence | implemented |
 | S20 | `refe_validation` | — | — | — | — | removed (author amendment, 2026-11-04) | implemented |
-| S21 | `structure_id` (plain) | ro | none | T26 | none | gate 1→2: must equal S1 (§8.6.1) | implemented |
-| S22 | `fragments` (plain) | ro | none | T24 | T10, T27 | stage 4: the skeleton's rows and the clip's range; gate 3→4 | implemented |
-| S23 | `range_pdbs_aa` (plain) | ro | none | T25 | none | stages 4–6: the only structure the viewer shows (§8.6.5); gate 3→4 | implemented |
-| S25 | `gaussian_scores` (plain) | ro | none | T28 | none | stage 6: candidate and reference scores, the computed classes (the class table's default and its "differs from computed" marks), `filter_set_version` and the filter names; the browser computes no Gaussian (author, O5) | implemented |
+| S21 | `structure_id` (plain) | ro | none | T26 | T29, T30 | gate 1→2: must equal S1 (§8.6.1) | implemented |
+| S22 | `fragments` (plain) | ro | none | T24 | T10, T27, T29, T30 | stage 4: the skeleton's rows and the clip's range; gate 3→4 | implemented |
+| S23 | `range_pdbs_aa` (plain) | ro | none | T25 | T29, T30 | stages 4–6: the only structure the viewer shows (§8.6.5); gate 3→4 | implemented |
+| S25 | `gaussian_scores` (plain) | ro | none | T28 | T29, T30 | stage 6: candidate and reference scores, the computed classes (the class table's default and its "differs from computed" marks), `filter_set_version` and the filter names; the browser computes no Gaussian (author, O5) | implemented |
 | S26 | `stage4_active_nucleotide` (plain: null or `{chain, resid, insertion_code, base}`) | rw | none (not persisted) | none | none | stage 4 only: the active nucleotide N of the stage 4 viewer and sidebar, as its identity in S22 `residues`. Only a nucleotide shared by two adjacent fragments can be active: its pre fragment ends on N and its post fragment starts on N. Null, or a value that names no such nucleotide of the fresh S22, shows the stage's default (the first such nucleotide) without writing. In stages 5–6, where the stage 4 panel is embedded, the nucleotide chooser is per tab and never touches S26. Written per slider/combobox change, debounced (about 300 ms). Reset to null by each of the four transitions into or out of stage 4 (§8.5). Ignored outside stage 4 | implemented; unmounted, read by no transformer |
-| S24 | `energy_threshold_edits` (plain `{schema:1, basis:{pdbcode, range-1 row}, ranges:[{row, values:{"frag-N-SEQ": value or null}}]}`) | rw | `energy-threshold-edits.json`, file, loader → null | none | T27; export | Continue 4→5 creates it as an empty skeleton or keeps the entries of unchanged ranges; filled by Copy and/or typing in stage 5; every true matrix cell must have a value before stage 6; stage 6 display is read-only (author, D13; clarification 2026-11-06) | implemented |
+| S27 | `export_admission` (plain schema-1 result) | ro | none | T29 | T30; Stage 6 export UI | readiness, addressed hard blocks, backend-computed warning reasons and snapshot digest; its share checksum is compared with the current state-graph node checksum | implemented |
+| S24 | `energy_threshold_edits` (plain `{schema:1, basis:{pdbcode, range-1 row}, ranges:[{row, values:{"frag-N-SEQ": value or null}}]}`) | rw | `energy-threshold-edits.json`, file, loader → null | none | T27, T29, T30 | Continue 4→5 creates it as an empty skeleton or keeps the entries of unchanged ranges; filled by Copy and/or typing in stage 5; every true matrix cell must have a value before stage 6; stage 6 display is read-only (author, D13; clarification 2026-11-06) | implemented |
 
 ¹ `interactions.json` lists `runs[].anchors`, which T15 can only derive from S7 and S8. The energetics mini-plan's signature for T15 omits them.
 
@@ -354,26 +357,27 @@ These cells are not shared. They are listed so that every pin of every §2 trans
 
 | # | Cell (celltype) | From | To | Status |
 |---|---|---|---|---|
-| B1 | `range_pdb_files` (folder; mount `pdbs/`) | T2 | T3 | implemented |
+| B1 | `range_pdb_files` (folder; mount `pdbs/`) | T2 | T3, T29, T30 | implemented |
 | B2 | `aareduce_files` (folder; read-only mount) | vendored `aareduce/` | T3 | implemented |
-| B3 | `range_pdb_files_aa` (folder; mount `pdbs-aa/`) | T3 | B4, B6, T25 | implemented |
-| B4 | `rna_pdb` (bytes) | `range-1-aa.pdb` of B3 | T5, T6, T7 | implemented |
-| B5 | `exclude_pdb_code` (str) | S1, lower-cased | T5, T7, T9, T21, T24, T25 | implemented |
+| B3 | `range_pdb_files_aa` (folder; mount `pdbs-aa/`) | T3 | B4, B6, T25, T29, T30 | implemented |
+| B4 | `rna_pdb` (bytes) | `range-1-aa.pdb` of B3 | T5, T6, T7, T29, T30 | implemented |
+| B5 | `exclude_pdb_code` (str) | S1, lower-cased | T5, T7, T9, T21, T24, T25, T29, T30 | implemented |
 | B6 | `protein_pdbs` (folder) | B3 without range 1 | T13 (one file per instance), T21 | implemented |
-| B7 | `fraglib_identities` (str) | `identities()`, at backend start | T5, T7, T21 | implemented |
+| B7 | `fraglib_identities` (str) | `identities()`, at backend start | T5, T7, T21, T29, T30 | implemented |
 | B8 | `best_fit` (folder) | T5 | T7, T9, T12, T21 | implemented |
 | B9 | `refe_fragments` (folder) | T6 | T9, T12, T24 | implemented |
 | B10 | `best_fit_tables` (folder) | T7 | T8 | implemented |
-| B11 | `clipped_fragments` (folder; mount `clipped-fragments/`) | T11 | export | implemented |
+| B11 | `clipped_fragments` (folder; mount `clipped-fragments/`) | T11 | T29, T30 | implemented |
 | B12 | `ligands` (folder) | T12 | T13 | implemented |
 | B13 | `energies_range_<k>` | T13 instance k | T14 | implemented: each instance's `energetics.json` is collected as `range-<k>.json` in the folder cell `energetics_range_results` |
-| B14 | `interactions` (plain; mount `interactions.json`) | T15 | export | implemented; also shared read-only |
-| B15 | `gaussian_model_json` (plain; read-only mount from `$ALARIC_DIR`) | Alaric | T19, T21, T28 | implemented: read-only mount of `<root>/alaric/gaussian_stacking_filter.json` |
-| B16 | `ring_refe` (folder; read-only mount) | Alaric | T4, T18 (D8), T21 | implemented as six read-only bytes cells `ring_refe_{a,c,phe,his,arg,trp}` (the `refe-*.pdb` files) |
+| B14 | `interactions` (plain; mount `interactions.json`) | T15 | T29, T30 | implemented; also shared read-only |
+| B15 | `gaussian_model_json` (bytes; read-only mount from `$ALARIC_DIR`) | Alaric | T19, T21, T28, T29, T30 | implemented: read-only mount of `<root>/alaric/gaussian_stacking_filter.json` |
+| B16 | `ring_refe` (folder; read-only mount) | Alaric | T4, T18 (D8), T21, T29, T30 | implemented as six read-only bytes cells `ring_refe_{a,c,phe,his,arg,trp}` (the `refe-*.pdb` files) |
 | B17 | `gaussian_check_jobs` (plain) | T20 | T21 | implemented: T20's result, serialized by `gaussian_check_job_json` |
-| B18 | `gaussian_check` (plain) | T21 | T22 | implemented: the `gaussian_check` result |
+| B18 | `gaussian_check` (plain) | T21 | T22, T29, T30 | implemented: the `gaussian_check` result |
+| B19 | `export_tree` (folder; unshared) | T30 | Seamless `export.zip` download | implemented; not mounted or shared |
 
-The results of the validators T10, T19 and T27 are not shared. What matters to the frontend is only their node state in the state graph (§8.4); a failed T10 or T27 closes gate 4→5 or 5→6.
+The results of the validators T10, T19 and T27 are not shared. Both export transformers depend on their required plain result pins; a successful `None` is a dependency gate. The frontend reads their node state in the state graph (§8.4); a failed T10 or T27 closes gate 4→5 or 5→6.
 
 ### 8.4 Errors, status and staleness
 - **The state graph is the only error channel.** It is served at `/preparic/state-graph` and reaches the frontend through `onstategraph`.
@@ -382,7 +386,7 @@ The results of the validators T10, T19 and T27 are not shared. What matters to t
     - T0 in stage 2, beside T1;
     - T26 in stage 1;
     - T3, T6, T24 and T25 in stage 3, because the fresh fragment list and all-atom viewer files are required before stage 4 can start;
-    - T5–T11 in stage 4, T12–T16 and T27 in stage 5, and T18–T22 and T28 in stage 6;
+    - T5–T11 in stage 4, T12–T16 and T27 in stage 5, and T18–T22, T28, T29 and T30 in stage 6;
     - T21's installation error (missing or mismatching caches) in stage 6.
   - When a pin's conversion fails, the transformer is `blocked` and its `exception` is empty. The frontend should show "blocked" for a blocked node whose upstream nodes have not failed.
 - **Shares do not show staleness.**
@@ -399,7 +403,7 @@ The results of the validators T10, T19 and T27 are not shared. What matters to t
     - S19 `gaussian_validation`: the S18 rows it judged, S12, the selected keys and S10's echo. T20's jobs echo the `best_fits` keys. A mismatch shows "validating…".
     - S23 `range_pdbs_aa`: S5 `range_specs` and B5. If either differs from the tab's current values, the viewer shows "preparing all-atom structure…" instead of the old PDBs.
   - A cell is fresh when its echo equals this tab's current values, pending writes included. A tab that has just written sees its dependents go stale at once.
-  - The export is blocked while any gate is stale, running or failed (§3, stage 6).
+  - T29 consumes only its explicit pins and checks decision bases, freshness echoes, exact file bytes and validator dependency gates. If a producer/validator cannot run, the state graph takes precedence over the last shared admission value; the UI does not display an old ready result as current. Stage 6 also compares the completed T29 node checksum with S27's share checksum. T30 independently repeats normalization and digest checks, and fails while admission is not ready. The GET reads one consistent `export_tree` cut; if it is pending, failed or blocked, the Seamless download returns `409`.
 
 ### 8.5 Writes that span several cells
 Each key is written separately, and the writes are not atomic. With markers and bases (§8.1), only one user action writes two edit cells: a new PDB code writes S3 and S1, only once the CIF download has succeeded, under the arbiter rule (§8.6.1). Every other action writes one cell:
@@ -440,13 +444,16 @@ Conflicting edits of one cell resolve through the conditional PUT: the last acce
      - S4's scalars are strings, so integers are converted here. A parse error shows as a stage 2 banner.
    - The frontend stops writing S5: `setSharedRangeSpecs` and its calls in `App.svelte` go. The backend no longer initialises S5 from the file.
 3. **`range_pdbs` (S6) is unshared (author decision).** No frontend code reads it. The stage 6 mini-plan planned a reader for `ring-geometry.ts`, but T18 replaced that module. The `share()` call at `backend.py:182` goes; the cell itself stays, because T2, T4 and T18 read it. The frontend displays the aareduce output (S23), never these raw extractions (§8.6.5).
-4. **Export (deferred).**
-   - It reads B11, B14, S24 and the mounted files.
-   - Its "proceed anyway" checkbox is computed in the frontend, from the sources below. Amber states trigger it like red ones (author, D13).
-     - S11 pairs against S9's raw values (bases never trigger it; author amendment, 2026-11-04);
-     - S13/S24: a true kept cell whose best-fit energy is not below its edited threshold (author, D13);
-     - S19.
-   - It needs no new shared cell, apart from whatever triggers the export.
+4. **Export (T29/T30; implementation: [export-gens-plan.md](../export-gens-plan.md)).**
+   - Both transformers receive the same explicit pin inventory: decision cells S1, S2, S3, S4, S8, S11, S12, S14, S18 and S24; computed cells S5, S7, S9, S10, S13, S17, S19, S21, S22, S23 and S25; prepared bytes/folders B1, B3, B4, B5, B7, B11, B14, B15, B18 and the six ring-reference cells. T10/T19/T27 result pins are dependency gates only; their successful `None` values are not evidence. S26 and the Proceed anyway checkbox are excluded from the backend digest.
+   - T29 `export_admission_transformer` reports semantic readiness, addressed hard blocks, ordered X5 reasons and a digest. It rechecks the stage-6 gate and every decision/result echo, matrix lock, prepared byte identity, selected class, clipping, pair/energy threshold and required job result. It supplies the single warning calculation:
+     - S11 kept pair values are compared with S9 raw values; the warning boundary is `threshold - raw < 1e-5` (bases never warn);
+     - S24 true-cell values warn when the best-fit energy is not below the edited threshold;
+     - S19 Gaussian amber/red/non-green results and classes below RRM-95 warn;
+     - amber cases warn just like red cases. A sentinel alone does not warn.
+   - With warnings, the browser displays the exact Proceed anyway checkbox and the backend's inspectable reasons. `acknowledgedDigest` is local to the tab and only acknowledges S27's current digest. The GET carries no consent. A direct GET is allowed for a ready tree; T30 refuses hard-blocked input regardless of browser state.
+   - The Stage 6 UI waits for connection, no pending writes, fresh stage-6 echoes, a complete successful T29 node whose checksum equals the S27 share checksum, and a complete T30 node. The button remains disabled for semantic admission blocks or unexpected tree errors. Download fetches `/preparic/export.zip` with cache bypass, validates the schema-1 manifest and digest before saving, then revokes its object URL. Back, disconnect, edits or digest/readiness changes cancel an active request; a late reply cannot download. A later digest change labels a previous download stale.
+   - The Seamless GET packs one consistent folder cut. Pending/failed/blocked tree reads return `409`; an unavailable leaf buffer may return `503`. The ZIP adds the `alaric_project/` prefix once and includes the rendered files from B19.
 5. **From stage 4 on, the viewer shows the backend's aareduce PDBs (author decision, 2026-10-29).**
    - In stages 1–3 the viewer shows the structure downloaded from RCSB, as today, because ranges are picked on it.
    - In stages 4, 5 and 6 it shows the files of S23, one per range, exactly as T3 wrote them, and nothing from the RCSB structure. Fragment overlays (reference and best-fit PDBs from S10) are drawn on top. All of them share the CIF frame.

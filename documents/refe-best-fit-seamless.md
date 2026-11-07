@@ -255,16 +255,46 @@ preparation fixes these points:
 
 ## Export seam
 
-`alaric/export_bundle.py` (`build_export_bundle`, `bundle_is_stale`) fixes what
-a future export receives from preparic and what it emits, as one snapshot of
-all decisions (oracle contract X1–X7). It emits one Gaussian `anchor` action per
-selected stacking with its edited filter, and deduplicated `anchor-refe` actions
-for every kept candidate. Each `anchor-refe` threshold is A4's rounded base
-value, or the `-1` sentinel with an attached comment when that value exceeds
-`L_OV`. `grow` thresholds come from the edited kept pairs, and an edited pair
-value above `L_OV` blocks the export. The energy-threshold file holds the
-edited values of the true kept matrix cells. The export page and the project
-directory layout are not designed yet.
+The export is implemented in Preparic as two pure graph transformers. The
+shared `export_admission` result validates the pinned decisions and computed
+evidence, publishes addressed hard blocks and backend-computed warnings, and
+provides the canonical snapshot digest. The unshared `export_tree` folder
+rebuilds that snapshot, checks admission and digest agreement, and returns the
+DATA files, manifest and nested generator catalogue. Seamless's existing share
+server serves one consistent cut as `export.zip`; no Context capture callback
+or persistent export job is involved. Preparic includes the transformer
+sources as modules, so it does not import Alaric from the installation.
+
+`DATA/reference.pdb` is byte-identical to the all-atom RNA file used by the
+fit. The archive carries the prepared range bytes, schema-1 constraints and
+energy thresholds, score-filter defaults, kept fragment PDBs and a manifest
+that records the digest and generator inventory. Gaussian `anchor` recipes
+retain per-stacking actions. The `anchor-refe` tree deduplicates candidate
+actions; each threshold comes from A4's rounded base value, or uses the
+deliberately failing `-1` sentinel plus a YAML comment when that rounded value
+exceeds `L_OV`. Edited kept-pair thresholds populate `constraints.json`; an
+ovRMSD above `L_OV` blocks admission. Fixed recipes score a pool against the
+required protein ranges as a tandem AND chain. Each unfixed range-rooted
+recipe scores only against its own range, and already-scored restrictions do
+not trigger redundant scoring.
+
+The Stage 6 browser reads admission through its share and state-graph status.
+It displays backend-supplied warning reasons and binds the local Proceed
+anyway acknowledgment to the digest. A GET has no consent field. The browser
+checks the downloaded manifest and current request state before releasing the
+ZIP, cancels a request when its decision or readiness changes, and marks an
+older download stale after later edits. Hard blocks are also enforced by
+`export_tree`, so direct GETs cannot serve a successful blocked tree.
+
+The ZIP's nested gen folders are alternatives, not a runnable action graph in
+place. A user chooses compatible gens and moves their action directories into
+the project root beside `DATA/`; Alaric's project loader ignores nested action
+directories. The exporter does not choose merge locations or perform
+run-final dead-end removal. See [the export plan](../plans/export-gens-plan.md)
+and [project layout](../plans/alaric-project-layout.md) for the inventory and
+selection rules. The old synthetic `alaric/export_bundle.py` API was retired
+after its useful assertions moved to tests of real Preparic snapshots and
+export trees.
 
 ## Verification
 
