@@ -41,6 +41,7 @@ ACTION_SCHEMAS: dict[str, set[str]] = {
     "mask": {"action", "type", "input", "score_input", "threshold"},
     "identity": {"action", "type", "input1", "input2"},
     "mask-common-conformer": {"action", "type", "input1", "input2"},
+    "apply-mask": {"action", "type", "input", "mask_input", "mask"},
 }
 
 REQUIRED: dict[str, set[str]] = {
@@ -52,8 +53,9 @@ REQUIRED: dict[str, set[str]] = {
     "energy-filter": {"input", "fragment", "sequence", "exclude", "protein", "threshold", "epsilon", "cascade", "min_cascade"},
     "rmsd": {"input", "fragment", "exclude"},
     "mask": {"input", "score_input", "threshold"},
-    "identity": {"input1", "input2"},
+    "identity": {"input1"},
     "mask-common-conformer": {"input1", "input2"},
+    "apply-mask": {"input", "mask_input", "mask"},
 }
 
 DEPENDENCY_FIELDS: dict[str, dict[str, str]] = {
@@ -67,6 +69,7 @@ DEPENDENCY_FIELDS: dict[str, dict[str, str]] = {
     "mask": {"input": POSE, "score_input": SCORE},
     "identity": {"input1": POSE, "input2": POSE},
     "mask-common-conformer": {"input1": POSE, "input2": POSE},
+    "apply-mask": {"input": POSE, "mask_input": MASK},
 }
 
 OUTPUT_KIND = {
@@ -79,9 +82,10 @@ OUTPUT_KIND = {
     "rmsd": SCORE,
     "mask": MASK,
     "identity": POSE,
-    # A paired conformer mask contains one selector for each input pool; callers pass the
-    # corresponding mask to select-poses.py.
+    # A paired conformer mask contains one selector for each input pool. apply-mask
+    # consumes the selector matching the source pool and preserves its pose order.
     "mask-common-conformer": MASK,
+    "apply-mask": POSE,
 }
 
 AUTO_FIELDS = {
@@ -173,6 +177,10 @@ def normalize_action(name: str, path: Path, data: dict[str, Any]) -> ActionSpec:
         if conformer <= 0:
             raise SchemaError(f"{path}: conformer must be positive")
         data["conformer"] = conformer
+    if action == "apply-mask":
+        selector = data["mask"]
+        if type(selector) is not int or selector not in {1, 2}:
+            raise SchemaError(f"{path}: mask must be the integer 1 or 2")
     if action == "energy-filter":
         protein = data.get("protein")
         if not isinstance(protein, str) or re.fullmatch(r"range-\d+", protein) is None:

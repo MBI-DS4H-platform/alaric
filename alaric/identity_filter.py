@@ -670,9 +670,122 @@ def build_mapping(
     return np.concatenate(chunks, axis=0)
 
 
+def _run_single_identity_filter(
+    pose_dir: Path,
+    output_dir: Path,
+    *,
+    force: bool,
+    max_poses_per_file: int,
+    compress: bool,
+) -> dict[str, int]:
+    """Deduplicate one pool while loading each organized archive exactly once."""
+    print("Indexing one pose directory...", file=sys.stderr)
+    entries = _read_file_index(pose_dir)
+    if not entries:
+        raise ValueError(f"no organized pose files found in {pose_dir}")
+    bucket_size = entries[0].bucket_size
+    input_poses = int(sum(entry.nP for entry in entries))
+    print(f"Bucket size: {bucket_size}", file=sys.stderr)
+    print(f"Number of input poses: {input_poses}", file=sys.stderr)
+    _clean_output_dir(output_dir, force=force)
+
+    # Only packed conformer/rotamer identities and global source IDs are retained. Files
+    # are released one at a time; aggregation is limited to one spatial bucket at once.
+    groups_by_bucket = _index_by_bucket(entries)
+    identity: dict[PoseKey, np.ndarray] = {}
+    mapping_parts: list[tuple[int, int, np.ndarray]] = []
+    destination_start = 0
+    for M in sorted(groups_by_bucket):
+        offset_records: dict[
+            tuple[int, int, int],
+            list[tuple[FileIndexEntry, int, np.ndarray, np.ndarray]],
+        ] = {}
+        for entry in sorted(groups_by_bucket[M], key=lambda item: item.order):
+            loaded = _read_loaded(entry)
+            for offset_index, offset_row in enumerate(entry.O):
+                offset = _row_tuple(offset_row)
+                keys = loaded.pose_keys(offset_index)
+                if not len(keys):
+                    continue
+                start = entry.global_start + int(entry.I[offset_index])
+                source_ids = np.arange(start, start + len(keys), dtype=np.uint64)
+                offset_records.setdefault(offset, []).append(
+                    (entry, offset_index, keys, source_ids)
+                )
+            del loaded
+
+        for offset in sorted(offset_records):
+            pose_key = (M, offset)
+            records = offset_records[offset]
+            all_keys = np.concatenate([record[2] for record in records]).astype(
+                np.uint32, copy=False
+            )
+            all_source_ids = np.concatenate([record[3] for record in records]).astype(
+                np.uint64, copy=False
+            )
+            order = np.lexsort((all_source_ids, all_keys))
+            sorted_keys = all_keys[order]
+            sorted_source_ids = all_source_ids[order]
+            is_last = np.r_[sorted_keys[1:] != sorted_keys[:-1], True]
+            unique_keys = sorted_keys[is_last].copy()
+            selected_source_ids = sorted_source_ids[is_last]
+            identity[pose_key] = unique_keys
+
+            for entry, offset_index, keys, source_ids in records:
+                key_indices = np.searchsorted(unique_keys, keys)
+                keep = selected_source_ids[key_indices] == source_ids
+                if not np.any(keep):
+                    continue
+                selected_indices = key_indices[keep]
+                selected_sources = source_ids[keep]
+                row_order = np.argsort(selected_indices, kind="stable")
+                rows = np.column_stack(
+                    (
+                        selected_sources[row_order],
+                        np.uint64(destination_start) + selected_indices[row_order].astype(np.uint64),
+                    )
+                ).astype(np.uint64, copy=False)
+                mapping_parts.append((entry.order, offset_index, rows))
+            destination_start += len(unique_keys)
+
+    total_identity = int(sum(len(keys) for keys in identity.values()))
+    print(f"Number of unique poses: {total_identity}", file=sys.stderr)
+    print("Writing output pose directory...", file=sys.stderr)
+    write_identity_pose_dir(
+        identity,
+        output_dir,
+        bucket_size=bucket_size,
+        max_poses_per_file=max_poses_per_file,
+        compress=compress,
+    )
+    mapping_parts.sort(key=lambda part: (part[0], part[1]))
+    map1 = (
+        np.concatenate([part[2] for part in mapping_parts], axis=0)
+        if mapping_parts
+        else np.empty((0, 2), dtype=np.uint64)
+    )
+    save_npy(output_dir / "map-1.npy", map1, compress=compress)
+
+    manifest = {
+        "pose_dir_1": str(pose_dir),
+        "single_input": True,
+        "bucket_size": bucket_size,
+        "input_poses_1": input_poses,
+        "kept_poses_1": input_poses,
+        "common_buckets": len({entry.M for entry in entries if entry.nP}),
+        "common_mini_buckets": len(identity),
+        "identity_poses": total_identity,
+        "map_1_rows": int(len(map1)),
+    }
+    (output_dir / "identity-filter.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+    )
+    return manifest
+
+
 def run_identity_filter(
     pose_dir1: Path,
-    pose_dir2: Path,
+    pose_dir2: Path | None,
     output_dir: Path,
     *,
     force: bool = False,
@@ -680,6 +793,33 @@ def run_identity_filter(
     readahead: int = 20,
     compress: bool = False,
 ) -> dict[str, int]:
+    if pose_dir2 is None:
+        return _run_single_identity_filter(
+            pose_dir1,
+            output_dir,
+            force=force,
+            max_poses_per_file=max_poses_per_file,
+            compress=compress,
+        )
+    if Path(pose_dir1).resolve() == Path(pose_dir2).resolve():
+        manifest = _run_single_identity_filter(
+            pose_dir1,
+            output_dir,
+            force=force,
+            max_poses_per_file=max_poses_per_file,
+            compress=compress,
+        )
+        suffix = ".npy.zst" if compress else ".npy"
+        shutil.copyfile(output_dir / f"map-1{suffix}", output_dir / f"map-2{suffix}")
+        manifest.pop("single_input", None)
+        manifest["pose_dir_2"] = str(pose_dir2)
+        manifest["input_poses_2"] = manifest["input_poses_1"]
+        manifest["kept_poses_2"] = manifest["kept_poses_1"]
+        manifest["map_2_rows"] = manifest["map_1_rows"]
+        (output_dir / "identity-filter.json").write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+        )
+        return manifest
     print("Indexing pose directories...", file=sys.stderr)
     entries1 = _read_file_index(pose_dir1)
     entries2 = _read_file_index(pose_dir2)
@@ -762,13 +902,20 @@ def run_identity_filter(
     return manifest
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Identity-filter two organized alaric pose directories."
+        description="Identity-filter organized alaric pose directories."
     )
-    parser.add_argument("pose_dir_1", type=Path)
-    parser.add_argument("pose_dir_2", type=Path)
-    parser.add_argument("output_dir", type=Path)
+    parser.add_argument(
+        "--single-input",
+        nargs=2,
+        type=Path,
+        metavar=("POSE_DIR", "OUTPUT_DIR"),
+        help="deduplicate one organized pool instead of intersecting two pools",
+    )
+    parser.add_argument("pose_dir_1", nargs="?", type=Path)
+    parser.add_argument("pose_dir_2", nargs="?", type=Path)
+    parser.add_argument("output_dir", nargs="?", type=Path)
     parser.add_argument(
         "--force",
         action="store_true",
@@ -797,11 +944,29 @@ def parse_args() -> argparse.Namespace:
             "map-*.npy.zst instead of map-*.npy."
         ),
     )
-    return parser.parse_args()
+    args = parser.parse_args(argv)
+    positional = (args.pose_dir_1, args.pose_dir_2, args.output_dir)
+    if args.single_input is not None:
+        if any(value is not None for value in positional):
+            parser.error("--single-input cannot be combined with three positional arguments")
+    elif any(value is None for value in positional):
+        parser.error("provide POSE_DIR_1 POSE_DIR_2 OUTPUT_DIR or --single-input POSE_DIR OUTPUT_DIR")
+    return args
 
 
 def main() -> None:
     args = parse_args()
+    if args.single_input is not None:
+        run_identity_filter(
+            args.single_input[0],
+            None,
+            args.single_input[1],
+            force=args.force,
+            max_poses_per_file=args.max_poses_per_file,
+            readahead=args.readahead,
+            compress=args.compress,
+        )
+        return
     run_identity_filter(
         args.pose_dir_1,
         args.pose_dir_2,

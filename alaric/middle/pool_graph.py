@@ -97,12 +97,14 @@ def _pool_kind(action: ResolvedAction) -> str:
         return "anchor"
     if action.action in {"grow", "grow-test"}:
         return "grow"
-    if action.action == "energy-filter":
+    if action.action in {"energy-filter", "apply-mask"}:
         return "filter"
     if action.action == "identity":
         in1 = action.params.get("input1")
         in2 = action.params.get("input2")
-        if isinstance(in1, ResolvedAction) and isinstance(in2, ResolvedAction) and in1.name == in2.name:
+        if isinstance(in1, ResolvedAction) and (
+            in2 is None or (isinstance(in2, ResolvedAction) and in1.name == in2.name)
+        ):
             return "dedup"
         return "merge"
     raise PoolGraphError(f"{action.name}: not a pose-pool action ({action.action})")
@@ -130,7 +132,7 @@ def _provenance_edges(action: ResolvedAction, fragment: int, frag_of: dict[str, 
             edges.append(
                 ProvEdge(restrict.name, "restrict", None, frag_of[restrict.name] != fragment)
             )
-    elif action.action == "energy-filter":
+    elif action.action in {"energy-filter", "apply-mask"}:
         src = dep("input")
         if src is not None:
             edges.append(

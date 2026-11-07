@@ -263,10 +263,23 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
             }
         )
     elif action.action == "identity":
+        input1_path = shell_path(dep_result_path(p["input1"], location))
+        if isinstance(p.get("input2"), ResolvedAction):
+            identity_cli_args = " ".join(
+                [
+                    input1_path,
+                    shell_path(dep_result_path(p["input2"], location)),
+                    shell_path(output_dir),
+                ]
+            )
+        else:
+            identity_cli_args = " ".join(
+                ["--single-input", input1_path, shell_path(output_dir)]
+            )
         context.update(
             {
-                "input1_result_path": shell_path(dep_result_path(p["input1"], location)),
-                "input2_result_path": shell_path(dep_result_path(p["input2"], location)),
+                "input1_result_path": input1_path,
+                "identity_cli_args": identity_cli_args,
             }
         )
     elif action.action == "mask-common-conformer":
@@ -274,6 +287,17 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
             {
                 "input1_result_path": shell_path(dep_result_path(p["input1"], location)),
                 "input2_result_path": shell_path(dep_result_path(p["input2"], location)),
+            }
+        )
+    elif action.action == "apply-mask":
+        context.update(
+            {
+                "input_result_path": shell_path(dep_result_path(p["input"], location)),
+                # mask-common-conformer is a pair directory; its selectors are named
+                # mask1.npy and mask2.npy, unlike the ordinary mask.npy result.
+                "mask_pair_result_path": shell_path(dep_result_path(p["mask_input"], location)),
+                "mask_side": q(p["mask"]),
+                "output_path": shell_path(output_dir),
             }
         )
     return context

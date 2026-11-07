@@ -33,10 +33,10 @@ def _write_project(root: Path) -> None:
     (data / "constraints.json").write_text(
         """
 {
-  "pdb_code": "1abc",
-  "frag4": {"sequence": "GU", "scores": {"dom": -1.5}},
-  "frag5": {"sequence": "UU", "scores": {"dom": -2.5}},
-  "pairs": [{"down": "frag4", "up": "frag5", "cRMSD": 0.25, "ovRMSD": 0.75}]
+  "schema": 1,
+  "frag4": {"sequence": "GU"},
+  "frag5": {"sequence": "UU"},
+  "pairs": [{"down": 4, "up": 5, "sequence": "GUU", "crmsd": "0.25", "ovrmsd": "0.75"}]
 }
 """.strip()
         + "\n"

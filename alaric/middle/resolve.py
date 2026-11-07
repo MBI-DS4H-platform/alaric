@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,9 @@ from .schema import ActionSpec, _gaussian_filter_spec
 
 
 FRAG_RE = re.compile(r"(?:^|-)frag(\d+)(?:-|$)")
+CONSTRAINT_FRAG_RE = re.compile(r"frag([1-9][0-9]*)\Z")
+RNA_DINUC_RE = re.compile(r"[ACGU]{2}\Z")
+RNA_TRINUC_RE = re.compile(r"[ACGU]{3}\Z")
 
 
 @dataclass(frozen=True)
@@ -35,7 +39,96 @@ def _fragment_from_name(name: str) -> int:
 
 def _constraints(project: Project) -> dict[str, Any]:
     path = project.data_dir / "constraints.json"
-    return read_json(path) if path.is_file() else {}
+    if not path.is_file():
+        raise ResolveError(f"constraints.json missing: {path}")
+    try:
+        raw = read_json(path)
+    except (OSError, ValueError) as exc:
+        raise ResolveError(f"cannot read constraints.json: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ResolveError("constraints.json must be an object")
+    if type(raw.get("schema")) is not int or raw["schema"] != 1:
+        raise ResolveError("constraints.json must declare schema: 1")
+    if "pairs" not in raw or not isinstance(raw["pairs"], list):
+        raise ResolveError("constraints.json pairs must be a list")
+
+    fragments: dict[int, str] = {}
+    for key, value in raw.items():
+        if key in {"schema", "pairs"}:
+            continue
+        match = CONSTRAINT_FRAG_RE.fullmatch(key) if isinstance(key, str) else None
+        if match is None:
+            raise ResolveError(f"constraints.json has invalid key {key!r}")
+        fragment = int(match.group(1))
+        if not isinstance(value, dict) or set(value) != {"sequence"}:
+            raise ResolveError(f"constraints.json {key} must contain only sequence")
+        sequence = value["sequence"]
+        if not isinstance(sequence, str) or not RNA_DINUC_RE.fullmatch(sequence.upper()):
+            raise ResolveError(f"constraints.json {key}.sequence must be an RNA dinucleotide")
+        fragments[fragment] = sequence.upper()
+
+    def positive_threshold(pair: dict[str, Any], canonical: str, alias: str, address: str) -> float:
+        present = [key for key in (canonical, alias) if key in pair]
+        if not present:
+            raise ResolveError(f"constraints.json pair {address} missing {canonical}")
+        parsed: list[Decimal] = []
+        for key in present:
+            value = pair[key]
+            if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+                raise ResolveError(f"constraints.json pair {address} {key} must be numeric")
+            try:
+                decimal_value = Decimal(str(value))
+            except (InvalidOperation, ValueError) as exc:
+                raise ResolveError(f"constraints.json pair {address} {key} must be numeric") from exc
+            if not decimal_value.is_finite() or decimal_value <= 0:
+                raise ResolveError(f"constraints.json pair {address} {key} must be finite and positive")
+            if decimal_value.as_tuple().exponent < -2:
+                raise ResolveError(f"constraints.json pair {address} {key} must have at most two decimals")
+            parsed.append(decimal_value)
+        if len(parsed) == 2 and parsed[0] != parsed[1]:
+            raise ResolveError(f"constraints.json pair {address} has conflicting {canonical}/{alias} values")
+        return float(parsed[0])
+
+    pairs: list[dict[str, Any]] = []
+    seen_pairs: set[tuple[int, int]] = set()
+    allowed_pair_keys = {"down", "up", "sequence", "crmsd", "ovrmsd", "cRMSD", "ovRMSD"}
+    for index, pair in enumerate(raw["pairs"]):
+        address = f"row {index}"
+        if not isinstance(pair, dict):
+            raise ResolveError(f"constraints.json pair {address} must be an object")
+        unknown = set(pair) - allowed_pair_keys
+        if unknown:
+            raise ResolveError(f"constraints.json pair {address} has unknown keys: {', '.join(sorted(unknown))}")
+        if not {"down", "up", "sequence"}.issubset(pair):
+            raise ResolveError(f"constraints.json pair {address} requires down, up, and sequence")
+        down, up = pair["down"], pair["up"]
+        if type(down) is not int or type(up) is not int or down < 1 or up != down + 1:
+            raise ResolveError(f"constraints.json pair {address} must address adjacent fragments down->down+1")
+        address = f"{down}->{up}"
+        if (down, up) in seen_pairs:
+            raise ResolveError(f"constraints.json has duplicate pair {address}")
+        seen_pairs.add((down, up))
+        if down not in fragments or up not in fragments:
+            raise ResolveError(f"constraints.json pair {address} requires both fragment sequences")
+        sequence = pair["sequence"]
+        if not isinstance(sequence, str) or not RNA_TRINUC_RE.fullmatch(sequence.upper()):
+            raise ResolveError(f"constraints.json pair {address} sequence must be an RNA trinucleotide")
+        expected_sequence = fragments[down] + fragments[up][1]
+        if sequence.upper() != expected_sequence:
+            raise ResolveError(f"constraints.json pair {address} sequence disagrees with fragment sequences")
+        pairs.append(
+            {
+                "down": down,
+                "up": up,
+                "sequence": sequence.upper(),
+                "crmsd": positive_threshold(pair, "crmsd", "cRMSD", address),
+                "ovrmsd": positive_threshold(pair, "ovrmsd", "ovRMSD", address),
+            }
+        )
+
+    normalized: dict[str, Any] = {"schema": 1, "pairs": pairs}
+    normalized.update({f"frag{fragment}": {"sequence": sequence} for fragment, sequence in fragments.items()})
+    return normalized
 
 
 def _sequence_from_reference(project: Project, fragment: int) -> str | None:
@@ -74,20 +167,9 @@ def resolve_fragment(value: Any, name: str) -> int:
 def resolve_sequence(project: Project, fragment: int) -> str:
     constraints = _constraints(project)
     frag_key = f"frag{fragment}"
-    try:
-        return str(constraints[frag_key]["sequence"]).upper()
-    except KeyError:
-        pass
-    seq_file = project.data_dir / "sequence.txt"
-    if seq_file.is_file():
-        text = "".join(seq_file.read_text().split()).upper()
-        idx = fragment - 1
-        if idx >= 0 and idx + 1 < len(text):
-            return text[idx : idx + 2]
-    from_ref = _sequence_from_reference(project, fragment)
-    if from_ref:
-        return from_ref.upper()
-    raise ResolveError(f"frag{fragment}: cannot resolve sequence:auto")
+    if frag_key not in constraints:
+        raise ResolveError(f"constraints.json has no sequence for {frag_key}")
+    return str(constraints[frag_key]["sequence"])
 
 
 def resolve_exclude(project: Project, value: Any) -> list[str]:
@@ -99,8 +181,6 @@ def resolve_exclude(project: Project, value: Any) -> list[str]:
     if pdbcode.is_file():
         return [pdbcode.read_text().strip().lower()]
     constraints = _constraints(project)
-    if "pdb_code" in constraints:
-        return [str(constraints["pdb_code"]).lower()]
     raise ResolveError("cannot resolve exclude:auto")
 
 
@@ -145,23 +225,9 @@ def _pair_thresholds(project: Project, source_fragment: int, target_fragment: in
         raise ResolveError("grow crmsd:auto/ovrmsd:auto requires adjacent fragments")
     down, up = sorted((source_fragment, target_fragment))
     constraints = _constraints(project)
-    pairs = constraints.get("pairs", [])
-    def frag_num(value: Any) -> int:
-        text = str(value)
-        if text.startswith("frag"):
-            text = text[4:]
-        return int(text)
-
-    for pair in pairs:
-        if frag_num(pair.get("down", -1)) == down and frag_num(pair.get("up", -1)) == up:
-            try:
-                crmsd = pair.get("crmsd", pair.get("cRMSD"))
-                ovrmsd = pair.get("ovrmsd", pair.get("ovRMSD"))
-                if crmsd is None or ovrmsd is None:
-                    raise KeyError("crmsd/ovrmsd")
-                return float(crmsd), float(ovrmsd)
-            except KeyError as exc:
-                raise ResolveError(f"pair {down}->{up} missing {exc.args[0]}") from exc
+    for pair in constraints["pairs"]:
+        if pair["down"] == down and pair["up"] == up:
+            return pair["crmsd"], pair["ovrmsd"]
     raise ResolveError(f"constraints.json has no pair thresholds for {down}->{up}")
 
 

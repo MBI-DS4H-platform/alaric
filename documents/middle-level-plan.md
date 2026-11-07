@@ -30,6 +30,15 @@ Project layout:
 
 `alaric.yaml` is strict: unknown keys error. `action:` is canonical; `type:` is accepted only if `action:` is absent.
 
+Current `DATA/constraints.json` consumers require schema 1. The top-level shape is `schema: 1`,
+`fragN: {sequence: "AG"}` entries, and `pairs: [{down: N, up: N+1, sequence: "AGU",
+crmsd: "0.25", ovrmsd: "0.75"}]`. Fragment entries contain only a two-base RNA sequence;
+pair rows address adjacent fragments and their three-base sequence must agree with those entries.
+Pair addresses must be unique. Thresholds are finite positive values with at most two decimal
+places; canonical keys are lowercase, with uppercase aliases accepted only when unambiguous.
+The resolver validates the complete file and rejects absent/unsupported schemas or malformed
+entries. It does not migrate legacy data.
+
 Supported action schemas:
 - `anchor`: `fragment`, `sequence`, `exclude`, `protein`, `resid`, `nucleotide`, optional `dihedral`, `angle`, `margin`
 - `grow`: `input`, `fragment`, `sequence`, `exclude`, `direction`, `crmsd`, `ovrmsd`
@@ -46,16 +55,12 @@ Auto-resolution rules, field by field:
 - `fragment:auto`:
   Parse from action-dir name `fragN-...`. Applies to `anchor`, `grow`, `rmsd`. Fail if the dir name does not encode `fragN`.
 - `sequence:auto` in `anchor` and `grow`:
-  1. `DATA/constraints.json["fragN"]["sequence"]`
-  2. `DATA/sequence.txt` if present and indexable by fragment number
-  3. `DATA/reference.pdb` by extracting residues `N,N+1`
-  Fail if none works.
+  Read exactly `DATA/constraints.json["fragN"]["sequence"]`. A missing requested fragment
+  entry is an error; `sequence.txt` and `reference.pdb` do not supply fallbacks.
 - `sequence:auto` in `score`:
   Resolve from the referenced input action’s final fragment sequence, not directly from `constraints.json`.
 - `exclude:auto`:
-  1. `DATA/pdbcode.txt`
-  2. `DATA/constraints.json["pdb_code"]`
-  Normalize to a one-element list of lowercase PDB codes.
+  Read `DATA/pdbcode.txt` and normalize to a one-element list of lowercase PDB codes.
 - `protein:auto`:
   `auto` → `DATA/protein-aa.pdb` (spec: auto maps to the literal `protein-aa.pdb`,
   middle-level.txt:26). Only `auto` may resolve to/fall back to `protein-aa.pdb`.
@@ -67,17 +72,15 @@ Auto-resolution rules, field by field:
   Explicit values normalize as `fwd`/`forward` => `forward`, `bwd`/`backward` => `backward`;
   any other value is a schema error.
 - `crmsd:auto` and `ovrmsd:auto`:
-  For `grow`, resolve source fragment from `input`, target fragment from this action, require adjacency, then read the matching `DATA/constraints.json["pairs"]` entry for the ordered pair `{down: lower fragment, up: higher fragment}`.
+  For `grow`, resolve source fragment from `input`, target fragment from this action, require adjacency, then read the matching schema-1 `DATA/constraints.json["pairs"]` entry `{down: lower ordinal, up: higher ordinal, sequence, crmsd, ovrmsd}`. Pair sequences must agree with both fragment sequence entries.
 - `dihedral:auto`:
   `DATA/anchor.yaml["dihedral"]`
 - `angle:auto`:
   `DATA/anchor.yaml["angle"]`
 - `threshold:auto`:
-  Allowed only for `filter` and `mask` on the score route.
-  1. Resolve the referenced `score_input`
-  2. If it is a `score` action, use `DATA/constraints.json["fragN"]["scores"][protein]`, where `fragN` comes from the scored input fragment and `protein` is the resolved score protein
-  3. If it is a `rmsd` action, fail: no auto-threshold source is defined
-  4. If it is a `score_add` action, fail by explicit policy
+  The old score/filter `threshold:auto` route described here is retired. Schema-1
+  `constraints.json` contains fragment sequences and grow-pair thresholds only; it has no
+  score thresholds.
 - `reference` in `rmsd` is not an `auto` field:
   default to `DATA/reference.pdb` when omitted; allow explicit override
 

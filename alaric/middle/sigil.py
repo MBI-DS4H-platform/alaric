@@ -40,6 +40,16 @@ def parameter_record(action: ResolvedAction, dep_sigils: dict[str, str]) -> dict
     for field, path in sorted(action.file_fields.items()):
         params[field] = byte_checksum(path)
         params[f"__{field}"] = path.name
+    if (
+        action.action == "identity"
+        and "input1" in dep_sigils
+        and "input2" in dep_sigils
+        and dep_sigils["input1"] == dep_sigils["input2"]
+    ):
+        # Same-result two-input identity is used as a deduplicator. Version that semantic
+        # change so an old self-intersection result cannot be reused under its prior sigil;
+        # the distinct-input record (and the one-input record) remains byte-compatible.
+        params["same_input_dedup_version"] = 1
     if dep_sigils:
         params["dependencies"] = dep_sigils
     return params

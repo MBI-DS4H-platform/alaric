@@ -95,13 +95,38 @@ class ActionGraph:
             if scored_pose_input(score_input).name != p["input"].name:
                 raise GraphError(f"{resolved.name}: mask.score_input.input must equal mask.input")
         elif resolved.action == "identity":
-            if final_fragment(p["input1"]) != final_fragment(p["input2"]):
-                raise GraphError(f"{resolved.name}: identity inputs must resolve to the same fragment")
+            input2 = p.get("input2")
+            if isinstance(input2, ResolvedAction):
+                if final_fragment(p["input1"]) != final_fragment(input2):
+                    raise GraphError(f"{resolved.name}: identity inputs must resolve to the same fragment")
         elif resolved.action == "mask-common-conformer":
             if final_fragment(p["input1"]) != final_fragment(p["input2"]):
                 raise GraphError(
                     f"{resolved.name}: mask-common-conformer inputs must resolve to the same fragment"
                 )
+            if final_sequence(p["input1"]) != final_sequence(p["input2"]):
+                raise GraphError(
+                    f"{resolved.name}: mask-common-conformer inputs must resolve to the same sequence"
+                )
+        elif resolved.action == "apply-mask":
+            source = p["input"]
+            mask = p["mask_input"]
+            side = p["mask"]
+            if not isinstance(source, ResolvedAction) or not isinstance(mask, ResolvedAction):
+                raise GraphError(f"{resolved.name}: unresolved apply-mask dependency")
+            if mask.action != "mask-common-conformer":
+                raise GraphError(
+                    f"{resolved.name}: mask_input must be a mask-common-conformer result"
+                )
+            expected_source = mask.params.get(f"input{side}")
+            if not isinstance(expected_source, ResolvedAction) or source.name != expected_source.name:
+                raise GraphError(
+                    f"{resolved.name}: input must match input{side} of {mask.name}"
+                )
+            if final_fragment(source) != final_fragment(mask):
+                raise GraphError(f"{resolved.name}: source and mask must resolve to the same fragment")
+            if final_sequence(source) != final_sequence(mask):
+                raise GraphError(f"{resolved.name}: source and mask must resolve to the same sequence")
         elif resolved.action == "energy-filter":
             source = p["input"]
             if not isinstance(source, ResolvedAction):

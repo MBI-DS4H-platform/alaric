@@ -13,6 +13,14 @@ Every alaric.yaml contains one field "action" (legacy: "type"), which can be anc
 The other parameters are shown below per action type, with examples. 
 For "auto", the parentheses explain how it is determined.
 
+DATA/constraints.json is schema 1: it has `schema: 1`, `fragN: {sequence: "AG"}` entries,
+and `pairs: [{down: N, up: N+1, sequence: "AGU", crmsd: "0.25", ovrmsd: "0.75"}]`.
+Pair addresses are adjacent original fragment ordinals. Thresholds are finite positive numbers
+with at most two decimal places. Sequence resolution requires the requested `fragN` entry;
+the resolver rejects a missing or unsupported schema and malformed data instead of migrating
+legacy files. Pair thresholds also accept `cRMSD`/`ovRMSD` aliases when they do not conflict
+with lowercase values.
+
 
 For merging actions, there is the following validation: both inputs must have the same fragment. 
 
@@ -21,7 +29,7 @@ For merging actions, there is the following validation: both inputs must have th
 ## anchor
 
 fragment: 5 or auto (read from dirname "frag5-X")
-sequence: UU or auto (read sequence from ../DATA/sequence.txt or ../DATA/reference.pdb)
+sequence: UU or auto (read from ../DATA/constraints.json fragN.sequence)
 exclude: 1b7f or auto (read from ../DATA/pdbcode.txt)
 protein: 1b7f or auto . In both cases, read from ../DATA, either 1b7f-aa.pdb or protein-aa.pdb for auto
 resid: 123
@@ -40,7 +48,7 @@ There is no cRMSD: the nucleobase is essentially rigid, so no conformer can be e
 internal conformation.
 
 fragment: 5 or auto (read from dirname "frag5-X")
-sequence: UU or auto (read sequence from ../DATA/sequence.txt or ../DATA/reference.pdb)
+sequence: UU or auto (read from ../DATA/constraints.json fragN.sequence)
 exclude: 1b7f or auto (read from ../DATA/pdbcode.txt)
 nucleotide: first or second
 ovrmsd: 0.75, or auto (read from ../DATA/anchor.yaml)
@@ -70,7 +78,7 @@ energy-filter actions connected in sequence, so the result is an AND across rang
 
 input: name of a pose action dir
 fragment: 5 or auto (read from dirname "frag5-X")
-sequence: UU or auto (read from DATA/sequence.txt or DATA/reference.pdb)
+sequence: UU or auto (read from DATA/constraints.json fragN.sequence)
 exclude: 1b7f or auto (read from DATA/pdbcode.txt)
 protein: range-2 [exactly one range-K]
 threshold: -16.59 or auto (read from DATA/energy-thresholds.json)
@@ -127,13 +135,19 @@ conformer: single 1-based target conformer index that grown poses may have
 
 ## identity
 
-This is a merging action
-input1: frag4-anchor1 . Name of action dir
-input2: frag4-anchor2. Name of action dir
+This action intersects two pose pools, or deduplicates one pool when `input2` is omitted.
+Both inputs must resolve to the same fragment; `input2` is optional.
+
+input1: frag4-anchor1 . Name of action dir [required]
+input2: frag4-anchor2. Name of action dir [optional]
+
+The two-input CLI remains `identity_filter.py INPUT1 INPUT2 OUTPUT`. The one-input form is
+explicit: `identity_filter.py --single-input INPUT OUTPUT`.
 
 ## mask-common-conformer
 
-Generates two compressed boolean masks, `mask1.npy.zstd` and `mask2.npy.zstd`. Each
+Generates two compressed boolean masks, `mask1.npy.zst` and `mask2.npy.zst`, plus
+`mask-pair.json` with the ordered source-pool fingerprints. Each
 mask has one entry per pose in its corresponding input pool and is true when that pose's
 conformer occurs in both pools. The action streams each pool while retaining only its
 conformer array; after each mask is written, that pool's conformers and mask are released.
@@ -141,11 +155,18 @@ conformer array; after each mask is written, that pool's conformers and mask are
 input1: frag5-anchor-bwd . Name of the first pose action dir
 input2: frag5-anchor-fwd . Name of the second pose action dir
 
-Use either output with `select-poses.py`, selecting the corresponding input pool explicitly:
+Consume each mask with a matching `apply-mask` action. The selected side must correspond to
+the same input pool and pose order used to create the pair:
 
 ```
-python alaric/select-poses.py POSE_DIR mask.npy OUTPUT_DIR --base 0
+action: apply-mask
+input: frag5-anchor-bwd
+mask_input: frag5-common
+mask: 1
 ```
+
+`mask` is the strict integer selector 1 or 2. The result is a pose pool in source order with
+`provenance.npy` linking each selected pose to its source row.
 
 
 # alaric-sigil
