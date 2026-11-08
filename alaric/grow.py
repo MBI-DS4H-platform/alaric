@@ -1313,8 +1313,9 @@ def _run(args: argparse.Namespace) -> int:
     factories, _templates = config(verify_checksums=False)
     source_factory = factories[args.source_sequence]
     source_factory.load_rotaconformers()
+    excluded_pdb_codes = sorted(args.pdb_exclude) or None
     source_library = source_factory.create(
-        pdb_code=None,
+        pdb_code=excluded_pdb_codes,
         nucleotide_mask=np.array(layout.source_mask, dtype=bool),
         with_rotaconformers=True,
     )
@@ -1323,7 +1324,6 @@ def _run(args: argparse.Namespace) -> int:
     source_factory.unload_rotaconformers()
 
     print("[3/6] Building cRMSD pivot...", file=sys.stderr)
-    excluded_pdb_codes = sorted(args.pdb_exclude) or None
     crmsds = load_crmsds(
         layout.crmsd_ab,
         layout.crmsd_bc,
