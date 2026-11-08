@@ -243,10 +243,12 @@ preparation fixes these points:
 - The middle layer additionally accepts `ovrmsd: -1` for `anchor-refe`. That is
   the export's sentinel for a disabled positive control. Such an action deploys
   but fails when it runs, and it does not stop the project's other actions.
-- `energy-filter` replaces `score`, `filter` and `score_add`. It scores one
-  fragment against exactly one protein range and keeps poses with energy
-  strictly below the threshold. Several ranges are chained as successive AND
-  filters and never summed. Its thresholds come from
+- Standalone `score` is available alongside `energy-filter` again. `score` writes
+  the historical 10/12 Å grid-score array; `filter` and `score_add` remain retired.
+  `energy-filter` provides the range-specific filtering semantics: it scores one
+  fragment against exactly one protein range and keeps poses with energy strictly
+  below the threshold. Several ranges are chained as successive AND filters and
+  never summed. Its thresholds come from
   `DATA/energy-thresholds.json` (`schema: 1` plus `frag-N-SEQ` → `range-K` →
   two-decimal string, nothing else), and its `cascade`/`min_cascade` defaults
   come from `DATA/score-filter.yaml`. The grid cascade only accelerates the

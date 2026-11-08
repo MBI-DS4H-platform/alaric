@@ -161,7 +161,7 @@ class ActionGraph:
 
 
 def scored_pose_input(score: ResolvedAction) -> ResolvedAction:
-    if score.action == "rmsd":
+    if score.action in {"score", "rmsd"}:
         dep = score.params.get("input")
         if isinstance(dep, ResolvedAction):
             return dep

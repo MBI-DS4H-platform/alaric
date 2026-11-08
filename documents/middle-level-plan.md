@@ -1,6 +1,6 @@
 # Middle-Level Command Toolchain Handoff
 
-> **Historical.** The current action set and parameters are in `documents/middle-level.txt`. Since this plan, `score`, `filter` and `score_add` were replaced by `energy-filter`, and `anchor` uses only precomputed Gaussian filters.
+> **Historical.** The current action set and parameters are in `documents/middle-level.txt`. Standalone `score` has since been restored beside `energy-filter`; `filter` and `score_add` remain retired. `anchor` uses only precomputed Gaussian filters.
 
 ## Summary
 Implement the middle level as a strict `alaric.yaml` action graph with deterministic `auto` resolution, content-addressed sigils, plain-bash deployers, and checksum-based local/remote result lifecycle. Use Seamless only for canonical JSON and byte/deepfolder checksums. No `seamless-run`, no Slurm, no automatizer logic.

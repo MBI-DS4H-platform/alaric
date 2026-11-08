@@ -16,11 +16,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "alaric"), str(ROOT / "tests")]
 
-@pytest.mark.parametrize("deployer", ["local", "local-chunk"])
+@pytest.mark.parametrize("deployer", ["local", "local-chunk", "remote", "remote-chunk"])
 def test_energy_filter_backend_context_renders_real_deployed_template(tmp_path, deployer):
     from alaric.energy_filter_action import build_parser
     from alaric.middle.backend import template_context
-    from alaric.middle.deploy import render_action_template
+    from alaric.middle.deploy import ORGANIZE_DELIM, render_action_template
     from alaric.middle.project import Project
     from alaric.middle.resolve import ResolvedAction
 
@@ -41,16 +41,47 @@ def test_energy_filter_backend_context_renders_real_deployed_template(tmp_path, 
     assert shlex.split(context["protein_range"]) == ["range-2"]
     # Use deployment's real template discovery and renderer, with no injected
     # context that could accidentally conceal a missing backend field.
-    lines = render_action_template(Project(tmp_path), action, deployer=deployer, **arguments)
+    chunked = deployer.endswith("-chunk")
+    extra = {"nchunks": 3, "chunk_index": 2} if chunked else None
+    lines = render_action_template(Project(tmp_path), action, deployer=deployer,
+                                   extra_context=extra, **arguments)
     script = "\n".join(lines)
     assert re.search(r"\{\{\s*[a-z_][a-z_0-9]*\s*\}\}", script) is None
-    command = shlex.split(script.replace("\\\n", " "), comments=True)
-    assert Path(command[1]).name == "energy_filter_action.py"
-    parsed = build_parser().parse_args(command[2:])
-    assert parsed.protein_range == "range-2"
-    assert parsed.protein.name == "range-2-aa.pdb"
-    assert parsed.pose_dir.as_posix() == "../CACHE/results/source-pose-sigil"
-    assert (parsed.nprocs, parsed.chunk_poses) == (2, 999)
+
+    def command_of(text):
+        # Drop the remote templates' TMPDIR export; the action command is what remains.
+        text = "\n".join(line for line in text.splitlines() if not line.startswith("export "))
+        return shlex.split(text.replace("\\\n", " "), comments=True)
+
+    if not chunked:
+        command = command_of(script)
+        assert Path(command[1]).name == "energy_filter_action.py"
+        parsed = [build_parser().parse_args(command[2:])]
+    else:
+        from alaric.energy_filter_chunk import build_parser as chunk_parser
+
+        assert script.count(ORGANIZE_DELIM) == 1
+        chunk_text, organize_text = script.split(ORGANIZE_DELIM)
+        parsed = []
+        for text, mode in ((chunk_text, "chunk"), (organize_text, "assemble")):
+            command = command_of(text)
+            assert Path(command[1]).name == "energy_filter_chunk.py"
+            assert command[2] == mode
+            args = chunk_parser().parse_args(command[2:])
+            assert args.nchunks == 3
+            assert args.chunks_dir.as_posix() == "../CACHE/results/filtered-CHUNKS"
+            parsed.append(args)
+        assert parsed[0].chunk_index == 2
+        assert parsed[1].output.as_posix() == "../CACHE/results/filtered"
+    for args in parsed:
+        assert args.protein_range == "range-2"
+        assert args.protein.name == "range-2-aa.pdb"
+        assert args.pose_dir.as_posix() == "../CACHE/results/source-pose-sigil"
+        assert args.pdb_exclude == ["1b7f"]
+        assert args.chunk_poses == 999
+    assert parsed[-1].nprocs == 2
+    if deployer.startswith("remote"):
+        assert script.count('export TMPDIR="${ALARIC_REMOTE_SCRATCH_DIR:-') == (2 if chunked else 1)
 
 
 def test_reference_fragment_deps_pin_only_minimal_backbone_helper():

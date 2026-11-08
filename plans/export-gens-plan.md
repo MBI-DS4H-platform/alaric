@@ -50,7 +50,7 @@ Implementation record and contract specification, 2026-11-07. §3 retains the ge
   - A gen that consumes fragment N−1 references `fragN-1`, whichever gen produced it.
   - The main folder can hold only one action dir per name, so the filesystem allows exactly one source per fragment in a run. Two gens with the same final pool cannot both be moved in.
   - In unfixed mode the range suffix applies where R9 requires it: `frag5-range2`.
-- **Exception: merge gens** name their final pool `fragN-merged` (R5). The user chooses gens dynamically, so a merge must be able to sit in the main folder next to the gens it joins. Its restricting pool is another gen's `fragN`, and a merge that ends on an anchored fragment (e.g. `merge/fwd/gen-frag6`) sits next to the anchor gen's `fragN`.
+- **Exception: merge gens** name their final pool `fragN-merged` (R5). The user chooses gens dynamically, so a merge must be able to sit in the main folder next to the gens it joins. Its restricting pool is another gen's `fragN`, and a merge that ends on an anchored fragment (e.g. `merge/fwd/anchor/gen-frag6-merged`) sits next to the anchor gen's `fragN`.
 - **Exception: common-conformer gens** name their final pools `fragN-rangeX-common-conf` and `fragN-rangeY-common-conf` (R8), so they sit next to the plain pools they read.
 - **Intermediate pools** are named by the pool's own fragment, then the gen role, then the range suffix if any, then a step suffix:
 
@@ -72,7 +72,7 @@ Implementation record and contract specification, 2026-11-07. §3 retains the ge
 - Examples:
   - `anchor/fwd/gen-frag6-7`: `frag6-anchor-raw`, `frag7-anchor-raw`, `frag6-anchor-scored`, `frag7-anchor-scored`, `frag7-anchor-grown` → `frag7`, `frag6-anchor-grown` → `frag6` (R12, one stacking per nucleotide).
   - Grow gen: `frag3-fwd-grown` → `frag3-fwd-unique` → `frag3`.
-  - Inner fragment of a K-run: `frag5-anchor-from-5`, `frag5-anchor-from-6` → `frag5-anchor-ident` → `frag5-anchor-scored`.
+  - Inner fragment of a K-run: `frag5-anchor-from-nuc5`, `frag5-anchor-from-nuc6` → `frag5-anchor-ident` → `frag5-anchor-scored`.
 
 **R1. What the exporter writes.**
 - `DATA/` and gens. Each gen is a subfolder, nested in a classification path (R7), and holds the gen's actions. There are many more gens than a run uses. The user builds a run à la carte by moving a gen's action dirs into the main folder.
@@ -96,7 +96,7 @@ Implementation record and contract specification, 2026-11-07. §3 retains the ge
   - `locks` give the unclipped fragments that contain the nucleotide, as matrix row keys with nucleotide 1/2. They already use ordinal fragment numbering (contract §1), so no residue-number arithmetic is needed.
   - `range` gives `protein: range-K`.
   - `stackings` lists every selected stacking collapsed into that anchor, each with its own protein residue.
-- **Several stackings of one nucleotide.** When a nucleotide stacks with several protein residues, each stacking gets its own raw Gaussian anchor action, and all of them are folded by `identity` into the single pool that one stacking would have produced: `fragN-anchor-raw`, or `fragM-anchor-from-M` for an inner fragment. The reference tree emits the corresponding candidate only once. The recipes below are unchanged downstream of that pool.
+- **Several stackings of one nucleotide.** When a nucleotide stacks with several protein residues, each stacking gets its own raw Gaussian anchor action, and all of them are folded by `identity` into the single pool that one stacking would have produced: `fragN-anchor-raw`, or `fragM-anchor-from-nucM` for an inner fragment. The reference tree emits the corresponding candidate only once. The recipes below are unchanged downstream of that pool.
   - Fixed mode: this covers all stackings of the nucleotide, whatever their range (R6).
   - Unfixed mode: only stackings on the same range are folded. Stackings on different ranges belong to different range-rooted gens (R6, R9).
   - Names of the individual raw anchors: `-1`, `-2`, … appended, ordered by (range, protein residue), e.g. `frag5-anchor-raw-1`, `frag5-anchor-raw-2` → `frag5-anchor-raw`.
@@ -106,7 +106,7 @@ Implementation record and contract specification, 2026-11-07. §3 retains the ge
   - With one stacking per anchor pool, "restricted by" here is an unrestricted `grow` followed by an `identity` with the scored anchor pool (R12): `frag7-anchor-grown` + `frag7-anchor-scored` → `frag7`. When nuc7 has several stackings, it is a `grow` with `restrict_input`.
   - bwd: the same with the order reversed (frag6 first).
 - **K consecutive anchors on the same range** (nucleotides N … N+K−1). The folder is named by the first and last fragment, e.g. `anchor/fwd/gen-frag3-6`.
-  1. Each of the K−1 inner fragments, whether there is one (K=2) or several, is anchored from both its nucleotides: inner fragment M gets `fragM-anchor-from-M` and `fragM-anchor-from-M+1`. The two pools are merged by `identity`, then energy-filtered.
+  1. Each of the K−1 inner fragments, whether there is one (K=2) or several, is anchored from both its nucleotides: inner fragment M gets `fragM-anchor-from-nucM` and `fragM-anchor-from-nuc(M+1)`. The two pools are merged by `identity`, then energy-filtered.
   2. If K>2, the inner fragments are pruned against each other by a forward pass and then a backward pass, as in `gen-frag6-7`:
      - Forward pass: grow the first inner fragment's scored pool forward, restricted by the next inner fragment's scored pool, and repeat up to the last inner fragment. The last inner fragment's forward-pass pool is its final pool.
      - Backward pass: grow the last inner fragment's final pool backward, restricted by the previous inner fragment's forward-pass pool (for the first inner fragment, its scored pool), and repeat down to the first inner fragment. Each backward-pass pool is that fragment's final pool.
@@ -124,16 +124,18 @@ Implementation record and contract specification, 2026-11-07. §3 retains the ge
 - Chains stop at the clip boundary.
 
 **R5. Merge gens.**
-- Example: `merge/fwd/gen-frag4` grows `frag3` (fwd side) forward, restricted by `frag4` (bwd side). Its final pool is `frag4-merged` (R0 exception). `merge/bwd/gen-frag3` is its mirror image.
+- Example: `merge/fwd/gen-frag4-merged` grows `frag3` (fwd side) forward, restricted by `frag4` (bwd side). Its final pool is `frag4-merged` (R0 exception). `merge/bwd/gen-frag3-merged` is its mirror image.
 - With anchors at nuc1 and nuc7 on the same range, the merges run:
-  - fwd: from `merge/fwd/gen-frag2` (grow `frag1`, restricted by `frag2`) to `merge/fwd/gen-frag6` (grow `frag5`, restricted by `frag6`, the anchor pool). The latter is the "all fwd, no bwd" choice.
+  - fwd: from `merge/fwd/gen-frag2-merged` (grow `frag1`, restricted by `frag2`) to `merge/fwd/anchor/gen-frag6-merged` or `merge/fwd/anchor-refe/gen-frag6-merged` (grow `frag5`, restricted by `frag6`, the anchor pool; R5 content, R7). The latter is the "all fwd, no bwd" choice.
   - bwd: the mirror image.
 - A chain does not carry on past the next anchor run on its own range (fixed: on any range). The anchor pool is the latest restriction target.
-- Abutting runs (e.g. nuc4 and nuc6): `merge/fwd/gen-frag5` grows `frag4`, restricted by `frag5` (the nuc6 anchor pool). `merge/bwd/gen-frag4` is the mirror.
+- Abutting runs (e.g. nuc4 and nuc6): `merge/fwd/gen-frag5-merged` grows `frag4`, restricted by `frag5` (the nuc6 anchor pool). `merge/bwd/gen-frag4-merged` is the mirror.
 - Merges are allowed only when both anchors are on the same range, or in fixed mode.
 - Content:
-  - Restricted by a grown pool: a single `grow` named `frag4-merged`, with `input: frag3` and `restrict_input: frag4`, and no `energy-filter`. `grow` keeps only output poses present in the restricting pool ([grow.py](../alaric/grow.py) `--restrict-poses`), and that pool is already scored.
-  - Restricted by a single-stacking anchor pool: a `grow` plus an `identity` instead (R12). An anchor pool of several stackings (e.g. a K-run's outer fragment) keeps `restrict_input`.
+  - Restricted by a grown pool: a `grow` named `frag4-merged-grown`, with `input: frag3` and `restrict_input: frag4`, followed by an `identity` of `frag4-merged-grown` with `frag4` (its `restrict_input`), named `frag4-merged`. There is no `energy-filter`. `grow` keeps only output poses present in the restricting pool ([grow.py](../alaric/grow.py) `--restrict-poses`), and that pool is already scored. The `identity` is always required: the grown pool must be identity-merged with its restricting pool before chains can be built on `frag4-merged`.
+  - Restricted by a single-stacking Gaussian anchor pool (`merge/.../anchor/`): an unrestricted `grow` named `frag6-merged-grown`, then the `identity` with `frag6` (R12). The pool is too large to serve as `restrict_input`.
+  - Restricted by the same pool made by `anchor-refe` (`merge/.../anchor-refe/`): the reference pool is small, so this merge is like the grown-pool case, with `restrict_input` on the `grow`, followed by the `identity`.
+  - An anchor pool of several stackings (e.g. a K-run's outer fragment) keeps `restrict_input` on the `grow` in both trees (still followed by the `identity`), so there is no `anchor/` / `anchor-refe/` split.
   - In unfixed mode, with a range suffix (R9): `frag8-merged-range2`.
 
 **R6. Fixed versus unfixed.**
@@ -154,12 +156,12 @@ Implementation record and contract specification, 2026-11-07. §3 retains the ge
 - In unfixed mode, where gens for different ranges would collide, the path becomes `X/Y/unfixed/range-2/Z`.
 - With a single protein range, fixed and unfixed coincide, so no `fixed/`/`unfixed/` levels are written.
 - Gen folder naming:
-  - X is the gen type's tree (`anchor`, `anchor-refe`, `grow`, `merge`) and Y the direction (`fwd`/`bwd`). Z is the gen folder, `gen-fragN`, or `gen-fragN-M` for an anchor run (a hyphen, since `frag67` would be ambiguous once fragment numbers reach 10).
+  - X is the gen type's tree (`anchor`, `anchor-refe`, `grow`, `merge`) and Y the direction (`fwd`/`bwd`). Z is the gen folder, `gen-fragN`, or `gen-fragN-M` for an anchor run (a hyphen, since `frag67` would be ambiguous once fragment numbers reach 10). A merge gen's folder is named after the final pool it generates: `gen-fragN-merged`.
   - Single-fragment anchors have no direction level: `anchor/gen-frag1`.
-  - Merges have a direction level like the other trees: `merge/fwd/gen-frag4`.
+  - Merges have a direction level like the other trees: `merge/fwd/gen-frag4-merged`.
   - The gen folder is always the last component, e.g. `grow/fwd/unfixed/range-2/gen-frag8`. The user moves `…/gen-*/*` into the main folder.
   - Common-conformer gens exist only in unfixed mode and have no direction or mode level: `common-conformer/gen-fragN-range-X-Y/` (R8).
-  - A merge whose R12 boundary restriction differs between the Gaussian `anchor` tree and the deduplicated `anchor-refe` tree has an `anchor/` or `anchor-refe/` source-tree level immediately before its `gen-*` folder, after any mode/range levels. For example: `merge/fwd/fixed/anchor/gen-frag6` and `merge/fwd/fixed/anchor-refe/gen-frag6`. Select the merge matching the chosen anchor tree, and declare only that tree's producers for the anchor-pool external input; leave other merge-input producer choices unchanged. Keep the ordinary generic merge path when both graphs are identical.
+  - A merge that ends on a single-stacking anchor pool (R12) is split by anchor tree: its graph differs between the Gaussian `anchor` tree (pool too large for `restrict_input`) and the `anchor-refe` tree. It has an `anchor/` or `anchor-refe/` source-tree level immediately before its `gen-*` folder, after any mode/range levels. For example: `merge/fwd/fixed/anchor/gen-frag6-merged` and `merge/fwd/fixed/anchor-refe/gen-frag6-merged`. Select the merge matching the chosen anchor tree, and declare only that tree's producers for the anchor-pool external input; leave other merge-input producer choices unchanged. Merges that end on a grown pool or on a multi-stacking anchor pool have identical graphs in both trees and keep the ordinary generic merge path.
 
 **R8. Common-conformer gens (unfixed, different ranges).**
 - For every fragment N that interacts with, and is reachable by, ranges X and Y (X < Y), i.e. every fragment whose pools carry a range suffix (R9), the exporter writes a common-conformer gen `common-conformer/gen-fragN-range-X-Y/`.
@@ -188,13 +190,13 @@ Implementation record and contract specification, 2026-11-07. §3 retains the ge
 
 **R12. Restriction by a single-stacking anchor pool is implemented as grow + `identity`** (optimisation).
 - Wherever R3/R5 say "restricted by" an anchor pool that comes from a single stacking, the gen runs an unrestricted `grow` followed by an `identity` merge with the scored anchor pool. That gives the same poses (and unique ones, R11) at a much lower cost than `restrict_input`, because single-stacking pools are large.
-- An anchor pool that combines several stackings is much smaller, and restricting by it is cheap, so it keeps `restrict_input`. This holds whether the stackings are on consecutive nucleotides (a K-run, inner and outer fragments alike) or are several stackings of one nucleotide (R3). The stackings are always on one range, or in fixed mode.
+- An anchor pool that combines several stackings, or any `anchor-refe` pool, is much smaller, and restricting by it is cheap, so it keeps `restrict_input`. This holds whether the stackings are on consecutive nucleotides (a K-run, inner and outer fragments alike) or are several stackings of one nucleotide (R3). The stackings are always on one range, or in fixed mode.
 - Single-stacking anchor pools occur in:
   - the `gen-frag6-7` steps (both variants), when nuc7 has one stacking;
-  - merges that end on such a pool (`merge/fwd/gen-frag6` into a one-stacking nuc7, the abutting `merge/fwd/gen-frag5` into a one-stacking nuc6, and their mirrors).
-- Merges restricted by a grown pool (e.g. `merge/fwd/gen-frag4` restricted by the bwd side's `frag4`) also keep `restrict_input` (R5).
+  - the Gaussian-tree merges that end on such a pool (`merge/fwd/anchor/gen-frag6-merged` into a one-stacking nuc7, the abutting `merge/fwd/anchor/gen-frag5-merged` into a one-stacking nuc6, and their mirrors). The `anchor-refe` merges to the same target keep `restrict_input`: a reference pool is small.
+- Merges restricted by a grown pool (e.g. `merge/fwd/gen-frag4-merged` restricted by the bwd side's `frag4`) also keep `restrict_input` on the `grow` (R5), followed by the `identity` with the restricting pool.
 - No `energy-filter` after the `identity`: the result is a subset of the scored anchor pool.
-- Names: `frag7-anchor-grown` → `frag7` (identity with `frag7-anchor-scored`); `frag6-merged-grown` → `frag6-merged` (identity with `frag6`). With `restrict_input` the step is a single `grow` named after its output (`frag7`, `frag6-merged`).
+- Names: `frag7-anchor-grown` → `frag7` (identity with `frag7-anchor-scored`); `frag6-merged-grown` → `frag6-merged` (identity with `frag6`). With `restrict_input`, a non-merge gen's step is a single `grow` named after its output (`frag7`). A merge always has the `-merged-grown` → `-merged` pair: its `grow` keeps `restrict_input` where R12 does not apply, and the `identity` with the restricting pool is always present.
 
 ## 4. Ownership, inputs and snapshot admission
 
@@ -355,7 +357,7 @@ Build in this order:
 6. Enumerate ordinary fwd/bwd grow gens outside anchor-run final pools. Walk to the clip/matrix limit or the next anchor run of the mode/range. Each ordinary grow is `grow` → single-input `identity` → scoring. Keep only directions with a reachable adjacent input; do not emit a consumer whose external pool has no possible producer.
 7. Between successive compatible anchor runs in the same reachable component, enumerate a merge at every joining edge, including either run's boundary anchor target. Example: if the left final anchor pool is frag1 and the right boundary pool is frag6, emit fwd merges for targets frag2…frag6 and bwd merges for targets frag1…frag5. Do not emit merges on an open tail, across a false interaction gap, or between unrelated unfixed ranges. Abutting runs give just the two boundary merges. A merge reads plain pool names and produces `-merged`; it never overwrites its restricting pool or automatically redirects downstream inputs.
 8. For each fragment reached by at least two unfixed ranges, emit R8's pairwise mask/apply-mask gens. For two reachable ranges use `fragN-rangeX-common-conf`; with three or more reachable ranges use pair-qualified output names for **all** pairs, to avoid collisions. These gens always read plain pools and create separate filtered pools.
-9. Compare canonical rendered action graphs, comments, final names and external input contracts across fixed/unfixed modes. External contracts describe the required pool kind/fragment/sequence/frame, not the history of how its poses were produced. Hoist only genuinely identical recipes to their shared R7 path. Otherwise retain fixed/unfixed paths. For boundary merges, compare the R12 graph for each actual anchor source tree; use the conditional `anchor/` or `anchor-refe/` path level from R7 only when reference-tree deduplication makes the merge graphs differ, and keep the generic merge path when they match. Use range folders consistently within an unfixed (type, direction) branch when multiple root ranges populate that branch, even where one particular fragment has only one producer; this preserves R8's `grow/fwd/unfixed/range-3/gen-frag6` example. Comparing only final names, a fragment's current scoring ranges, or the number of protein ranges is insufficient. With one protein range all recipes are common and no mode levels are emitted.
+9. Compare canonical rendered action graphs, comments, final names and external input contracts across fixed/unfixed modes. External contracts describe the required pool kind/fragment/sequence/frame, not the history of how its poses were produced. Hoist only genuinely identical recipes to their shared R7 path. Otherwise retain fixed/unfixed paths. For boundary merges, compare the R12 graph for each actual anchor source tree; use the conditional `anchor/` or `anchor-refe/` path level from R7 only when the merge graphs differ (target is a single-stacking Gaussian anchor pool), and keep the generic merge path when they match. Use range folders consistently within an unfixed (type, direction) branch when multiple root ranges populate that branch, even where one particular fragment has only one producer; this preserves R8's `grow/fwd/unfixed/range-3/gen-frag6` example. Comparing only final names, a fragment's current scoring ranges, or the number of protein ranges is insufficient. With one protein range all recipes are common and no mode levels are emitted.
 
 Validate each gen as a DAG with distinct local names, declared finals, resolved local references, and an explicit external-input list. Validate each selected assembled run as a DAG separately in tests; the unselected catalogue contains mutually exclusive alternatives and is not itself a deployable graph. Reject classification-path collisions rather than choosing one recipe silently.
 
@@ -367,9 +369,9 @@ Render JSON/YAML with deterministic ordering, UTF-8 and a final newline. Add act
 
 `score_pool(fragment, input, output, mode, root_range)` emits the reusable energy-filter chain. Fixed mode sorts true ranges by numeric threshold (most negative first), then numeric range index; unfixed mode uses just its root range. A one-range filter uses the requested output name directly; longer chains use `-e1`, `-e2`, … and put the last filter at the requested final or `-scored` name. Every filter has `threshold: auto`, `epsilon: 15`, `cascade: auto`, `min_cascade: auto`, explicit `fragment`/`protein`, and `sequence`/`exclude: auto`. The chosen sorting uses edited thresholds without re-rounding them. Keep intermediate stems distinct for different scoring sites in the same gen.
 
-`restrict_pool` chooses R12's optimisation from the **actual restricting recipe**, not the pool name: a single raw-anchor constraint uses grow→identity; a pool combining distinct anchor constraints or a grown pool uses `restrict_input`. Reference-tree deduplication may make this choice differ from its Gaussian counterpart. Both paths preserve the scored restricting pool's subset, so add no energy filter or ordinary-grow unique step after them. Preserve R3's deliberate `restrict_input` for inner pruning passes.
+`restrict_pool` chooses R12's optimisation from the **actual restricting recipe**, not the pool name: a single raw-anchor constraint made by the Gaussian `anchor` action uses grow→identity; a pool combining distinct anchor constraints, a pool made by `anchor-refe`, or a grown pool uses `restrict_input`. Both paths preserve the scored restricting pool's subset, so add no energy filter or ordinary-grow unique step after them. Preserve R3's deliberate `restrict_input` for inner pruning passes.
 
-When that difference changes a boundary merge's action graph, emit the matching `anchor`/`anchor-refe` merge alternatives using R7's conditional source-tree path level. Restrict the anchor-pool external input's permitted producers to the matching tree; retain all compatible producers for the other merge inputs. A generic merge recipe may be shared across the two anchor trees only when its rendered graph and external contract are identical.
+When the boundary merge's target is a single-stacking Gaussian anchor pool, emit the matching `anchor`/`anchor-refe` merge alternatives using R7's conditional source-tree path level. Restrict the anchor-pool external input's permitted producers to the matching tree; retain all compatible producers for the other merge inputs. A generic merge recipe may be shared across the two anchor trees only when its rendered graph and external contract are identical.
 
 For all grows, `fragment` is the **output** fragment, direction is explicit, and the resolved pair is (N−1,N) for fwd or (N,N+1) for bwd. Do not use a source fragment's thresholds by accident. Keep `sequence`, `exclude`, `crmsd`, `ovrmsd` as `auto`.
 
@@ -614,4 +616,4 @@ Completion means E0–E7 pass, the §10 catalogue is a checked golden rather tha
 | Unfixed/range-3 | `gen-frag3-5` fwd/bwd | fwd frag6–8; no bwd | None |
 | Unfixed/range-2 | `gen-frag5-6` fwd/bwd; `gen-frag10` single | fwd frag7–9; bwd frag7–9 | fwd frag7–10; bwd frag6–9 |
 
-Unfixed names at frag5–8 carry their range suffix; frag9/frag10 stay plain. There are four common-conformer gens, for frag5–8. Compare rendered graphs when hoisting: `anchor/gen-frag10` and `anchor-refe/gen-frag10`, `grow/bwd/gen-frag9`, `merge/fwd/gen-frag10` and `merge/bwd/gen-frag9` are common to both modes. The other listed choices require their mode-specific paths. Retaining both directional anchor variants gives **46 physical gen folders** after these five shared choices are hoisted; assert their paths, actions, external inputs and final pools in the golden. Merges include the anchor targets at the gap ends even though ordinary grows stop before them.
+Unfixed names at frag5–8 carry their range suffix; frag9/frag10 stay plain. There are four common-conformer gens, for frag5–8. Compare rendered graphs when hoisting: `anchor/gen-frag10` and `anchor-refe/gen-frag10`, `grow/bwd/gen-frag9`, `merge/fwd/anchor/gen-frag10-merged`, `merge/fwd/anchor-refe/gen-frag10-merged` and `merge/bwd/gen-frag9-merged` are common to both modes. The other listed choices require their mode-specific paths. The boundary merges into the frag6 and frag10 anchor pools are split by anchor tree (R5). Retaining both directional anchor variants gives **49 physical gen folders** after these six shared choices are hoisted; assert their paths, actions, external inputs and final pools in the golden. Merges include the anchor targets at the gap ends even though ordinary grows stop before them.

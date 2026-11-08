@@ -26,6 +26,7 @@ from npy_io import (  # noqa: E402
     NpyWriter,
     compress_npy_file,
     find_npy,
+    iter_npy_chunks,
     load_npy,
     open_npy_mmap,
     read_npy_header,
@@ -41,6 +42,25 @@ ARRAYS = {
     "scores": np.linspace(-10, 10, 100, dtype=np.float32),
     "empty": np.empty(0, dtype=np.uint32),
 }
+
+
+@pytest.mark.parametrize("compressed", [False, True])
+@pytest.mark.parametrize("fortran", [False, True])
+def test_chunked_rows(tmp_path, compressed, fortran):
+    values = np.arange(42, dtype=np.uint64).reshape(21, 2)
+    if fortran:
+        values = np.asfortranarray(values)
+    path = save_npy(tmp_path / "rows.npy", values, compress=compressed)
+    chunks = list(iter_npy_chunks(path, rows=8))
+    assert [len(c) for c in chunks] == [8, 8, 5]
+    np.testing.assert_array_equal(np.concatenate(chunks), values)
+
+
+def test_chunked_rows_rejects_truncation(tmp_path):
+    path = save_npy(tmp_path / "rows.npy", np.arange(21), compress=False)
+    path.write_bytes(path.read_bytes()[:-1])
+    with pytest.raises(ValueError, match="truncated"):
+        list(iter_npy_chunks(path, rows=8))
 
 
 def _decompress(path: Path) -> bytes:

@@ -7,7 +7,8 @@ From the repository root, run explicitly (potentially minutes and substantial RA
 The ignored source pool must already exist. Its generating recipe and blessed
 ARC digest are recorded in fixtures/w8/energy-filter-integration.json. Missing
 inputs FAIL after opt-in, rather than silently turning acceptance into a skip.
-This tests both actual local/local-chunk shell templates, not a scheduling mock.
+This tests both actual local/local-chunk shell templates, not a scheduling mock;
+local-chunk runs three chunks and the organize replay.
 Only the recorded dom2 range is covered; other/clipped receptors need their own
 recorded fixtures and finite-sample bounds. Bounds apply only to scores eligible
 for grid-only decisions under the production float64 precision guard; every
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import shlex
@@ -84,38 +86,90 @@ def recorded_pool(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def measured_ranges(recorded_pool):
-    """Observe actual action scorers; no energy, grid or selected-pose mock."""
+    """Measure independent grid and gridless JAX oracles on the recorded sample."""
     import energy_filter_action as action
     from energy_filter import DEFAULT_SCORE_FILTER
+    from grid_generator import generate_grid
+    from jax_scorer import JaxScoreOracle
+    from minfor import rotvec_world_to_attr_np
+    from nb_kernel.forcefields.nonbon8.params import load_params
 
     metadata, pool, work = recorded_pool
     results = []
     for range_meta in metadata["ranges"]:
         protein = ROOT / range_meta["protein"]
         assert hashlib.sha256(protein.read_bytes()).hexdigest() == range_meta["protein_sha256"]
-        measured = {}
-        original = action.cascade_filter
-
-        def observe(ids, **kwargs):
-            # Capture the production scorer closures, then evaluate every recorded
-            # sample at every default step, including poses an earlier step rejects.
-            exact = np.asarray(kwargs["gridless_score"](ids))
-            grids = [np.asarray(kwargs["grid_score"](ids, step))
-                     for step in DEFAULT_SCORE_FILTER["cascade"]]
-            assert np.all(np.isfinite(exact))
-            assert all(np.all(np.isfinite(g)) for g in grids)
-            measured.update(exact=exact, grids=grids)
-            return original(ids, **kwargs)
-
-        with pytest.MonkeyPatch.context() as patch:
-            patch.setattr(action, "cascade_filter", observe)
-            action.run_energy_filter(
-                pool, protein, sequence=metadata["sequence"],
-                fragment=metadata["fragment"], protein_range=range_meta["protein_range"],
-                threshold=0.0, cascade=[], exclude=metadata["exclude"],
-                output_dir=work / (range_meta["protein_range"] + "-probe"),
-                nprocs=1, chunk_poses=1001,
+        measure_dir = work / (range_meta["protein_range"] + "-measure")
+        measure_dir.mkdir()
+        # Use the action's shared preparation path, then call the scorer directly. This
+        # keeps the measurement independent of the action's cascade implementation and
+        # avoids relying on internal scorer callbacks that no longer exist.
+        action._prepare_minfor_inputs(pool, protein, metadata["sequence"], metadata["exclude"], measure_dir)
+        poses = np.load(measure_dir / "poses.rotvec.npy", mmap_mode="r", allow_pickle=False)
+        conformers = np.load(measure_dir / "poses.conformers.npy", allow_pickle=False).astype(np.int32, copy=False)
+        nposes = len(poses)
+        receptor = np.asarray(np.load(measure_dir / "receptor-coor.npy"), dtype=np.float64)
+        receptor_types = np.asarray(np.load(measure_dir / "receptor-atomtypes.npy"), dtype=np.int32)
+        receptor_charges = np.zeros(len(receptor), dtype=np.float64)
+        ligand = np.asarray(np.load(measure_dir / "ligand-ensemble.npy"), dtype=np.float64)
+        if ligand.ndim == 2:
+            ligand = ligand[None, :, :]
+        ligand_types = np.asarray(np.load(measure_dir / "ligand-atomtypes.npy"), dtype=np.int32)
+        ligand_charges = np.zeros(len(ligand_types), dtype=np.float64)
+        pivot = np.mean(ligand[0], axis=0)
+        dofs = rotvec_world_to_attr_np(poses, pivot, copy=True)
+        ensembles = np.ones(nposes, dtype=np.int32)
+        par_path = ROOT / "attract-jax/attract-original/attract-par.npz"
+        oracle_params = {
+            "receptor_ensemble": receptor,
+            "receptor_atomtypes": receptor_types,
+            "receptor_charges": receptor_charges,
+            "ligand_ensemble": ligand,
+            "ligand_atomtypes": ligand_types,
+            "ligand_charges": ligand_charges,
+            "attract_par_npz": str(par_path),
+            "lig_pivot": pivot,
+            "epsilon": 15.0,
+            "score_mode": "bulk",
+            "score_batch_size": 1001,
+            "nb_kernel": "compiled",
+            "energy_only": True,
+            "backend": "jax",
+            "dof_type": "rotvec",
+            "no_conformer_grouping": True,
+        }
+        exact_oracle = JaxScoreOracle(**oracle_params, grid_free=True)
+        exact, _ = exact_oracle.score_batch(ensembles, dofs, conformers)
+        ff_params = load_params(str(par_path))
+        grids = []
+        for step in DEFAULT_SCORE_FILTER["cascade"]:
+            grid = generate_grid(
+                rec_coords=receptor,
+                rec_atomtypes=receptor_types,
+                rec_charges_raw=receptor_charges,
+                ff_params=ff_params,
+                forcefield="nonbon8",
+                ffelec=math.sqrt(332.053986 / 15.0),
+                plateaudis=float(step["plateau_distance"]),
+                neighbourdis=float(step["neighbour_distance"]),
+                lig_atomtypes=ligand_types,
+                return_gradients=False,
+                force_jax=False,
             )
+            grid_oracle = JaxScoreOracle(**oracle_params, grid_object=grid)
+            grid_scores, _ = grid_oracle.score_batch(ensembles, dofs, conformers)
+            grids.append(np.asarray(grid_scores, dtype=np.float64))
+        measured = {"exact": np.asarray(exact, dtype=np.float64), "grids": grids}
+        assert len(measured["exact"]) == nposes
+        assert all(len(values) == nposes for values in grids)
+        assert np.all(np.isfinite(measured["exact"]))
+        assert all(np.all(np.isfinite(values)) for values in grids)
+        measured["sample_ids"] = np.arange(nposes, dtype=np.int64)
+        measured["source_ids"] = np.load(work / "source-ids.npy", allow_pickle=False)
+        measured["measurement_dir"] = measure_dir
+        np.save(measure_dir / "measured-exact.npy", measured["exact"], allow_pickle=False)
+        for index, values in enumerate(grids, start=1):
+            np.save(measure_dir / f"measured-grid-step-{index}.npy", values, allow_pickle=False)
         measured.update(range_meta=range_meta)
         results.append(measured)
     return results
@@ -135,11 +189,19 @@ def _assert_bounds(measured):
         np.testing.assert_array_equal(unsafe, expected_unsafe)
         eligible = ~unsafe
         assert np.any(eligible), "recorded sample needs grid-only-eligible scores"
-        error = float(np.max(np.abs(grid[eligible] - measured["exact"][eligible])))
+        eligible_positions = np.flatnonzero(eligible)
+        errors = np.abs(grid[eligible] - measured["exact"][eligible])
+        worst_position = int(eligible_positions[int(np.argmax(errors))])
+        error = float(errors.max())
         assert error < step["max_error"] / 2, (
             f"{measured['range_meta']['protein_range']} step={step}: empirical "
             f"eligible max abs error {error} must be strictly < {step['max_error'] / 2}; "
-            f"eligible={int(eligible.sum())}, precision-unsafe={int(unsafe.sum())}"
+            f"eligible={int(eligible.sum())}, precision-unsafe={int(unsafe.sum())}; "
+            f"sample_id={int(measured['sample_ids'][worst_position])}, "
+            f"source_pose_id={int(measured['source_ids'][worst_position])}, "
+            f"grid_energy={float(grid[worst_position])}, "
+            f"exact_energy={float(measured['exact'][worst_position])}, "
+            f"measurements={measured['measurement_dir']}"
         )
 
 
@@ -200,12 +262,22 @@ def test_recorded_precision_unsafe_scores_always_take_exact_route(measured_range
     assert fallback_count > 0, "recorded fixture must exercise the precision fallback"
 
 
-def _run_template(mode, values):
+def _run_template(mode, values, nchunks=3):
     template = (ROOT / "alaric/middle/templates" / mode / "energy-filter.sh").read_text()
-    for key, value in values.items():
-        template = template.replace("{{ " + key + " }}", str(value))
-    assert "{{" not in template, template
-    subprocess.run(["bash", "-e", "-c", template], check=True, cwd=ROOT)
+    if mode.endswith("-chunk"):
+        # Run each chunkN body, then the organize body, as the generated run.sh does.
+        chunk, organize = template.split("### ORGANIZE ###")
+        values = {**values, "nchunks": nchunks,
+                  "chunks_path": shlex.quote(str(values["output_path"]).strip("'") + "-CHUNKS")}
+        scripts = [chunk.replace("{{ chunk_index }}", str(i)) for i in range(1, nchunks + 1)]
+        scripts.append(organize)
+    else:
+        scripts = [template]
+    for script in scripts:
+        for key, value in values.items():
+            script = script.replace("{{ " + key + " }}", str(value))
+        assert "{{" not in script, script
+        subprocess.run(["bash", "-e", "-c", script], check=True, cwd=ROOT)
 
 
 def test_actual_energy_filter_bytes_ids_and_stats_across_templates(recorded_pool, measured_ranges):
@@ -276,6 +348,6 @@ def test_actual_energy_filter_bytes_ids_and_stats_across_templates(recorded_pool
                         assert stats[key] == expected_route[key]
         # Route counts differ by algorithm, but externally visible metadata agrees.
         route_keys = {"grid_counts", "gridless_count", "cascade_exit",
-                      "precision_fallback_counts", "precision_fallback_count"}
+                      "precision_fallback_counts", "precision_fallback_count", "minfor_invocations"}
         for key in route_stats["gridless"].keys() - route_keys:
             assert route_stats["gridless"][key] == route_stats["cascade"][key]

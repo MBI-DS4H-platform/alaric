@@ -40,6 +40,13 @@ def parameter_record(action: ResolvedAction, dep_sigils: dict[str, str]) -> dict
     for field, path in sorted(action.file_fields.items()):
         params[field] = byte_checksum(path)
         params[f"__{field}"] = path.name
+    if action.action == "score":
+        # The restored score runtime forwards exclusions to convert_poses as well as
+        # library generation. Its output therefore differs from pre-restoration caches.
+        params["score_runtime_version"] = 1
+    if action.action == "energy-filter":
+        # The compiled minfor cascade replaces the former NumPy scoring runtime.
+        params["energy_filter_runtime_version"] = 1
     if (
         action.action == "identity"
         and "input1" in dep_sigils

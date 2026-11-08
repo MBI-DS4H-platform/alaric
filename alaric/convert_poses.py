@@ -120,22 +120,31 @@ def convert_arc_dir(
     pose_range: tuple[int, int] | None,
     sequence: str,
     excluded_pdb_codes: list[str] | None = None,
+    pose_indices: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return (rotvec_dofs, conformers).
 
     rotvec_dofs : (N, 6) float64 — (v0, v1, v2, tx, ty, tz)
       tx/ty/tz are world-frame translations in Angstrom
     conformers  : (N,) int32 — 0-based conformer index into the library
-    """
-    from poses import PoseReader
 
+    ``pose_indices`` (0-based, global) selects scattered poses instead of a range; the
+    output rows follow the requested order.
+    """
+    from poses import PoseReader, select_pose_indices
+
+    if pose_indices is not None and pose_range is not None:
+        raise ValueError("pose_indices and pose_range are mutually exclusive")
     lib = _load_library(sequence, excluded_pdb_codes)
     rotvec_cache: dict[int, np.ndarray] = {}
     rotvec_chunks: list[np.ndarray] = []
     conf_chunks: list[np.ndarray] = []
 
-    reader = PoseReader(pose_dir, pose_range=pose_range)
-    for chunk in reader.iter_chunks():
+    if pose_indices is not None:
+        chunks = [select_pose_indices(pose_dir, pose_indices)]
+    else:
+        chunks = PoseReader(pose_dir, pose_range=pose_range).iter_chunks()
+    for chunk in chunks:
         if len(chunk) == 0:
             continue
         rv_chunk, conf_chunk = _process_chunk(chunk, lib, rotvec_cache)
@@ -159,6 +168,8 @@ def main() -> None:
     ap.add_argument("--pose-range", nargs=2, metavar=("START", "END"),
                     type=_positive_int,
                     help="1-based end-inclusive global pose range (default: all poses)")
+    ap.add_argument("--pose-indices", metavar="NPY",
+                    help="NPY array of 0-based global pose indices (instead of --pose-range)")
     ap.add_argument("--sequence", required=True, type=_dinucleotide_sequence,
                     help="Dinucleotide sequence (e.g. GU)")
     ap.add_argument("--output-prefix", required=True,
@@ -173,12 +184,18 @@ def main() -> None:
         if start > end:
             ap.error("--pose-range START must be <= END")
         pose_range = (start, end)
+    pose_indices = None
+    if args.pose_indices is not None:
+        if pose_range is not None:
+            ap.error("--pose-indices and --pose-range are mutually exclusive")
+        pose_indices = np.load(args.pose_indices, allow_pickle=False)
 
     rotvec_dofs, conformers = convert_arc_dir(
         Path(args.pose_dir),
         pose_range,
         args.sequence,
         args.pdb_exclude,
+        pose_indices,
     )
 
     prefix = args.output_prefix

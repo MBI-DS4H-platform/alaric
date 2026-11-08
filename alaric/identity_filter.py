@@ -717,32 +717,23 @@ def _run_single_identity_filter(
         for offset in sorted(offset_records):
             pose_key = (M, offset)
             records = offset_records[offset]
-            all_keys = np.concatenate([record[2] for record in records]).astype(
-                np.uint32, copy=False
+            unique_keys = np.unique(
+                np.concatenate([record[2] for record in records]).astype(
+                    np.uint32, copy=False
+                )
             )
-            all_source_ids = np.concatenate([record[3] for record in records]).astype(
-                np.uint64, copy=False
-            )
-            order = np.lexsort((all_source_ids, all_keys))
-            sorted_keys = all_keys[order]
-            sorted_source_ids = all_source_ids[order]
-            is_last = np.r_[sorted_keys[1:] != sorted_keys[:-1], True]
-            unique_keys = sorted_keys[is_last].copy()
-            selected_source_ids = sorted_source_ids[is_last]
             identity[pose_key] = unique_keys
 
+            # Every input row is mapped, not one representative per unique pose: the
+            # duplicates of a pose are its alternative parents, and dropping them
+            # silently removes chain edges downstream (alaric-chain, propagate-provenance).
             for entry, offset_index, keys, source_ids in records:
                 key_indices = np.searchsorted(unique_keys, keys)
-                keep = selected_source_ids[key_indices] == source_ids
-                if not np.any(keep):
-                    continue
-                selected_indices = key_indices[keep]
-                selected_sources = source_ids[keep]
-                row_order = np.argsort(selected_indices, kind="stable")
+                row_order = np.argsort(key_indices, kind="stable")
                 rows = np.column_stack(
                     (
-                        selected_sources[row_order],
-                        np.uint64(destination_start) + selected_indices[row_order].astype(np.uint64),
+                        source_ids[row_order],
+                        np.uint64(destination_start) + key_indices[row_order].astype(np.uint64),
                     )
                 ).astype(np.uint64, copy=False)
                 mapping_parts.append((entry.order, offset_index, rows))

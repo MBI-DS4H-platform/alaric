@@ -45,7 +45,7 @@ or perform run-final dead-end removal. There is no bundled README.
 ## Actions
 `alaric.yaml` is strict (`action:` key; legacy `type:`). Dir names follow `frag<N>-<role>`: N is the dinucleotide at residues N and N+1, and a `-fwd`/`-bwd` suffix sets the grow direction. Dependency fields accept only the matching output kind.
 - **Pose pools**: `anchor` (stack on protein `resid`/`nucleotide` through one of the twelve precomputed Gaussian filters `rrm50` … `rrm95-tilt30-disp45`; see `documents/gaussian-filter.md`), `anchor-refe` (poses within `ovrmsd` of the reference nucleobase), `grow` (`input`, `restrict_input`, `crmsd`, `ovrmsd`), `energy-filter` (one protein range, keep energy < `threshold`; ranges chain as AND), `identity` (merge two pools or deduplicate `input1` when `input2` is omitted), and `apply-mask` (filter a pose pool with the corresponding side of a `mask-common-conformer` result). `anchor-test`/`grow-test` are single-conformer variants. `grow` and `anchor-refe` raise on an `ovrmsd` above √3 Å; `anchor-refe` admits `-1` as an export's disabled-control sentinel, which fails when run.
-- **Scores** (`score.npy`): `rmsd`. The `score`, `filter` and `score_add` actions are retired (`tests/legacy-middle-actions/`).
+- **Scores** (`score.npy`): `rmsd` and restored standalone `score` (ATTRACT grid energies). `filter` and `score_add` remain retired (`tests/legacy-middle-actions/`).
 - **Masks**: `mask`, `mask-common-conformer` (paired selectors plus source-order metadata), `apply-mask` (matching pose-pool filter).
 
 Pool dirs hold `poses-N.arc.zst`, plus `provenance.npy.zst` (grow, energy-filter, or apply-mask) or `map-1/2.npy.zst` (identity; one-input identity writes only `map-1.npy.zst`).
@@ -57,7 +57,7 @@ Pool dirs hold `poses-N.arc.zst`, plus `provenance.npy.zst` (grow, energy-filter
 4. `alaric-result-check|download|upload|clean` move or free bulk data. The checksum is the durable identity, so data is re-fetchable.
 
 ## Downstream
-`alaric-pool-graph` (graph JSON, `--select` for twice-visited fragments), `alaric-propagate-provenance`, then `alaric-chain --count | -o DIR` (`chains.txt`, `chains.json`, per-fragment pose dirs), `alaric-chain-focus`, `alaric-chain-coordinates`. `alaric-copy` and `alaric-count-poses` are helpers.
+`alaric-pool-graph` (graph JSON, `--select` for twice-visited fragments), `alaric-propagate-provenance`, then `alaric-chain --count | -o DIR` (`chains.txt`, `chains.json`, per-fragment pose dirs), `alaric-chain-focus`, `alaric-chain-coordinates`. `alaric-copy`, `alaric-count-poses` and `alaric-rmsd` are helpers (`alaric-rmsd POOL_DIR` writes `rmsd.txt`, or `rmsd.npy` above 100k poses, into the pool dir, taking `DATA/reference.pdb`, `DATA/pdbcode.txt` and the `frag<N>` path component as inputs).
 
 ## Seamless and best-fit
 - The project cache is Alaric's own sigil/checksum scheme. Seamless only computes checksums and canonical JSON; there is no `seamless-run` in project actions.

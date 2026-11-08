@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+"""alaric-rmsd -- RMSD of every pose in a pose dir against the project reference.
+
+A wrapper around ``alaric/rmsd.py`` that derives its inputs from the project:
+
+* pose dir:  the given directory if it holds ``poses-*.arc[.zst]``; otherwise its
+             ``results/`` subdirectory, so an action dir such as ``TEST/frag3``
+             can be passed directly
+* reference: ``DATA/reference.pdb`` (project root = nearest ancestor holding ``DATA/``)
+* fragment:  N from the ``frag<N>`` component of the pose dir path, e.g.
+             ``frag4-anchor-fwd/results`` -> 4 (skipped if the reference holds
+             exactly two residues)
+* excluded fragment-library PDB code: ``DATA/pdbcode.txt``
+
+The result is written inside the pose dir (for an action dir: in its ``results/``): ``rmsd.npy`` (float32) for more than
+100,000 poses, otherwise ``rmsd.txt`` (one value per line, 3 decimals). The path
+of the file written is printed on stdout.
+
+Any argument not recognised here is passed on to ``alaric/rmsd.py``
+(e.g. ``--nprocs``, ``--chunksize``, ``--verify-checksums``).
+"""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+import re
+import sys
+
+import alaric
+
+_ALARIC_DIR = Path(alaric.__file__).resolve().parent
+if str(_ALARIC_DIR) not in sys.path:
+    sys.path.insert(0, str(_ALARIC_DIR))
+
+NPY_THRESHOLD = 100_000  # more poses than this -> rmsd.npy, otherwise rmsd.txt
+FRAG_RE = re.compile(r"(?:^|-)frag(\d+)(?:-|$)")  # same as alaric.middle.resolve
+
+
+class WrapperError(RuntimeError):
+    pass
+
+
+def _project_data_dir(pose_dir: Path) -> Path:
+    from alaric.middle.errors import MiddleError
+    from alaric.middle.project import Project
+
+    try:
+        return Project.discover(pose_dir).data_dir
+    except MiddleError as exc:
+        raise WrapperError(str(exc)) from None
+
+
+def _find_pose_dir(given: Path) -> Path:
+    """The given dir if it holds poses, else its ``results/`` (action dir)."""
+    from poses import discover_organized
+
+    if not given.is_dir():
+        raise WrapperError(f"pose dir not found: {given}")
+    if discover_organized(given):
+        return given
+    results = given / "results"
+    if results.is_dir():
+        if discover_organized(results):
+            return results
+        raise WrapperError(f"no organized poses-*.arc files found in {results}")
+    if results.is_symlink():
+        raise WrapperError(
+            f"{results} is a dangling symlink (result data not in CACHE; download it?)"
+        )
+    raise WrapperError(
+        f"no organized poses-*.arc files found in {given}, and it has no results/ "
+        "subdirectory (action not run yet?)"
+    )
+
+
+def _fragment_from_path(pose_dir: Path) -> int | None:
+    # Look at the path as given first (frag4-x/results is a symlink into CACHE,
+    # whose resolved path no longer carries the action name), innermost first.
+    for part in reversed(pose_dir.absolute().parts):
+        match = FRAG_RE.search(part)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _residue_count(reference: Path) -> int:
+    import numpy as np
+    from parse_pdb import parse_pdb
+
+    atoms = parse_pdb(reference.read_text())
+    models = np.unique(atoms["model"])
+    if len(models) > 1:
+        atoms = atoms[atoms["model"] == models[0]]
+    return len(np.unique(atoms["resid"]))
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="alaric-rmsd",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Other arguments are forwarded to alaric/rmsd.py.",
+    )
+    parser.add_argument("pose_dir", type=Path, help="Organized pose directory (poses-*.arc[.zst]), or an action dir with a results/ subdirectory.")
+    parser.add_argument("--reference", type=Path, help="Override DATA/reference.pdb.")
+    parser.add_argument("--fragment", type=int, metavar="N", help="Override the fragment number.")
+    parser.add_argument(
+        "--exclude",
+        "--pdb-exclude",
+        nargs="+",
+        metavar="PDB",
+        help="Override the excluded PDB code(s) from DATA/pdbcode.txt.",
+    )
+    return parser
+
+
+def plan(args: argparse.Namespace) -> tuple[Path, list[str]]:
+    """Return (output file, argv for rmsd.main)."""
+    from poses import PoseReader
+
+    given: Path = args.pose_dir
+    pose_dir = _find_pose_dir(given)
+    try:
+        nposes = PoseReader.get_nposes(pose_dir)
+    except (OSError, ValueError) as exc:
+        raise WrapperError(str(exc)) from None
+
+    data_dir = None
+    if args.reference is None or args.exclude is None:
+        data_dir = _project_data_dir(given)
+
+    reference = args.reference or data_dir / "reference.pdb"
+    if not reference.is_file():
+        raise WrapperError(f"reference PDB not found: {reference}")
+
+    if args.exclude is not None:
+        exclude = list(args.exclude)
+    else:
+        pdbcode = data_dir / "pdbcode.txt"
+        if not pdbcode.is_file():
+            raise WrapperError(
+                f"excluded PDB code not found: {pdbcode} (use --exclude PDB)"
+            )
+        exclude = [pdbcode.read_text().strip()]
+        if not exclude[0]:
+            raise WrapperError(f"{pdbcode} is empty")
+
+    fragment = args.fragment
+    if fragment is None:
+        fragment = _fragment_from_path(given)
+    if fragment is None and _residue_count(reference) != 2:
+        raise WrapperError(
+            f"cannot derive the fragment from the path {given.absolute()} "
+            "(no 'frag<N>' component) and the reference does not hold exactly two "
+            "residues; use --fragment N"
+        )
+
+    name = "rmsd.npy" if nposes > NPY_THRESHOLD else "rmsd.txt"
+    output = pose_dir / name
+    argv = [str(pose_dir), "--reference", str(reference), "--outputfile", str(output)]
+    if fragment is not None:
+        argv += ["--fragment", str(fragment)]
+    argv += ["--exclude", *exclude]
+    return output, argv
+
+
+def main(argv: list[str] | None = None) -> int:
+    args, passthrough = build_parser().parse_known_args(argv)
+    try:
+        output, rmsd_argv = plan(args)
+    except WrapperError as exc:
+        print(f"alaric-rmsd: error: {exc}", file=sys.stderr)
+        return 2
+
+    import rmsd
+
+    code = rmsd.main(rmsd_argv + passthrough)
+    if code not in (0, None):
+        return int(code)
+    # A leftover file of the other format would be ambiguous next to the new one.
+    for stale in (output.with_suffix(".npy"), output.with_suffix(".txt")):
+        if stale != output and stale.is_file():
+            stale.unlink()
+    print(f"wrote {output}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

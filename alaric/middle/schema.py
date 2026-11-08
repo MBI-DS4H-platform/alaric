@@ -36,6 +36,7 @@ ACTION_SCHEMAS: dict[str, set[str]] = {
     "anchor-refe": {"action", "type", "fragment", "sequence", "exclude", "nucleotide", "ovrmsd", "reference"},
     "grow": {"action", "type", "input", "restrict_input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
     "grow-test": {"action", "type", "input", "restrict_input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd", "conformer"},
+    "score": {"action", "type", "input", "sequence", "exclude", "protein", "nb_kernel"},
     "energy-filter": {"action", "type", "input", "fragment", "sequence", "exclude", "protein", "threshold", "epsilon", "cascade", "min_cascade"},
     "rmsd": {"action", "type", "input", "fragment", "exclude", "reference"},
     "mask": {"action", "type", "input", "score_input", "threshold"},
@@ -50,6 +51,7 @@ REQUIRED: dict[str, set[str]] = {
     "anchor-refe": {"fragment", "sequence", "exclude", "nucleotide", "ovrmsd"},
     "grow": {"input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
     "grow-test": {"input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd", "conformer"},
+    "score": {"input", "sequence", "exclude", "protein"},
     "energy-filter": {"input", "fragment", "sequence", "exclude", "protein", "threshold", "epsilon", "cascade", "min_cascade"},
     "rmsd": {"input", "fragment", "exclude"},
     "mask": {"input", "score_input", "threshold"},
@@ -64,6 +66,7 @@ DEPENDENCY_FIELDS: dict[str, dict[str, str]] = {
     "anchor-refe": {},
     "grow": {"input": POSE, "restrict_input": POSE},
     "grow-test": {"input": POSE, "restrict_input": POSE},
+    "score": {"input": POSE},
     "energy-filter": {"input": POSE},
     "rmsd": {"input": POSE},
     "mask": {"input": POSE, "score_input": SCORE},
@@ -78,6 +81,7 @@ OUTPUT_KIND = {
     "anchor-refe": POSE,
     "grow": POSE,
     "grow-test": POSE,
+    "score": SCORE,
     "energy-filter": POSE,
     "rmsd": SCORE,
     "mask": MASK,
@@ -94,6 +98,7 @@ AUTO_FIELDS = {
     "anchor-refe": {"fragment", "sequence", "exclude", "ovrmsd"},
     "grow": {"fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
     "grow-test": {"fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
+    "score": {"sequence", "exclude", "protein"},
     "energy-filter": {"fragment", "sequence", "exclude", "threshold", "cascade", "min_cascade"},
     "rmsd": {"fragment", "exclude"},
     "mask": {"threshold"},
@@ -177,6 +182,10 @@ def normalize_action(name: str, path: Path, data: dict[str, Any]) -> ActionSpec:
         if conformer <= 0:
             raise SchemaError(f"{path}: conformer must be positive")
         data["conformer"] = conformer
+    if action == "score":
+        data.setdefault("nb_kernel", "compiled")
+        if not isinstance(data["nb_kernel"], str) or data["nb_kernel"] not in {"compiled", "jax"}:
+            raise SchemaError(f"{path}: nb_kernel must be compiled or jax")
     if action == "apply-mask":
         selector = data["mask"]
         if type(selector) is not int or selector not in {1, 2}:

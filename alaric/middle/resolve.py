@@ -313,6 +313,11 @@ def resolve_action(
         p["fragment"] = resolve_fragment(p["fragment"], spec.name)
     if action in {"anchor", "anchor-test", "anchor-refe", "grow", "grow-test", "energy-filter"} and p.get("sequence") == "auto":
         p["sequence"] = resolve_sequence(project, int(p["fragment"]))
+    if action == "score" and p.get("sequence") == "auto":
+        dep = resolved_by_name.get(str(p["input"]))
+        if dep is None:
+            raise ResolveError(f"{spec.name}: score sequence:auto needs resolved input")
+        p["sequence"] = final_sequence(dep)
     if p.get("exclude") == "auto" or "exclude" in p:
         p["exclude"] = resolve_exclude(project, p["exclude"])
     if "protein" in p:

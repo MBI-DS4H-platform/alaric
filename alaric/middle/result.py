@@ -44,9 +44,28 @@ def clean(action_dir: str | Path = ".", *, all_state: bool = False) -> None:
         _checksum(project, sigil).unlink(missing_ok=True)
 
 
+def _link_results(action_path: Path, result: Path) -> None:
+    """Point <action>/results at the local result dir, as run.sh does."""
+    if not result.is_dir():
+        return
+    link = action_path / "results"
+    if link.exists() and not link.is_symlink():
+        return
+    target = os.path.relpath(result, action_path)
+    if link.is_symlink() and os.readlink(link) == target:
+        return
+    link.unlink(missing_ok=True)
+    link.symlink_to(target)
+
+
 def check(action_dir: str | Path = ".") -> None:
     project = Project.discover(action_dir)
     action = project.get_action_dir(action_dir)
+    _check(project, action)
+    _link_results(action.path, _local_result(project, _sigil(action.path)))
+
+
+def _check(project: Project, action) -> None:
     sigil = _sigil(action.path)
     result_txt = action.path / "result.txt"
     local_checksum = _checksum(project, sigil)
@@ -142,9 +161,6 @@ def _download(action_dir: str | Path, *, provenance_only: bool = False) -> None:
     else:
         tmp.rename(result)
     check(action_dir)
-    link = action.path / "results"
-    link.unlink(missing_ok=True)
-    link.symlink_to(os.path.relpath(result, action.path))
 
 
 def upload(action_dir: str | Path = ".") -> None:

@@ -49,5 +49,8 @@ stage4-best-fit-miniplan.md
 stage4-thresholds-howto.md
     Explanation of how Alaric's ovRMSD/cRMSD thresholds are derived: the best-fit, pairs and bases command chain on tests/1b7f, the meaning of each table, and the verified rule (table value rounded up to 0.01, no maximum). It also covers Seamless status, clipping as a pure subset, and gotchas.
 
+state-graph-freshness-plan.md
+    Draft (2026-11-07). Work package W10: replace preparic's hand-designed freshness echoes with one generic rule over the Seamless state graph (node complete, held result checksum equals the snapshot's, and every upstream edit cell's held, announced and snapshot checksums agree, with no pending write). It records the verified graph ancestry, the biounit gap in the fit echo, decisions F1–F7 for the author, the backend/frontend changes, a shadow phase, tests, and the contract and export-plan amendments.
+
 test-anchor-miniplan.md
     Plan for offering Alaric's "anchor-refe" ovRMSD mode in preparic as an alternative to the Gaussian filter, reusing stage 4's bases thresholds and editable table, with a separate anchor_modes cell. It covers the strict-greater rounding fix, cheap server-side threshold validation, and what the export stage must emit.

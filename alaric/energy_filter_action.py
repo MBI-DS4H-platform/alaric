@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Run one grid-assisted, gridless-correct energy-filter action on a pose pool."""
+"""Drive compiled minfor filter passes and publish a filtered pose pool."""
 from __future__ import annotations
 
 import argparse
-import importlib.util
+import base64
 import json
 import math
 from pathlib import Path
@@ -22,20 +22,194 @@ for _path in (str(_ALARIC), str(_ROOT), str(_ATTRACT_UTIL), str(_ATTRACT)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from energy_filter import cascade_filter  # noqa: E402
-from library import config  # noqa: E402
-from parse_pdb import parse_pdb  # noqa: E402
+from energy_filter import _validate_minimum, _validate_steps  # noqa: E402
 
 
-def _load_reducer():
-    path = _ROOT / "util" / "reduce-npy.py"
-    spec = importlib.util.spec_from_file_location("energy_filter_reduce_npy", path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load ATTRACT reducer {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+def _prepare_minfor_inputs(pose_dir, protein_pdb, sequence, exclude, work, *, pose_range=None, pose_indices=None):
+    """Prepare the same receptor, library and pose arrays consumed by score.sh.
+
+    ``pose_range`` (1-based, inclusive) or ``pose_indices`` (an NPY file of 0-based global
+    ids) restricts the converted poses; the minfor arrays are then indexed locally.
+    """
+    commands = [
+        [sys.executable, str(_ALARIC / "parse_pdb.py"), str(protein_pdb), str(work / "receptor-ppdb.npy")],
+        [sys.executable, str(_ROOT / "util" / "reduce-npy.py"), str(work / "receptor-ppdb.npy"), str(work / "receptor")],
+        [sys.executable, str(_ROOT / "util" / "get-reduced-library.py"), sequence, str(work / "ligand-ensemble.npy"),
+         *[argument for code in exclude for argument in ("-x", code)]],
+        [sys.executable, str(_ROOT / "util" / "ligand-atomtypes.py"), "--sequence", sequence, str(work / "ligand-atomtypes.npy")],
+        [sys.executable, str(_ALARIC / "convert_poses.py"), "--pose-dir", str(pose_dir), "--sequence", sequence,
+         "--output-prefix", str(work / "poses")],
+    ]
+    commands[-1].extend(argument for code in exclude for argument in ("--pdb-exclude", code))
+    if pose_range is not None:
+        commands[-1].extend(["--pose-range", str(pose_range[0]), str(pose_range[1])])
+    if pose_indices is not None:
+        commands[-1].extend(["--pose-indices", str(pose_indices)])
+    for command in commands:
+        subprocess.run(command, check=True)
+
+
+def _cascade_minfor(nposes, steps, minimum, invoke):
+    """Synchronize whole-action cascade counts between minfor subprocesses.
+
+    None represents the entire original pose array, avoiding a full-size index
+    array before the first discriminative filter has reduced the candidate set.
+    """
+    pending, pending_count = None, nposes
+    kept, precision = [], []
+    precision_count = 0
+    stats = {"grid_counts": [], "gridless_count": 0, "precision_fallback_counts": [],
+             "precision_fallback_count": 0, "cascade_exit": None}
+    for index, step in enumerate(steps):
+        unresolved = pending_count + precision_count
+        if not pending_count or unresolved < minimum:
+            stats["cascade_exit"] = {"before_step": index, "undecided": unresolved, "min_cascade": minimum}
+            break
+        stats["grid_counts"].append(int(pending_count))
+        white, grey, unsafe = invoke(pending, step)
+        kept.append(white)
+        exact_ids = grey[unsafe]
+        precision.append(exact_ids)
+        precision_count += len(exact_ids)
+        stats["precision_fallback_counts"].append(int(len(exact_ids)))
+        stats["precision_fallback_count"] += int(len(exact_ids))
+        pending = grey[~unsafe]
+        pending_count = len(pending)
+        unresolved = pending_count + precision_count
+        if unresolved < minimum:
+            stats["cascade_exit"] = {"after_step": index, "undecided": unresolved, "min_cascade": minimum}
+            break
+    if pending is None:
+        exact_ids, exact_count = None, nposes
+    else:
+        exact_ids = np.sort(np.concatenate([pending, *precision]))
+        exact_count = len(exact_ids)
+    stats["gridless_count"] = int(exact_count)
+    if exact_count:
+        white, grey, _ = invoke(exact_ids, None)
+        if len(grey):
+            raise ValueError("zero-tolerance gridless filtering returned grey poses")
+        kept.append(white)
+    return (np.sort(np.concatenate(kept)) if kept else np.empty(0, dtype=np.uint64)), stats
+
+
+def _validate_settings(threshold, epsilon, cascade, min_cascade, exclude, nprocs, chunk_poses):
+    """Validate the action parameters shared by whole-action and chunked runs."""
+    if epsilon != 15.0:
+        raise ValueError("energy-filter requires epsilon: 15")
+    if nprocs <= 0 or chunk_poses <= 0:
+        raise ValueError("nprocs and chunk_poses must be positive")
+    threshold = float(threshold)
+    if not math.isfinite(threshold):
+        raise ValueError("energy threshold must be finite")
+    steps = _validate_steps(cascade or [])
+    minimum = _validate_minimum(min_cascade)
+    exclude = [str(code).lower() for code in (exclude or [])]
+    return threshold, steps, minimum, exclude
+
+
+class _MinforInvoker:
+    """Run one minfor filter pass over prepared arrays in ``work``.
+
+    ``indices`` are 0-based into the prepared arrays (None means all of them). Grids are
+    reused within this invoker by (protein range, plateau distance, neighbour distance).
+    """
+
+    def __init__(self, work: Path, nposes: int, *, protein_range: str, epsilon: float,
+                 threshold: float, chunk_poses: int, prefix: str = "filter"):
+        self.work, self.nposes = work, nposes
+        self.protein_range, self.epsilon, self.threshold = protein_range, epsilon, threshold
+        self.chunk_poses, self.prefix = chunk_poses, prefix
+        self.grid_cache: dict[tuple, Path] = {}
+        self.count = 0
+
+    def __call__(self, indices, step):
+        work = self.work
+        self.count += 1
+        prefix = work / f"{self.prefix}-{self.count}"
+        white_path = prefix.with_suffix(".white.npy")
+        grey_path = prefix.with_suffix(".grey.npy")
+        report_path = prefix.with_suffix(".json")
+        command = [
+            sys.executable, str(_ATTRACT_UTIL / "minfor.py"),
+            "--filter", "--oracle", "jax", "--nb-kernel", "compiled",
+            "--score-mode", "bulk", "--no-conformer-grouping",
+            "--input-rotvec", str(work / "poses.rotvec.npy"),
+            "--input-conformers", str(work / "poses.conformers.npy"),
+            "--input-world-centered",
+            "--receptor-coordinates", str(work / "receptor-coor.npy"),
+            "--receptor-atomtypes", str(work / "receptor-atomtypes.npy"),
+            "--ligand-ensemble", str(work / "ligand-ensemble.npy"),
+            "--ligand-atomtypes", str(work / "ligand-atomtypes.npy"),
+            "--attract-par-npz", str(_ATTRACT / "attract-original" / "attract-par.npz"),
+            "--epsilon", str(self.epsilon), "--energy-threshold", str(self.threshold),
+            "--energy-tolerance", str(0.0 if step is None else step["max_error"]),
+            "--output-white", str(white_path), "--output-grey", str(grey_path),
+            "--filter-report", str(report_path), "--score-batch-size", str(self.chunk_poses),
+        ]
+        if indices is not None:
+            indices_path = prefix.with_suffix(".input.npy")
+            np.save(indices_path, indices, allow_pickle=False)
+            command.extend(["--pose-indices", str(indices_path)])
+        if step is None:
+            command.append("--no-grid")
+            label = "gridless"
+        else:
+            key = (str(self.protein_range), float(step["plateau_distance"]), float(step["neighbour_distance"]))
+            grid_path = self.grid_cache.setdefault(key, work / f"grid-{len(self.grid_cache)}.npz")
+            if grid_path.exists():
+                command.extend(["--grid", str(grid_path)])
+            else:
+                command.extend(["--plateaudis", str(key[1]), "--neighbourdis", str(key[2]),
+                                "--save-grid", str(grid_path)])
+            command.append("--filter-precision-safe")
+            label = f"grid {key[1]:g}/{key[2]:g}"
+        count = self.nposes if indices is None else len(indices)
+        print(f"Energy filter: {label}, {count} undecided poses", file=sys.stderr, flush=True)
+        # minfor reports score/filter progress and errors on stderr, as score.sh does.
+        subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
+        white = np.load(white_path, allow_pickle=False)
+        grey = np.load(grey_path, allow_pickle=False)
+        for values in (white, grey):
+            if values.ndim != 1 or values.dtype != np.dtype("uint64") or np.any(values >= self.nposes):
+                raise ValueError("minfor returned invalid pose indices")
+        report = json.loads(report_path.read_text())
+        if step is None:
+            precision = np.zeros(len(grey), dtype=bool)
+        else:
+            packed = base64.b64decode(report["precision_fallback_bits"], validate=True)
+            if len(packed) != (len(grey) + 7) // 8:
+                raise ValueError("minfor returned invalid precision routing metadata")
+            precision = np.unpackbits(np.frombuffer(packed, dtype=np.uint8), count=len(grey)).astype(bool)
+            if np.count_nonzero(precision) != report["precision_fallback_count"]:
+                raise ValueError("minfor precision routing count does not match its metadata")
+        return white, grey, precision
+
+
+def _publish(pose_dir, protein_pdb, output_dir, kept_ids, stats, work, *, epsilon, threshold,
+             fragment, protein_range, nposes, invocations, nprocs, chunk_poses):
+    """Select the kept poses into ``output_dir`` and write provenance and statistics."""
+    index_path = work / "keep.npy"
+    np.save(index_path, kept_ids, allow_pickle=False)
+    subprocess.run([
+        sys.executable, str(_ALARIC / "select-poses.py"), str(pose_dir), str(index_path),
+        str(output_dir), "--base", "0", "--force", "--compress",
+        "--nprocs", str(nprocs), "--chunk-poses", str(chunk_poses),
+    ], check=True)
+    from npy_io import save_npy
+
+    save_npy(output_dir / "provenance.npy", kept_ids, compress=True)
+    stats.update({
+        "schema": 1, "epsilon": epsilon, "threshold": threshold,
+        "fragment": int(fragment), "protein_range": str(protein_range),
+        "input_count": int(nposes), "kept_count": int(len(kept_ids)),
+        "protein": protein_pdb.name, "backend": "compiled", "frontend": "minfor",
+        "minfor_invocations": invocations,
+    })
+    (output_dir / "energy-filter-stats.json").write_text(
+        json.dumps(stats, sort_keys=True, indent=2, allow_nan=False) + "\n", encoding="utf-8"
+    )
+    return stats
 
 
 def run_energy_filter(
@@ -54,189 +228,29 @@ def run_energy_filter(
     nprocs: int = 1,
     chunk_poses: int = 10_000,
 ) -> dict[str, Any]:
-    """Score one fragment/range and write the passing poses in original order."""
-    pose_dir = Path(pose_dir)
-    protein_pdb = Path(protein_pdb)
-    output_dir = Path(output_dir)
-    if epsilon != 15.0:
-        raise ValueError("energy-filter requires epsilon: 15")
-    if nprocs <= 0 or chunk_poses <= 0:
-        raise ValueError("nprocs and chunk_poses must be positive")
-    exclude = [str(code).lower() for code in (exclude or [])]
-
-    from convert_poses import convert_arc_dir  # noqa: PLC0415
-    from jax_scorer import JaxScoreOracle  # noqa: PLC0415
-    from minfor import rotvec_world_to_attr_np  # noqa: PLC0415
-    from grid_generator import generate_grid  # noqa: PLC0415
-    from nb_kernel.forcefields.nonbon8.params import load_params  # noqa: PLC0415
-    from library import config  # noqa: PLC0415
-    reducer = _load_reducer()
-
-    reduce_rules = reducer.read_forcefield(_ALARIC / "reduce.dat")
-    rec_coordinates, rec_atomtypes = reducer.reduce_ppdb(
-        parse_pdb(protein_pdb.read_text(encoding="utf-8")), reduce_rules
-    )
-    if len(rec_coordinates) == 0:
-        raise ValueError(f"{protein_pdb}: reduction produced no ATTRACT beads")
-    libraries, _ = config(verify_checksums=False)
-    if sequence not in libraries:
-        raise ValueError(f"sequence {sequence!r} is not in the fragment library")
-    factory = libraries[sequence]
-    factory.load_rotaconformers()
-    pdb_filter: str | list[str] | None
-    if len(exclude) == 1:
-        pdb_filter = exclude[0]
-    elif exclude:
-        pdb_filter = exclude
-    else:
-        pdb_filter = None
-    ligand_library = factory.create(pdb_filter, with_rotaconformers=True)
-    ligand_coordinates = ligand_library.reduce().astype(np.float64, copy=False)
-    attract_template = np.load(
-        _ROOT / "fraglib" / "templates" / "ATTRACT" / f"{sequence}-ppdb.npy",
-        allow_pickle=False,
-    )
-    ligand_atomtypes = np.asarray(attract_template["occupancy"], dtype=np.int32)
-    if ligand_coordinates.shape[1] != len(ligand_atomtypes):
-        raise ValueError("ligand reduced coordinates and ATTRACT atom types do not match")
-    pivot = np.mean(ligand_coordinates[0], axis=0).astype(np.float64, copy=False)
-    world_dofs, conformers = convert_arc_dir(
-        pose_dir, None, sequence, excluded_pdb_codes=exclude
-    )
-    if len(world_dofs) != len(conformers):
-        raise ValueError("pose conversion returned mismatched arrays")
-    atom_dofs = rotvec_world_to_attr_np(world_dofs, pivot)
-    parameter_path = _ATTRACT / "attract-original" / "attract-par.npz"
-    ff_params = load_params(str(parameter_path))
-    ffelec = math.sqrt(332.053986 / epsilon)
-
-    def make_oracle(grid=None, *, grid_free: bool = False):
-        return JaxScoreOracle(
-            backend="numpy",
-            energy_only=True,
-            grid_free=grid_free,
-            epsilon=epsilon,
-            receptor_ensemble=rec_coordinates,
-            receptor_atomtypes=rec_atomtypes,
-            receptor_charges=np.zeros(len(rec_coordinates), dtype=np.float64),
-            ligand_ensemble=ligand_coordinates,
-            ligand_atomtypes=ligand_atomtypes,
-            ligand_charges=np.zeros(len(ligand_atomtypes), dtype=np.float64),
-            grid_object=grid,
-            attract_par_npz=str(parameter_path),
-            lig_pivot=pivot,
-            dof_type="rotvec",
-        )
-
-    def score_ids(oracle, ids: np.ndarray) -> np.ndarray:
-        output: list[np.ndarray] = []
-        for start in range(0, len(ids), chunk_poses):
-            batch = ids[start : start + chunk_poses]
-            energies, _gradients = oracle.score_batch(
-                np.ones(len(batch), dtype=np.int32),
-                atom_dofs[batch],
-                conformers=conformers[batch],
-            )
-            output.append(np.asarray(energies, dtype=np.float64))
-        if not output:
-            return np.empty(0, dtype=np.float64)
-        return np.concatenate(output)
-
-    # The reusable grid is a receptor/range product, independent of the RNA
-    # fragment.  Use a universal ligand alphabet so the exact key is the
-    # contract's (range, plateau distance, neighbour distance) tuple.
-    grid_oracles: dict[tuple[str, float, float], Any] = {}
-
-    def grid_score(ids: np.ndarray, step: dict[str, Any]) -> np.ndarray:
-        key = (
-            str(protein_range),
-            float(step["plateau_distance"]),
-            float(step["neighbour_distance"]),
-        )
-        oracle = grid_oracles.get(key)
-        if oracle is None:
-            grid = generate_grid(
-                rec_coordinates,
-                rec_atomtypes,
-                np.zeros(len(rec_coordinates), dtype=np.float64),
-                ff_params,
-                "nonbon8",
-                ffelec,
-                plateaudis=key[1],
-                neighbourdis=key[2],
-                lig_atomtypes=None,
-                return_gradients=False,
-            )
-            oracle = make_oracle(grid)
-            grid_oracles[key] = oracle
-        return score_ids(oracle, np.asarray(ids, dtype=np.int64))
-
-    gridless_oracle = make_oracle(grid_free=True)
-    def gridless_score(ids: np.ndarray) -> np.ndarray:
-        return score_ids(gridless_oracle, np.asarray(ids, dtype=np.int64))
-
-    ids = np.arange(len(atom_dofs), dtype=np.int64)
-    kept_ids, stats = cascade_filter(
-        ids,
-        threshold=threshold,
-        cascade=cascade or [],
-        min_cascade=min_cascade,
-        grid_score=grid_score,
-        gridless_score=gridless_score,
+    """Run compiled minfor filters and retain passing poses in original order."""
+    pose_dir, protein_pdb, output_dir = Path(pose_dir), Path(protein_pdb), Path(output_dir)
+    threshold, steps, minimum, exclude = _validate_settings(
+        threshold, epsilon, cascade, min_cascade, exclude, nprocs, chunk_poses
     )
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="energy-filter-") as temporary:
-        index_path = Path(temporary) / "keep.npy"
-        np.save(index_path, kept_ids.astype(np.uint64, copy=False))
-        subprocess.run(
-            [
-                sys.executable,
-                str(_ALARIC / "select-poses.py"),
-                str(pose_dir),
-                str(index_path),
-                str(output_dir),
-                "--base",
-                "0",
-                "--force",
-                "--compress",
-                "--nprocs",
-                str(nprocs),
-                "--chunk-poses",
-                str(chunk_poses),
-            ],
-            check=True,
-        )
-    # select-poses publishes request positions as order-array.npy. Here the
-    # request is already the ordered list of source pose IDs, so publish the
-    # energy-filter lineage using those original IDs for middle-level chaining.
-    from npy_io import save_npy  # noqa: PLC0415
-
-    save_npy(
-        output_dir / "provenance.npy",
-        kept_ids.astype(np.uint64, copy=False),
-        compress=True,
-    )
-    stats.update(
-        {
-            "schema": 1,
-            "epsilon": epsilon,
-            "threshold": threshold,
-            "fragment": int(fragment),
-            "protein_range": str(protein_range),
-            "input_count": int(len(ids)),
-            "kept_count": int(len(kept_ids)),
-            "protein": protein_pdb.name,
-        }
-    )
-    (output_dir / "energy-filter-stats.json").write_text(
-        json.dumps(stats, sort_keys=True, indent=2, allow_nan=False) + "\n",
-        encoding="utf-8",
-    )
-    return stats
+        work = Path(temporary)
+        _prepare_minfor_inputs(pose_dir, protein_pdb, sequence, exclude, work)
+        poses = np.load(work / "poses.rotvec.npy", mmap_mode="r", allow_pickle=False)
+        nposes = len(poses)
+        del poses
+        invoke = _MinforInvoker(work, nposes, protein_range=protein_range, epsilon=epsilon,
+                                threshold=threshold, chunk_poses=chunk_poses)
+        kept_ids, stats = _cascade_minfor(nposes, steps, minimum, invoke)
+        return _publish(pose_dir, protein_pdb, output_dir, kept_ids, stats, work,
+                        epsilon=epsilon, threshold=threshold, fragment=fragment,
+                        protein_range=protein_range, nposes=nposes, invocations=invoke.count,
+                        nprocs=nprocs, chunk_poses=chunk_poses)
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+def add_filter_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    """The action parameters shared by the whole-action and chunked command lines."""
     parser.add_argument("--pose-dir", required=True, type=Path)
     parser.add_argument("--protein", required=True, type=Path)
     parser.add_argument("--sequence", required=True)
@@ -246,9 +260,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--epsilon", required=True, type=float)
     parser.add_argument("--cascade", required=True, help="JSON list of grid steps")
     parser.add_argument("--min-cascade", required=True, type=int)
-    parser.add_argument("--pdb-exclude", action="append", default=[])
+    parser.add_argument("--pdb-exclude", action="extend", nargs="+", default=[])
     parser.add_argument("--nprocs", type=int, default=1)
     parser.add_argument("--chunk-poses", type=int, default=10_000)
+    return parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = add_filter_arguments(argparse.ArgumentParser(description=__doc__))
     parser.add_argument("--output", required=True, type=Path)
     return parser
 

@@ -47,7 +47,7 @@ _ALARIC_DIR = Path(__file__).resolve().parents[1]
 if str(_ALARIC_DIR) not in sys.path:
     sys.path.insert(0, str(_ALARIC_DIR))
 
-from npy_io import find_npy, load_npy  # noqa: E402
+from npy_io import find_npy, iter_npy_chunks, load_npy, read_npy_header  # noqa: E402
 from poses import (  # noqa: E402
     DEFAULT_BUCKET_SIZE,
     PoseReader,
@@ -143,6 +143,41 @@ def _join(left_keys, left_vals, right_keys, right_vals):
 # -- provenance composition -----------------------------------------------
 
 
+def _select_map_rows(path: Path, pose_ids: np.ndarray) -> np.ndarray:
+    """Keep only map rows whose child occurs in this provenance route."""
+    keys = np.unique(pose_ids)
+    selected = []
+    if not len(keys):
+        return np.empty((0, 2), dtype=np.int64)
+    for pairs in iter_npy_chunks(path):
+        # Search the small route, rather than sorting the entire merge map.
+        positions = np.searchsorted(keys, pairs[:, 1])
+        np.minimum(positions, len(keys) - 1, out=positions)
+        matches = keys[positions] == pairs[:, 1]
+        if np.any(matches):
+            selected.append(pairs[matches])
+    return np.concatenate(selected) if selected else np.empty((0, 2), dtype=np.int64)
+
+
+def _take_provenance(path: Path, pose_ids: np.ndarray) -> np.ndarray:
+    """Gather a dense provenance route without decompressing it into RAM."""
+    shape, dtype = read_npy_header(path)
+    if not len(pose_ids):
+        return np.empty(0, dtype=dtype)
+    if pose_ids.min() < 0 or pose_ids.max() >= shape[0]:
+        raise IndexError(f"provenance pose id out of range in {path}")
+    order = np.argsort(pose_ids, kind="stable")
+    indices = pose_ids[order]
+    result = np.empty(len(indices), dtype=dtype)
+    start = 0
+    for chunk in iter_npy_chunks(path):
+        stop = start + len(chunk)
+        lo, hi = np.searchsorted(indices, [start, stop])
+        result[order[lo:hi]] = chunk[indices[lo:hi] - start]
+        start = stop
+    return result
+
+
 @dataclass
 class Edges:
     """Bipartite edges between a lower-fragment pool and a higher-fragment pool."""
@@ -221,7 +256,7 @@ class ChainGraph:
             for name in self._filter_provenance_arrays(pool)
         )
 
-    def _load_step_array(self, step: dict) -> np.ndarray:
+    def _step_array_path(self, step: dict) -> Path:
         # The pool graph records the *logical* array name; on disk it may be the
         # zstd-compressed form, which is what the pose-producing actions now write.
         pool = step["pool"]
@@ -229,9 +264,7 @@ class ChainGraph:
         path = self._pool_dir(pool) / name
         found = find_npy(path)
         if found is not None:
-            # Compressed arrays cannot be mapped; they are read whole, which costs no
-            # more than the int64 copy _compose makes of them either way.
-            return load_npy(found, mmap=True)
+            return found
         # The array is unavailable. Follow the user's rule: a pool is walkable as
         # long as it is materialized or still carries filter provenance; if it is
         # neither, the chain provenance cannot be composed -> give up.
@@ -322,7 +355,7 @@ class ChainGraph:
         cur = rep_ids.copy()
         for step in path:
             try:
-                arr = self._load_step_array(step)
+                array_path = self._step_array_path(step)
             except ChainError as exc:
                 # An intermediate array is gone, which is the normal reason to have
                 # propagated provenance in the first place -- so if a file under the
@@ -333,11 +366,10 @@ class ChainGraph:
                 raise ChainError(f"{exc}\n{hint}") from exc
             if step["orientation"].startswith("row="):
                 # dense: arr[this] = parent
-                prov = np.asarray(arr, dtype=np.int64)
-                cur = prov[cur]
+                cur = _take_provenance(array_path, cur)
             else:
                 # pairs: cols (parent, this); map this -> parent (1:many)
-                pairs = np.asarray(arr, dtype=np.int64)
+                pairs = _select_map_rows(array_path, cur)
                 parents, reps = _join(pairs[:, 1], pairs[:, 0], cur, rep_ids)
                 cur, rep_ids = parents, reps
         return rep_ids, cur

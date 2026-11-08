@@ -175,6 +175,38 @@ def open_npy_mmap(path: str | Path, *, tempdir: str | Path | None = None):
         tmp_path.unlink(missing_ok=True)
 
 
+def iter_npy_chunks(path: str | Path, *, rows: int = 262_144):
+    """Read numeric array rows in bounded chunks, including compressed files.
+
+    Chunks own their storage. Fortran arrays use a temporary mapping because
+    their rows are not contiguous in the file.
+    """
+    if rows <= 0:
+        raise ValueError("rows must be positive")
+    path = Path(path)
+    with _open_stream(path) as stream:
+        shape, fortran_order, dtype = _read_header(stream, path)
+        if not shape:
+            raise ValueError(f"{path}: expected an array with a row dimension")
+        if not fortran_order:
+            for start in range(0, shape[0], rows):
+                chunk = np.empty((min(rows, shape[0] - start), *shape[1:]), dtype=dtype)
+                target = memoryview(chunk).cast("B")
+                position = 0
+                while position < len(target):
+                    count = stream.readinto(target[position:])
+                    if not count:
+                        raise ValueError(f"truncated .npy array: {path}")
+                    position += count
+                yield chunk
+            if stream.read(1):
+                raise ValueError(f"trailing data after .npy array: {path}")
+            return
+    with open_npy_mmap(path) as array:
+        for start in range(0, len(array), rows):
+            yield np.array(array[start : start + rows])
+
+
 # Filesystem request size for a range-read array. Consumers ask for whatever range
 # they are working on; the reader fetches at least this much, so the request size seen
 # by the filesystem does not follow the caller's chunk size. One buffer per reader per

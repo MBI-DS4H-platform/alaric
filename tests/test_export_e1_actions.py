@@ -175,6 +175,25 @@ def test_single_identity_equals_same_pool_intersection(rows, split, tmp_path):
     assert not (single / "map-2.npy.zst").exists()
 
 
+@pytest.mark.parametrize("split", [None, 2, 4])
+def test_single_identity_maps_every_duplicate_to_its_pose(tmp_path, split):
+    # Duplicates are a pose's alternative parents: alaric-chain needs all of them, so
+    # map-1 must hold one row per *input* pose, not one per unique output pose.
+    source, single = tmp_path / "source", tmp_path / "single"
+    # _write_pool needs rows grouped by translation; the splits put duplicates in two files.
+    rows = [(0,0,(0,0,0)), (3,3,(0,0,0)), (0,0,(0,0,0)), (1,1,(1,0,0)), (1,1,(1,0,0)),
+            (1,1,(1,0,0)), (2,2,(17,0,0))]
+    _write_pool(source, rows, split=split)
+    manifest = identity_filter.run_identity_filter(source, None, single)
+    inputs, outputs = _records(source), _records(single)
+    assert sorted(inputs) == sorted(rows)
+    mapping = load_npy(single / "map-1.npy").astype(np.int64)
+    assert len(outputs) == len(set(rows)) == 4
+    assert sorted(mapping[:, 0].tolist()) == list(range(len(inputs)))
+    assert all(inputs[parent] == outputs[child] for parent, child in mapping.tolist())
+    assert manifest["map_1_rows"] == len(inputs)
+
+
 def test_single_identity_reads_each_source_file_once(tmp_path, monkeypatch):
     source = tmp_path / "source"
     _write_pool(source, [(0,0,(0,0,0)), (1,1,(1,0,0)), (1,1,(1,0,0)), (2,2,(17,0,0))], split=2)

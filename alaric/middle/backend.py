@@ -74,6 +74,10 @@ def exclude_args(values: list[str], flag: str = "--pdb-exclude") -> str:
     return " ".join([q(flag), *[q(v) for v in values]])
 
 
+def score_exclude_args(values: list[str]) -> str:
+    return " ".join(f"-x {q(v)}" for v in values)
+
+
 def python_bin() -> str:
     return '"${PYTHON:-python}"'
 
@@ -141,6 +145,18 @@ def conformer_range_args(p: dict[str, Any]) -> str:
         conformer = q(p["conformer"])
         return f"--conformer-range {conformer} {conformer}"
     return f"--conformer-range 1 {q(p['nconformers'])}"
+
+
+def score_concat_command(alaric_dir: str, output_dir: str, chunks_dir: str, location: str) -> str:
+    lines: list[str] = []
+    if location == "remote":
+        lines.append(f'export TMPDIR="{SCRATCH_EXPR}"')
+    lines.append(
+        f"{python_bin()} {alaric_dir}/score_concat.py {shell_path(chunks_dir)} "
+        f"{shell_path(f'{output_dir}/score.npy')} --nposes \"$TOTAL\" --nchunks "
+        + "{{ nchunks }}"
+    )
+    return "\n".join(lines)
 
 
 def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str, location: str) -> dict[str, Any]:
@@ -225,6 +241,21 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
                 "organize_command": organize_command(alaric_dir, output_dir, location),
             }
         )
+    elif action.action == "score":
+        chunks_dir = f"{output_dir.removesuffix('.partial')}-CHUNKS"
+        context.update(
+            {
+                "input_result_path": shell_path(dep_result_path(p["input"], location)),
+                "input_result_python": python_path(dep_result_path(p["input"], location)),
+                "sequence": q(p["sequence"]),
+                "protein_path": data_file_path(p["__protein"], location),
+                "nb_kernel": q(p.get("nb_kernel", "compiled")),
+                "score_exclude_args": score_exclude_args(p.get("exclude", [])),
+                "score_output_path": shell_path(f"{output_dir}/score.npy"),
+                "score_chunks_path": shell_path(chunks_dir),
+                "score_concat_command": score_concat_command(alaric_dir, output_dir, chunks_dir, location),
+            }
+        )
     elif action.action == "energy-filter":
         cascade_json = json.dumps(p["cascade"], separators=(",", ":"))
         context.update(
@@ -242,6 +273,8 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
                 "nprocs": q(p.get("nprocs", 1)),
                 "chunk_poses": q(p.get("chunk_poses", 10000)),
                 "output_path": shell_path(output_dir),
+                # Per-chunk cascade records of the chunk deployers (see energy_filter_chunk.py).
+                "chunks_path": shell_path(f"{output_dir.removesuffix('.partial')}-CHUNKS"),
             }
         )
     elif action.action == "rmsd":

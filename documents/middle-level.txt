@@ -63,10 +63,32 @@ values are rejected by the schema.
 
 ## rmsd
 
-This is a scoring action. This action dir can only be a score_input. Generates not poses but a 1D score.npy file
-The reference is not provided, it must be present as ../DATA/reference.pdb
+This scoring action writes one RMSD value per input pose to a 1D `score.npy` file.
+The reference defaults to `DATA/reference.pdb`.
+
+input: name of a pose action dir
 fragment, exclude: see "anchor"
-input: frag4-fwd-filtered . Name of action dir
+
+
+## score
+
+This scoring action writes one ATTRACT energy per input pose to a 1D `score.npy` file.
+It uses the historical JAX score oracle, with a 10 Å plateau and 12 Å neighbour grid by
+default, and keeps the selected nonbonded kernel in the action parameters. `nb_kernel`
+defaults to `compiled`; the other supported value is `jax`. It returns grid-score energies;
+`energy-filter` separately uses its cascade to decide a strict gridless threshold.
+`sequence:auto` follows the input action's resolved sequence. `protein:auto` selects
+`DATA/protein-aa.pdb`; an explicit protein name selects `DATA/NAME-aa.pdb`.
+`exclude:auto` reads the lowercase PDB code from `DATA/pdbcode.txt`.
+
+input: name of a pose action dir
+sequence: GU or auto
+exclude: 1b7f or auto
+protein: protein or a DATA protein name, or auto
+nb_kernel: compiled (default) or jax
+
+Local and remote chunk deployers split the input into global, 1-based pose ranges and
+concatenate the chunk arrays in input order. The final score array remains float32.
 
 
 ## energy-filter
@@ -75,6 +97,15 @@ Scores one pose input against exactly one protein range and retains poses whose 
 energy is strictly below the numeric threshold. The grid cascade is an accelerator; poses
 still in the uncertainty band are decided by gridless scoring. Repeated ranges are separate
 energy-filter actions connected in sequence, so the result is an AND across ranges.
+
+The runtime prepares score.sh-compatible inputs once, then invokes minfor.py in compiled
+filter mode for each cascade step and the final gridless pass. The default cascade uses
+two grid passes (5/7 and 10/12 Å) and a gridless pass; resolved poses and steps below
+min_cascade are skipped. minfor compares float64 energies and reports progress on stderr.
+Each pass returns 0-based uint64 white/grey pose indices instead of a dense energy array
+or boolean mask. White means E < threshold - max_error; grey includes the uncertainty
+band, with the upper boundary rejected. Precision-unsafe grid values are reserved for
+the gridless pass. The final pass uses zero tolerance and strict E < threshold.
 
 input: name of a pose action dir
 fragment: 5 or auto (read from dirname "frag5-X")
@@ -90,6 +121,15 @@ Grid instances are reused within one energy-filter action by the tuple
 (protein range, plateau distance, neighbour distance). The runtime is service-free; it does
 not promise grid reuse across action processes or restarts.
 
+Local and remote chunk deployers split the input into global, 1-based pose ranges
+(energy_filter_chunk.py). min_cascade still counts undecided poses over the whole action:
+each chunk speculatively runs every grid step and the gridless pass on its own range and
+records the decided pose ids under <result>-CHUNKS; organize.sh replays the whole-action
+cascade from those records and gridless-scores only the poses that an earlier whole-action
+exit adds (fewer than min_cascade). The pool, provenance and energy-filter-stats.json
+(including minfor_invocations, which reports the whole-action route) are byte-identical to
+an unchunked run. Each chunk builds its own grids.
+
 
 ## mask
 
@@ -97,7 +137,7 @@ This action dir can only be a mask_input.
 Generates not poses but mask.py, a 1D boolean mask array OR a array of 0-based uint indices, whichever is smaller.
 input: name of action dir
 score_input: name of scoring action dir
-threshold: 0.23 or "auto" (try to extract from constraints.json)
+threshold: numeric cutoff for the selected score array (`threshold:auto` is unsupported)
 The score_input.input must be equal to the input
 
 
@@ -143,6 +183,10 @@ input2: frag4-anchor2. Name of action dir [optional]
 
 The two-input CLI remains `identity_filter.py INPUT1 INPUT2 OUTPUT`. The one-input form is
 explicit: `identity_filter.py --single-input INPUT OUTPUT`.
+
+`map-N.npy` holds one `(input pose, output pose)` row for every input pose that survives,
+duplicates included. When deduplicating, the duplicates of a pose are its alternative grow
+parents, and chain building needs all of them.
 
 ## mask-common-conformer
 
@@ -233,6 +277,8 @@ The check.sh is written as well.
 ## Chunk deployment
 
 Chunk deployers generate N=1..nchunks chunkN.sh scripts. For grow.py, they generate an organize.sh script.
+Chunkable actions: anchor, anchor-test, anchor-refe, grow, grow-test, score and energy-filter;
+any other action deploys its non-chunk run.sh under a chunk deployer.
 For local deployment, they generate a run.sh that calls all chunkN.sh and then the organize.sh in tandem.
 In the templates, non-load-bearing parameters are present in commented-out form.
 In general, compression is always enabled: poses (grow/anchor/organize/identity),
@@ -241,7 +287,7 @@ order-array.npy.zst), and mask.npy.zst. Compression is transparent for checksums
 readers, which resolve either form, so it changes neither a result checksum nor a sigil;
 a consumer (and the sidecar step) is always given the logical, uncompressed name.
 
-The RMSD result array is stored as score.npy and may be memory-mapped by downstream tools.
+RMSD and score result arrays are stored as score.npy and may be memory-mapped by downstream tools.
 
 # alaric-result-clean
 

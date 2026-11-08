@@ -177,12 +177,21 @@ def test_auto_malformed_defaults_are_errors(tmp_path, text):
         runtime().resolve_config('auto', 'auto', path)
 
 
-@pytest.mark.parametrize('action', ['score','filter','score_add'])
+@pytest.mark.parametrize('action', ['filter','score_add'])
 def test_removed_actions_rejected(action,tmp_path):
     from alaric.middle.schema import normalize_action
     from alaric.middle.errors import SchemaError
     with pytest.raises(SchemaError):
         normalize_action('frag1-old', tmp_path, {'action':action})
+
+
+def test_score_action_is_restored_with_legacy_kernel_default(tmp_path):
+    from alaric.middle.schema import normalize_action
+    spec = normalize_action('frag4-score', tmp_path, {
+        'action':'score', 'input':'frag4-pose', 'sequence':'auto',
+        'exclude':'auto', 'protein':'auto',
+    })
+    assert spec.raw['nb_kernel'] == 'compiled'
 
 
 @pytest.mark.parametrize('other', [

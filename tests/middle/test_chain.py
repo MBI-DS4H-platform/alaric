@@ -394,6 +394,39 @@ def test_compressed_provenance_composes_identically(tmp_path):
     assert (res.kept, res.total_chains) == (plain.kept, plain.total_chains)
 
 
+@pytest.mark.parametrize("compressed", [False, True])
+def test_chunked_route_matches_full_join(tmp_path, monkeypatch, compressed):
+    import alaric.middle.chain as chain
+
+    # Duplicate child keys and duplicate requests must retain their full fan-out,
+    # including matches on either side of a chunk boundary.
+    pairs = np.array([[8, 3], [1, 2], [7, 3], [4, 9], [6, 2], [5, 3]], dtype=np.uint64)
+    ids = np.array([3, 2, 3, 0], dtype=np.int64)
+    reps = np.arange(len(ids))
+    path = save_npy(tmp_path / "map.npy", pairs, compress=compressed)
+    original_chunks = chain.iter_npy_chunks
+    sizes = []
+
+    def small_chunks(path):
+        for chunk in original_chunks(path, rows=2):
+            sizes.append(len(chunk))
+            yield chunk
+
+    monkeypatch.setattr(chain, "iter_npy_chunks", small_chunks)
+    selected = chain._select_map_rows(path, ids)
+    expected = chain._join(pairs[:, 1], pairs[:, 0], ids, reps)
+    actual = chain._join(selected[:, 1], selected[:, 0], ids, reps)
+    for got, want in zip(actual, expected):
+        np.testing.assert_array_equal(got, want)
+    assert sizes == [2, 2, 2]
+
+    dense = np.array([9, 5, 4, 8, 2, 1], dtype=np.uint32)
+    path = save_npy(tmp_path / "dense.npy", dense, compress=compressed)
+    np.testing.assert_array_equal(chain._take_provenance(path, ids), dense[ids])
+    assert chain._take_provenance(path, np.empty(0, dtype=np.int64)).size == 0
+    assert chain._select_map_rows(path, np.empty(0, dtype=np.int64)).shape == (0, 2)
+
+
 def test_compressed_provenance_survives_obsoleted_intermediate(tmp_path):
     # The intermediate keeps only its (compressed) provenance -- no poses at all.
     _filter_step_project(tmp_path)
