@@ -116,6 +116,7 @@ Meaning:
 - `ALARIC_REMOTE_ALARIC_DIR`: remote path to the `alaric/` Python package
   directory.
 - `ALARIC_REMOTE_RESULT_DIR`: remote directory where results are stored.
+- `ALARIC_NPROCS`: the number of processes to use for various actions, notably `anchor` and `organize`. Only needed for older Python versions.
 
 To make these settings persistent, add them to your shell startup file:
 
