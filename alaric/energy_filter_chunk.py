@@ -12,6 +12,8 @@ Independently submitted chunk jobs cannot see each other's counts, so:
     its local undecided poses, ignoring ``min_cascade``, and then the gridless pass on
     whatever it has left undecided. Each step's white, pending and precision-fallback
     ids are recorded as global 0-based ids under ``CHUNKS_DIR/chunk-<N>/``.
+    A completed record matching the current settings and pose range is reused on retry;
+    unpublished ``.partial`` directories are discarded and recomputed.
 
 ``assemble``
     Replays ``energy_filter_action._cascade_minfor`` -- the very function a whole-action
@@ -86,14 +88,25 @@ def run_chunk(args) -> dict:
     offset = np.uint64(first - 1)
     final = args.chunks_dir / f"chunk-{args.chunk_index}"
     partial = args.chunks_dir / f"chunk-{args.chunk_index}.partial"
-    shutil.rmtree(partial, ignore_errors=True)
-    partial.mkdir(parents=True)
     record = {
         "schema": RECORD_SCHEMA, "nchunks": args.nchunks, "chunk_index": args.chunk_index,
         "total": total, "first": first, "last": last,
         "settings": _settings(args, threshold, steps, minimum, exclude),
-        "steps": 0, "gridless_all": False, "minfor_invocations": 0,
     }
+    # Only the final directory is published as complete. A killed job may leave even a
+    # fully written record in .partial; that directory must never trigger this skip.
+    try:
+        completed = json.loads((final / "record.json").read_text())
+    except (OSError, ValueError):
+        completed = None
+    if isinstance(completed, dict) and all(completed.get(key) == value
+                                           for key, value in record.items()):
+        print(f"Energy filter: chunk {args.chunk_index} already complete; skipping", file=sys.stderr)
+        return completed
+
+    shutil.rmtree(partial, ignore_errors=True)
+    partial.mkdir(parents=True)
+    record.update(steps=0, gridless_all=False, minfor_invocations=0)
     if count:
         with tempfile.TemporaryDirectory(prefix="energy-filter-chunk-") as temporary:
             work = Path(temporary)

@@ -124,6 +124,60 @@ def test_assemble_rejects_missing_and_stale_chunks(tmp_path, fake_minfor):
         efc.run_assemble(_args(tmp_path, "assemble", 61, 3, output=tmp_path / "out"))
 
 
+def test_chunk_retry_skips_completed_output(tmp_path, fake_minfor, monkeypatch, capsys):
+    args = _args(tmp_path, "chunk", 60, 3, chunk_index=1)
+    record = efc.run_chunk(args)
+    final = args.chunks_dir / "chunk-1"
+    before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in final.iterdir()}
+
+    def unexpected_prepare(*args, **kwargs):
+        pytest.fail("completed chunk was recomputed")
+
+    monkeypatch.setattr(efa, "_prepare_minfor_inputs", unexpected_prepare)
+    assert efc.run_chunk(args) == record
+    assert {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in final.iterdir()} == before
+    assert "already complete; skipping" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("stage", ["prepare", "publish"])
+def test_chunk_retry_recomputes_unpublished_output(tmp_path, fake_minfor, monkeypatch, stage):
+    args = _args(tmp_path, "chunk", 60, 3, chunk_index=1)
+
+    def terminate(*args, **kwargs):
+        raise SystemExit("simulated termination")
+
+    with monkeypatch.context() as patch:
+        if stage == "prepare":
+            patch.setattr(efa, "_prepare_minfor_inputs", terminate)
+        else:
+            patch.setattr(Path, "rename", terminate)
+        with pytest.raises(SystemExit, match="simulated termination"):
+            efc.run_chunk(args)
+    partial = args.chunks_dir / "chunk-1.partial"
+    assert partial.is_dir()
+    assert (partial / "record.json").exists() == (stage == "publish")
+    assert not (args.chunks_dir / "chunk-1").exists()
+    (partial / "leftover").write_text("interrupted output")
+    efc.run_chunk(args)
+    assert not partial.exists()
+    final = args.chunks_dir / "chunk-1"
+    assert (final / "record.json").is_file()
+    assert not (final / "leftover").exists()
+
+
+@pytest.mark.parametrize("change", ["nchunks", "min_cascade", "protein"])
+def test_chunk_retry_recomputes_incompatible_output(tmp_path, fake_minfor, change):
+    args = _args(tmp_path, "chunk", 60, 3, chunk_index=1)
+    original = efc.run_chunk(args)
+    if change == "protein":
+        args.protein.write_text("HEADER changed protein\n")
+    else:
+        setattr(args, change, getattr(args, change) + 1)
+    updated = efc.run_chunk(args)
+    assert updated != original
+    assert json.loads((args.chunks_dir / "chunk-1" / "record.json").read_text()) == updated
+
+
 def test_chunk_ranges_tile_the_pool():
     for total in (0, 1, 5, 400):
         for nchunks in (1, 3, 7):
