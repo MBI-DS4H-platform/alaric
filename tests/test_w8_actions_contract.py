@@ -90,7 +90,7 @@ def test_float64_ulp_routes_grid_scores_to_exact():
     assert stats['gridless_count'] == 3
 
 
-def test_min_cascade_counts_precision_fallback_as_unresolved():
+def test_min_cascade_counts_only_grid_eligible_poses():
     ids = np.array([10, 20, 30, 40])
     grid_ids = []
     exact_ids = []
@@ -107,7 +107,8 @@ def test_min_cascade_counts_precision_fallback_as_unresolved():
 
     def direct(batch):
         exact_ids.extend(batch.tolist())
-        return np.array([-2.] * len(batch))
+        exact = {10: -2., 20: -1., 30: -.9, 40: .1}
+        return np.array([exact[int(pose_id)] for pose_id in batch])
 
     kept, stats = runtime().cascade_filter(
         ids, threshold=0., min_cascade=4,
@@ -117,13 +118,14 @@ def test_min_cascade_counts_precision_fallback_as_unresolved():
         ],
         grid_score=grid, gridless_score=direct,
     )
-    assert grid_ids == [[10, 20, 30, 40], [20, 30, 40]]
-    assert exact_ids == [10]
+    assert grid_ids == [[10, 20, 30, 40]]
+    assert exact_ids == [10, 20, 30, 40]
     assert kept.tolist() == [10, 20, 30]
-    assert stats['grid_counts'] == [4, 3]
-    assert stats['precision_fallback_counts'] == [1, 0]
+    assert stats['grid_counts'] == [4]
+    assert stats['precision_fallback_counts'] == [1]
     assert stats['precision_fallback_count'] == 1
-    assert stats['gridless_count'] == 1
+    assert stats['gridless_count'] == 4
+    assert stats['cascade_exit'] == {'after_step': 0, 'undecided': 3, 'min_cascade': 4}
 
 
 def test_ranges_are_successive_and_never_summed():

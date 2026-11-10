@@ -1,8 +1,4 @@
-"""Chunked energy-filter replay equals the whole-action cascade (synthetic minfor oracle).
-
-The real-minfor equivalence is exercised by deploying an energy-filter action with a chunk
-deployer; this checks the speculation/replay bookkeeping over many chunkings and exits.
-"""
+"""Per-chunk cascade cutoffs preserve the all-gridless filtering result."""
 from __future__ import annotations
 
 import json
@@ -75,18 +71,6 @@ def fake_minfor(monkeypatch):
     monkeypatch.setattr(efc, "_total_poses", lambda pose_dir: N)
 
 
-def _whole(minimum):
-    work_ids = {"ids": np.arange(N)}
-
-    class Whole(FakeInvoker):
-        def __init__(self):
-            self.ids, self.count = work_ids["ids"], 0
-
-    invoke = Whole()
-    kept, stats = efa._cascade_minfor(N, STEPS, minimum, invoke)
-    return kept, stats, invoke.count
-
-
 def _args(tmp_path, mode, minimum, nchunks, **extra):
     protein = tmp_path / "protein-aa.pdb"
     protein.write_text("HEADER\n")
@@ -101,15 +85,20 @@ def _args(tmp_path, mode, minimum, nchunks, **extra):
 
 @pytest.mark.parametrize("minimum", [0, 60, 200, 1000])
 @pytest.mark.parametrize("nchunks", [1, 3, 7, 450])
-def test_chunked_replay_matches_whole_action(tmp_path, fake_minfor, minimum, nchunks):
-    kept, stats, invocations = _whole(minimum)
+def test_chunked_filter_matches_gridless(tmp_path, fake_minfor, minimum, nchunks):
     for index in range(1, nchunks + 1):
         efc.run_chunk(_args(tmp_path, "chunk", minimum, nchunks, chunk_index=index))
     result = efc.run_assemble(_args(tmp_path, "assemble", minimum, nchunks, output=tmp_path / "out"))
-    np.testing.assert_array_equal(result["kept"], kept)
-    np.testing.assert_array_equal(kept, np.flatnonzero(EXACT < THRESHOLD))
-    assert result["stats"] == stats
-    assert result["invocations"] == invocations
+    np.testing.assert_array_equal(result["kept"], np.flatnonzero(EXACT < THRESHOLD))
+    records = [json.loads((tmp_path / "chunks" / f"chunk-{i}" / "record.json").read_text())
+               for i in range(1, nchunks + 1)]
+    assert result["invocations"] == sum(r["minfor_invocations"] for r in records)
+    for r in records:
+        for count in r["stats"]["grid_counts"]:
+            assert count >= minimum
+    if N // nchunks < minimum:
+        assert result["stats"]["grid_counts"] == []
+        assert result["stats"]["gridless_count"] == N
 
 
 def test_assemble_rejects_missing_and_stale_chunks(tmp_path, fake_minfor):
@@ -257,3 +246,48 @@ def test_energy_filter_deploys_with_every_deployer(tmp_path, monkeypatch, deploy
         sigil = (action_dir / "sigil.txt").read_text().strip()
         assert f"--chunks-dir ../CACHE/results/{sigil}-CHUNKS" in chunks[0]
         assert f"rm -rf ../CACHE/results/{sigil}-CHUNKS" in run
+
+
+def test_chunk_batches_small_grid_remainder_with_precision_fallbacks(tmp_path, fake_minfor, monkeypatch):
+    # First grid leaves 984 greys: 982 precision fallbacks and 2 grid-eligible.
+    monkeypatch.setattr(efc, "_total_poses", lambda pose_dir: 1004)
+    calls = []
+
+    class PrecisionInvoker(FakeInvoker):
+        def __call__(self, indices, step):
+            self.count += 1
+            selected = np.arange(len(self.ids), dtype=np.uint64) if indices is None else indices
+            calls.append((step, selected.copy()))
+            if step is not None:
+                assert step == STEPS[0], "the 2-pose second grid should be skipped"
+                grey = selected[:984]
+                return np.empty(0, dtype=np.uint64), grey, np.arange(984) < 982
+            return selected[selected % 2 == 0], np.empty(0, dtype=np.uint64), np.empty(0, dtype=bool)
+
+    monkeypatch.setattr(efa, "_MinforInvoker", PrecisionInvoker)
+    record = efc.run_chunk(_args(tmp_path, "chunk", 1000, 1, chunk_index=1))
+    assert len(calls) == 2
+    assert calls[1][0] is None
+    np.testing.assert_array_equal(calls[1][1], np.arange(984))
+    assert record["stats"]["grid_counts"] == [1004]
+    assert record["stats"]["gridless_count"] == 984
+    assert record["stats"]["precision_fallback_count"] == 982
+    assert record["stats"]["cascade_exit"] == {
+        "after_step": 0, "undecided": 2, "min_cascade": 1000}
+    result = efc.run_assemble(_args(tmp_path, "assemble", 1000, 1, output=tmp_path / "out"))
+    np.testing.assert_array_equal(result["kept"], np.arange(0, 984, 2))
+    assert result["invocations"] == 2
+    assert len(calls) == 2, "assembly must not rescore poses"
+
+
+def test_chunk_rejects_and_recomputes_old_record_schema(tmp_path, fake_minfor):
+    args = _args(tmp_path, "chunk", 60, 1, chunk_index=1)
+    efc.run_chunk(args)
+    path = args.chunks_dir / "chunk-1" / "record.json"
+    old = json.loads(path.read_text())
+    old["schema"] = 1
+    path.write_text(json.dumps(old))
+    with pytest.raises(ValueError, match="stale chunk record.*schema"):
+        efc.run_assemble(_args(tmp_path, "assemble", 60, 1, output=tmp_path / "out"))
+    updated = efc.run_chunk(args)
+    assert updated["schema"] == efc.RECORD_SCHEMA == 2

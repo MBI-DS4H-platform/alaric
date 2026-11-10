@@ -4,8 +4,9 @@
 the W8 cascade test. `tests/test_w8_energy_filter_integration.py` compares the
 same 1B7F organized pose source with `cascade: []` and the default cascade,
 local and local-chunk templates, process counts, and chunk sizes that straddle
-`min_cascade`. It checks ARC bytes, selected-ID/order provenance, and whole-
-action grid/gridless counts across chunk configurations.
+`min_cascade`. It checks ARC bytes, selected-ID/order provenance, and actual per-chunk
+grid/gridless counts across chunk configurations. Accepted poses must match all-gridless
+scoring; routing and statistics may vary with chunking.
 
 The historical synthetic export-seam fixture was removed in E7 after its
 useful X1/X2/X3/X6/digest assertions moved to real Preparic input-pin fixtures

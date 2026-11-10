@@ -56,15 +56,15 @@ min_cascade: auto   # or an integer; auto -> DATA/score-filter.yaml
     - {plateau_distance: 10, neighbour_distance: 12, max_error: 0.05}
   ```
   Distances are in Å; `max_error` is in energy units. A missing file, a missing key or a malformed entry is a `ResolveError` for `auto`.
-- **Cascade semantics.** Let P be the undecided poses, initially the whole input pool.
+- **Cascade semantics.** Let P be the grid-eligible undecided poses, initially the input pool for this chunk (or the whole input for an unchunked run). Precision-unsafe poses leave P and are reserved for gridless scoring.
   1. Before each cascade step: if |P| < `min_cascade`, exit the cascade.
   2. Otherwise score P with the step's grid (plateau, neighbour distance), giving grid energy g, and with m = `max_error`:
      - g < T − m: **accepted** (kept in the output, removed from P);
      - g ≥ T + m: **rejected** (removed from P);
      - otherwise the pose stays in P, undecided.
-  3. After the last step, or on exit, score all of P gridless and keep the poses with E < T.
+  3. After the last step, or on exit, score all of P together with the reserved precision fallbacks gridless and keep the poses with E < T.
 
-  The output pool keeps the input order, whatever step decided each pose. |P| is counted over the whole action, never per chunk, so the route through the cascade, and hence the output, does not depend on chunking or nprocs. With `cascade: []`, or a pool smaller than `min_cascade`, everything is scored gridless.
+  The correctness contract is the same accepted poses, in input order, as if every pose were scored gridless. `min_cascade` is an optimization applied independently per chunk, counting only poses eligible for the next grid. Routing and statistics may depend on chunking; the accepted output must not. With `cascade: []`, or a chunk smaller than `min_cascade`, that chunk is scored entirely gridless. Assembly sums actual per-step and gridless counts and invocations, and reports chunk exits under `cascade_exit.chunks`.
 - **Output:** a POSE pool, the same format and provenance as `filter`, plus `stats.json` with per-step counts and the step at which the cascade was exited, if any.
 - **No mixed energy array.** Kept poses' energies would mix grid and gridless values. Use a plain gridless `score` if energies are needed.
 - **Thresholds file:** `energy-thresholds.json` is written by a preparic transformer (§6), alongside `interactions.json`. By later author decision it is `{"schema":1, "frag-5-UU":{"range-2":"-16.60"}}`: `schema` plus the threshold mapping at top level, and no other key. `epsilon`, `cascade` and `min_cascade` are action parameters (`final/contract-boundaries.md` T16).

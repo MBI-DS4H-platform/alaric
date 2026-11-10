@@ -468,7 +468,7 @@ def generate_chunk_files(
     Each chunkN.sh is self-contained and can be run in parallel (it discovers the chunking
     total at runtime, computes its own inclusive 1-based range, and runs a single backend
     invocation). organize.sh runs the post-step (organize for anchor/grow, concat for score,
-    the whole-action cascade replay for energy-filter) and writes the result checksum. run.sh is for testing convenience: it runs the chunks
+    combining independently filtered chunks for energy-filter) and writes the result checksum. run.sh is for testing convenience: it runs the chunks
     one-by-one and then organize.sh.
     """
     sigil = _read_sigil(action.path)

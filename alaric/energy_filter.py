@@ -175,8 +175,8 @@ def cascade_filter(
 
     ``grid_score`` is called with all currently grid-eligible IDs for one
     complete action step. The callback may internally split that work into
-    chunks; the minimum-cascade decision stays here, over all unresolved poses,
-    including poses already routed to exact scoring for precision safety.
+    batches; the minimum-cascade decision counts only grid-eligible poses in
+    this invocation. Precision fallbacks are reserved for exact scoring.
     """
     threshold = float(threshold)
     if not math.isfinite(threshold):
@@ -202,15 +202,15 @@ def cascade_filter(
         if len(undecided) == 0:
             stats["cascade_exit"] = {
                 "before_step": step_index,
-                "undecided": int(np.count_nonzero(precision_fallback)),
+                "undecided": 0,
                 "min_cascade": minimum,
             }
             break
-        unresolved_count = len(undecided) + int(np.count_nonzero(precision_fallback))
+        unresolved_count = len(undecided)
         if unresolved_count < minimum:
             stats["cascade_exit"] = {
                 "before_step": step_index,
-                "undecided": int(len(undecided) + np.count_nonzero(precision_fallback)),
+                "undecided": int(len(undecided)),
                 "min_cascade": minimum,
             }
             break
@@ -228,11 +228,11 @@ def cascade_filter(
         reject = safe_scores >= threshold + error
         kept[safe_positions[accept]] = True
         undecided = safe_positions[~(accept | reject)]
-        unresolved_count = len(undecided) + int(np.count_nonzero(precision_fallback))
+        unresolved_count = len(undecided)
         if unresolved_count < minimum:
             stats["cascade_exit"] = {
                 "after_step": step_index,
-                "undecided": int(len(undecided) + np.count_nonzero(precision_fallback)),
+                "undecided": int(len(undecided)),
                 "min_cascade": minimum,
             }
             break

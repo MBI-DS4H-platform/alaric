@@ -187,3 +187,5 @@ def test_subprocess_cascade_routes_match_existing_contract(tmp_path, minimum):
     assert stats == expected_stats
     if minimum == 0:
         assert calls == [5., 10., None]
+    elif minimum == 4:
+        assert calls == [5., None]

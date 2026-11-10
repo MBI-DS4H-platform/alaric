@@ -1,7 +1,5 @@
-# Each chunk speculatively runs every cascade step and the gridless pass over its own
-# global pose range and records the decided pose ids. organize.sh replays the cascade
-# on whole-action counts (min_cascade is never applied per chunk), so the result and
-# its statistics do not depend on nchunks.
+# Each chunk applies min_cascade to its own grid-eligible poses and records
+# its accepted IDs and route counts. Assembly combines results without rescoring.
 {{ python }} {{ alaric_dir }}/energy_filter_chunk.py chunk \
   --nchunks {{ nchunks }} \
   --chunk-index {{ chunk_index }} \
@@ -18,8 +16,7 @@
   {{ exclude_args }} \
   --chunk-poses {{ chunk_poses }}
 ### ORGANIZE ###
-# Replays the whole-action cascade from the chunk records; only poses added by an early
-# whole-action exit (fewer than min_cascade) are scored here.
+# Combine accepted IDs and actual route counts from the completed chunks.
 {{ python }} {{ alaric_dir }}/energy_filter_chunk.py assemble \
   --nchunks {{ nchunks }} \
   --chunks-dir {{ chunks_path }} \

@@ -122,13 +122,14 @@ Grid instances are reused within one energy-filter action by the tuple
 not promise grid reuse across action processes or restarts.
 
 Local and remote chunk deployers split the input into global, 1-based pose ranges
-(energy_filter_chunk.py). min_cascade still counts undecided poses over the whole action:
-each chunk speculatively runs every grid step and the gridless pass on its own range and
-records the decided pose ids under <result>-CHUNKS; organize.sh replays the whole-action
-cascade from those records and gridless-scores only the poses that an earlier whole-action
-exit adds (fewer than min_cascade). The pool, provenance and energy-filter-stats.json
-(including minfor_invocations, which reports the whole-action route) are byte-identical to
-an unchunked run. Each chunk builds its own grids.
+(energy_filter_chunk.py). Each chunk independently applies min_cascade to the count of
+poses still eligible for the next grid, excluding precision fallbacks. If that count is
+below the minimum, all remaining poses and precision fallbacks are scored together in
+one gridless pass. organize.sh combines accepted IDs in input order and sums actual
+route counts and minfor invocations; cascade_exit.chunks records each chunk's exit.
+min_cascade is an optimization, not a correctness contract. Routing and statistics may
+vary with chunking. The correctness contract is the same accepted poses as if all had
+been scored with just gridless. Each chunk builds its own grids.
 
 
 ## mask

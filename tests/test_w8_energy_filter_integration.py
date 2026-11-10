@@ -8,7 +8,7 @@ The ignored source pool must already exist. Its generating recipe and blessed
 ARC digest are recorded in fixtures/w8/energy-filter-integration.json. Missing
 inputs FAIL after opt-in, rather than silently turning acceptance into a skip.
 This tests both actual local/local-chunk shell templates, not a scheduling mock;
-local-chunk runs three chunks and the organize replay.
+local-chunk runs three independent cascades and combines their results.
 Only the recorded dom2 range is covered; other/clipped receptors need their own
 recorded fixtures and finite-sample bounds. Bounds apply only to scores eligible
 for grid-only decisions under the production float64 precision guard; every
@@ -205,7 +205,7 @@ def _assert_bounds(measured):
         )
 
 
-def _observe_precision_routes(measured):
+def _observe_precision_routes(measured, pose_ids=None):
     """Replay real measured energies through the production cascade, tracing IDs."""
     from energy_filter import DEFAULT_SCORE_FILTER, cascade_filter, grid_precision_unsafe
 
@@ -233,8 +233,9 @@ def _observe_precision_routes(measured):
         exact_ids.extend(ids.tolist())
         return exact[ids]
 
+    pose_ids = np.arange(len(exact), dtype=np.int64) if pose_ids is None else pose_ids
     selected, stats = cascade_filter(
-        np.arange(len(exact), dtype=np.int64), threshold=threshold,
+        pose_ids, threshold=threshold,
         cascade=DEFAULT_SCORE_FILTER["cascade"],
         min_cascade=DEFAULT_SCORE_FILTER["min_cascade"],
         grid_score=grid_score, gridless_score=gridless_score,
@@ -245,7 +246,7 @@ def _observe_precision_routes(measured):
     assert stats["precision_fallback_counts"] == fallback_counts
     assert stats["precision_fallback_count"] == len(unsafe_ids) == sum(fallback_counts)
     assert stats["gridless_count"] == len(exact_ids)
-    np.testing.assert_array_equal(selected, np.flatnonzero(exact < threshold))
+    np.testing.assert_array_equal(selected, pose_ids[exact[pose_ids] < threshold])
     return stats
 
 
@@ -292,7 +293,20 @@ def test_actual_energy_filter_bytes_ids_and_stats_across_templates(recorded_pool
         _assert_bounds(measured)  # Refuse cascade acceptance without this range's bound.
         range_meta = measured["range_meta"]
         exact = measured["exact"]
-        expected_route = _observe_precision_routes(measured)
+        expected_routes = {"local": _observe_precision_routes(measured)}
+        parts = [_observe_precision_routes(measured, np.arange(len(exact) * i // 3,
+                                                               len(exact) * (i + 1) // 3))
+                 for i in range(3)]
+        combined = {}
+        for key in ("grid_counts", "precision_fallback_counts"):
+            combined[key] = [sum(p[key][i] for p in parts if i < len(p[key]))
+                             for i in range(max(len(p[key]) for p in parts))]
+        for key in ("gridless_count", "precision_fallback_count"):
+            combined[key] = sum(p[key] for p in parts)
+        exits = [{"chunk_index": i, **p["cascade_exit"]} for i, p in enumerate(parts, 1)
+                 if p["cascade_exit"] is not None]
+        combined["cascade_exit"] = {"chunks": exits} if exits else None
+        expected_routes["local-chunk"] = combined
         threshold = float(np.median(exact))
         kept = np.flatnonzero(exact < threshold)
         assert 0 < len(kept) < len(exact), "fixture must exercise keep and reject"
@@ -332,22 +346,23 @@ def test_actual_energy_filter_bytes_ids_and_stats_across_templates(recorded_pool
                     assert snapshot[0] == baseline[0]
                     np.testing.assert_array_equal(snapshot[1], baseline[1])
                     assert snapshot[2] == baseline[2]
-                if label in route_stats:
-                    assert stats == route_stats[label]
+                route_key = (mode, label)
+                if route_key in route_stats:
+                    assert stats == route_stats[route_key]
                 else:
-                    route_stats[label] = stats
+                    route_stats[route_key] = stats
                 if label == "gridless":
                     assert stats["grid_counts"] == []
                     assert stats["gridless_count"] == len(exact)
                     assert stats["precision_fallback_counts"] == []
                     assert stats["precision_fallback_count"] == 0
                 else:
-                    assert stats["grid_counts"][0] == len(exact)
                     for key in ("grid_counts", "gridless_count", "cascade_exit",
                                 "precision_fallback_counts", "precision_fallback_count"):
-                        assert stats[key] == expected_route[key]
+                        assert stats[key] == expected_routes[mode][key]
         # Route counts differ by algorithm, but externally visible metadata agrees.
         route_keys = {"grid_counts", "gridless_count", "cascade_exit",
                       "precision_fallback_counts", "precision_fallback_count", "minfor_invocations"}
-        for key in route_stats["gridless"].keys() - route_keys:
-            assert route_stats["gridless"][key] == route_stats["cascade"][key]
+        for key in route_stats[("local", "gridless")].keys() - route_keys:
+            values = [stats[key] for stats in route_stats.values()]
+            assert all(value == values[0] for value in values)

@@ -50,34 +50,30 @@ def _prepare_minfor_inputs(pose_dir, protein_pdb, sequence, exclude, work, *, po
 
 
 def _cascade_minfor(nposes, steps, minimum, invoke):
-    """Synchronize whole-action cascade counts between minfor subprocesses.
+    """Apply the grid-eligible minimum between minfor subprocesses.
 
     None represents the entire original pose array, avoiding a full-size index
     array before the first discriminative filter has reduced the candidate set.
     """
     pending, pending_count = None, nposes
     kept, precision = [], []
-    precision_count = 0
     stats = {"grid_counts": [], "gridless_count": 0, "precision_fallback_counts": [],
              "precision_fallback_count": 0, "cascade_exit": None}
     for index, step in enumerate(steps):
-        unresolved = pending_count + precision_count
-        if not pending_count or unresolved < minimum:
-            stats["cascade_exit"] = {"before_step": index, "undecided": unresolved, "min_cascade": minimum}
+        if not pending_count or pending_count < minimum:
+            stats["cascade_exit"] = {"before_step": index, "undecided": pending_count, "min_cascade": minimum}
             break
         stats["grid_counts"].append(int(pending_count))
         white, grey, unsafe = invoke(pending, step)
         kept.append(white)
         exact_ids = grey[unsafe]
         precision.append(exact_ids)
-        precision_count += len(exact_ids)
         stats["precision_fallback_counts"].append(int(len(exact_ids)))
         stats["precision_fallback_count"] += int(len(exact_ids))
         pending = grey[~unsafe]
         pending_count = len(pending)
-        unresolved = pending_count + precision_count
-        if unresolved < minimum:
-            stats["cascade_exit"] = {"after_step": index, "undecided": unresolved, "min_cascade": minimum}
+        if pending_count < minimum:
+            stats["cascade_exit"] = {"after_step": index, "undecided": pending_count, "min_cascade": minimum}
             break
     if pending is None:
         exact_ids, exact_count = None, nposes
