@@ -168,10 +168,11 @@ class PoolGraph:
         resolved = graph.build(targets)
         self.pools: dict[str, PoolNode] = {}
 
+        members = self._members(graph, targets) if targets else set(resolved)
         pose_actions = {
             name: action
             for name, action in resolved.items()
-            if OUTPUT_KIND[action.action] == POSE
+            if name in members and OUTPUT_KIND[action.action] == POSE
         }
         frag_of = {name: final_fragment(action) for name, action in pose_actions.items()}
 
@@ -210,6 +211,32 @@ class PoolGraph:
         overrides = self._apply_selection()
         self._select_representatives(overrides)
         self._check_contiguous()
+
+    @staticmethod
+    def _members(graph: ActionGraph, targets: list[str]) -> set[str]:
+        """Actions in the pool graph of ``targets``: their dependency closure, cut at
+        every ``mask-common-conformer``.
+
+        A common-conformer mask pairs two pools (e.g. range-2 and range-3) that are
+        built as separate molecules with separate DAGs. Applying it sub-selects one
+        side's poses, but its other input is not where those poses come from, so the
+        mask is a root, like an anchor: tracing through it would pull the *other*
+        molecule into this graph and give each shared fragment two lineages.
+        ``ActionGraph.build`` still resolves the mask's inputs; they are only kept
+        out of the pool graph.
+        """
+        members: set[str] = set()
+        stack = list(targets)
+        while stack:
+            name = stack.pop()
+            if name in members:
+                continue
+            members.add(name)
+            spec = graph.specs[name]
+            if spec.action == "mask-common-conformer":
+                continue
+            stack.extend(graph.dependency_names(spec).values())
+        return members
 
     def _index_fragments(self) -> None:
         self.pools_by_fragment: dict[int, list[str]] = {}
@@ -573,7 +600,10 @@ def main(argv: list[str] | None = None) -> int:
         "--target",
         action="append",
         dest="targets",
-        help="Restrict to this action and its dependencies (repeatable).",
+        help="Restrict to this action and its dependencies (repeatable). "
+        "Dependencies are not traced through mask-common-conformer actions, "
+        "so a target on one side of a paired mask (e.g. range-2) leaves the "
+        "other side (range-3) out.",
     )
     parser.add_argument(
         "--select",

@@ -311,3 +311,46 @@ def test_unselected_projects_carry_empty_provenance(tmp_path):
     data = PoolGraph(Project(tmp_path)).to_dict()
     assert data["selected"] == []
     assert data["dropped_pools"] == {}
+
+
+# -- common-conformer masks (unfixed: range-2 / range-3 molecules) ---------
+
+
+def _common_conformer_project(root: Path) -> None:
+    """Two molecules sharing frag4: range-3 grows forward from a frag3 anchor,
+    range-2 grows backward from a frag5 anchor. A common-conformer mask pairs the
+    two frag4 pools; range-2 grows on (into frag3) from its masked side."""
+    _data(root)
+    _mk(root, "frag3-anchor", _anchor(3, "first"))
+    _mk(root, "frag4-range3", _grow("frag3-anchor", 4))
+    _mk(root, "frag5-anchor", _anchor(5, "second"))
+    _mk(root, "frag4-range2", _grow("frag5-anchor", 4, "backward"))
+    _mk(root, "frag4-mask", {
+        "action": "mask-common-conformer", "input1": "frag4-range2", "input2": "frag4-range3",
+    })
+    _mk(root, "frag4-range2-cc", {
+        "action": "apply-mask", "input": "frag4-range2", "mask_input": "frag4-mask", "mask": 1,
+    })
+    _mk(root, "frag4-range3-cc", {
+        "action": "apply-mask", "input": "frag4-range3", "mask_input": "frag4-mask", "mask": 2,
+    })
+    _mk(root, "frag3-range2", _grow("frag4-range2-cc", 3, "backward"))
+
+
+def test_common_conformer_mask_is_a_root(tmp_path):
+    """Targeting one side of a paired mask must not pull in the other molecule."""
+    _common_conformer_project(tmp_path)
+    graph = PoolGraph(Project(tmp_path), targets=["frag3-range2"])
+    assert sorted(graph.pools) == [
+        "frag3-range2", "frag4-range2", "frag4-range2-cc", "frag5-anchor",
+    ]
+    assert graph.representatives == {
+        3: "frag3-range2", 4: "frag4-range2-cc", 5: "frag5-anchor",
+    }
+
+
+def test_common_conformer_other_side(tmp_path):
+    _common_conformer_project(tmp_path)
+    graph = PoolGraph(Project(tmp_path), targets=["frag4-range3-cc"])
+    assert sorted(graph.pools) == ["frag3-anchor", "frag4-range3", "frag4-range3-cc"]
+    assert graph.representatives == {3: "frag3-anchor", 4: "frag4-range3-cc"}
