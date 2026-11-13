@@ -305,6 +305,8 @@ The extra export checks (coverage, retained locks, limits, file agreement, X5 re
 | `DATA/score-filter.yaml` | Exactly A12's default min_cascade/cascade data, below |
 | `DATA/clipped-fragments/reference/frag-N-SEQ-refe.pdb` | Exact kept reference PDB bytes from B11's `reference/` members |
 | `DATA/clipped-fragments/bestfit/frag-N-SEQ-bestfit.pdb` | Exact kept best-fit PDB bytes from B11's `bestfit/` members |
+| `DATA/best-fit-statistics.json` | Schema 1. Per kept fragment: best-fit RMSD, computed raw/rounded base ovRMSD per nucleotide, and the best fit's ATTRACT energy (or scoring error) against every protein range. Per kept pair: raw, computed (rounded) and edited cRMSD/ovRMSD. Informational; no action reads it |
+| `DATA/anchor-refe-bases.pdb` | One residue per RNA position used by an `anchor-refe` action in the catalogue: the nucleobase atom records that anchor-refe fits (Alaric's `only_base` template atoms: ring atoms plus in-plane exocyclic substituents), copied verbatim from `reference.pdb` in template order, each preceded by a REMARK naming its candidates and ovRMSD. Informational; no action reads it |
 | `DATA/export-manifest.json` | Digest and generator inventory (§5.2), including the hand-off and class table |
 | `<classification>/gen-*/<action-name>/alaric.yaml` | One schema-valid action mapping, plus real YAML comments for sentinel actions |
 
@@ -337,7 +339,7 @@ The manifest holds only what the browser check and the user's later work need:
 
 Input checksums, producer provenance and per-member hashes are not repeated: Seamless records the transformations, and the archive bytes come from cell buffers.
 
-All manifest paths are relative to the project folder, exactly like `export_tree` keys; they do not repeat the `alaric_project/` prefix. The download adds that prefix once. Define `EXPORTER_VERSION = 1` in `export_snapshot.py`; bump it when emission semantics change and keep a digest golden tied to that version. The manifest's `schema` describes its format; `EXPORTER_VERSION` participates only in snapshot identity.
+All manifest paths are relative to the project folder, exactly like `export_tree` keys; they do not repeat the `alaric_project/` prefix. The download adds that prefix once. Define `EXPORTER_VERSION` in `export_snapshot.py` (2 since the best-fit statistics and anchor-refe base members, 2026-11-13); bump it when emission semantics change and keep a digest golden tied to that version. The manifest's `schema` describes its format; `EXPORTER_VERSION` participates only in snapshot identity.
 
 Compute `snapshot_sha256` in `export_snapshot.py` from canonical JSON of the normalised snapshot: sorted mapping keys, fixed separators, UTF-8, `allow_nan=False`, byte buffers represented by their SHA-256 and length, ordered lists in defined range/fragment/stacking order, plus an `EXPORTER_VERSION` constant that changes with the emitted configuration. Exclude timestamps, local install paths and view state. `export_admission` publishes it as `digest`; `export_tree` writes it into the manifest after checking that it recomputes the same value (§4.3). Never use a Seamless checksum as if it were the raw file's SHA-256.
 

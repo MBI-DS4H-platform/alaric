@@ -773,7 +773,11 @@ removal. The catalogue is not one combined runnable DAG.
   successively as an AND; an unfixed chain is rooted in one independent range
   and scores only against that range. R12 restrictions on an already-scored
   anchor pool do not add redundant scoring. Thresholds are never summed.
-  The archive carries the kept reference and best-fit PDBs. The manifest
+  The archive carries the kept reference and best-fit PDBs, the kept
+  best-fit statistics (`best-fit-statistics.json`) and the reference
+  nucleobases fitted by the catalogue's `anchor-refe` actions
+  (`anchor-refe-bases.pdb`); admission blocks a reference lacking a kept
+  nucleotide's base atoms. The manifest
   carries the hand-off, class table and generator final pools/external input choices.
 - **X5. Proceed anyway.** `export_admission` is the single owner of warning
   calculation. It reports Gaussian validation that is not green or a class
