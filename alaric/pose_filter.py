@@ -202,8 +202,11 @@ class IndexSelector:
         return len(self._sorted)
 
     def kept(self, start: int, stop: int) -> tuple[np.ndarray, np.ndarray | None]:
-        first = int(np.searchsorted(self._sorted, start, side="left"))
-        last = int(np.searchsorted(self._sorted, stop, side="left"))
+        # Keys in the array's own dtype: under NumPy 1.x a Python-int key against a
+        # uint64 array promotes both to float64, converting the whole (pool-scale)
+        # index array on every call -- O(n) per chunk instead of O(log n).
+        bounds = np.array([start, stop], dtype=self._sorted.dtype)
+        first, last = (int(x) for x in np.searchsorted(self._sorted, bounds, side="left"))
         if first == last:
             return np.empty(0, dtype=np.int64), np.empty(0, dtype=np.uint32)
         local = np.asarray(self._sorted[first:last], dtype=np.int64) - int(start)

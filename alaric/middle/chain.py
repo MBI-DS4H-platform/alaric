@@ -172,7 +172,8 @@ def _take_provenance(path: Path, pose_ids: np.ndarray) -> np.ndarray:
     start = 0
     for chunk in iter_npy_chunks(path):
         stop = start + len(chunk)
-        lo, hi = np.searchsorted(indices, [start, stop])
+        # Keys in the array's dtype (NumPy 1.x: Python int vs uint64 -> float64 copy).
+        lo, hi = np.searchsorted(indices, np.array([start, stop], dtype=indices.dtype))
         result[order[lo:hi]] = chunk[indices[lo:hi] - start]
         start = stop
     return result

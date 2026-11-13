@@ -451,8 +451,11 @@ def select_pose_indices(pose_dir: str | Path, pose_indices: np.ndarray) -> PoseC
     for file_entry in files:
         file_start = file_entry.global_start
         file_stop = file_start + file_entry.nposes
-        first = int(np.searchsorted(sorted_indices, file_start, side="left"))
-        last = int(np.searchsorted(sorted_indices, file_stop, side="left"))
+        # Keys in the array's dtype (NumPy 1.x: Python int vs uint64 -> float64 copy).
+        bounds = np.array([file_start, file_stop], dtype=sorted_indices.dtype)
+        first, last = (
+            int(x) for x in np.searchsorted(sorted_indices, bounds, side="left")
+        )
         if first == last:
             continue
 
