@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import contextlib
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,7 +23,7 @@ from pathlib import Path
 from tqdm import tqdm
 import numpy as np
 
-from npy_io import save_npy
+from npy_io import NpyWriter
 from poses import (
     ARC_ZSTD_SUFFIX,
     HEADER_SIZE,
@@ -38,6 +40,8 @@ from poses import (
 _ZSTD_CLI = shutil.which("zstd")
 _LOADER_WORKERS = 10
 _ZSTD_THREADS = 4
+_SPOOL_BUFFER_BYTES = 16 * 1024 * 1024
+_SPOOL_READ_ROWS = (16 * 1024 * 1024) // 16
 
 
 PoseKey = tuple[tuple[int, int, int], tuple[int, int, int]]
@@ -76,6 +80,77 @@ class IdentityTask:
     small: FileIndexEntry
     other: FileIndexEntry
     offsets: list[tuple[tuple[int, int, int], int, int]]
+
+
+class _MapSpool:
+    """Spool (source_id, dest_id) mapping rows to scratch disk, then write one .npy.
+
+    A mapping has a row per mapped input pose (16 B each): billions of rows, tens to
+    hundreds of GB, so it must never be held in RAM. Rows are appended as raw uint64
+    segments to a temp file under ``$TMPDIR`` (node-local scratch under the remote
+    deployers); ``save`` then streams them into the .npy, whose header needs the final
+    row count up front. Segments are emitted in ascending ``key`` order (append order
+    when no key is given), so producers need not generate rows in output order.
+    """
+
+    def __init__(self, *, tempdir: str | Path | None = None) -> None:
+        self._dir = Path(tempfile.mkdtemp(prefix="alaric-identity-map-", dir=tempdir))
+        self._path = self._dir / "rows.u64"
+        self._handle = self._path.open("wb", buffering=_SPOOL_BUFFER_BYTES)
+        # (key, first row, row count)
+        self._segments: list[tuple[tuple, int, int]] = []
+        self.nrows = 0
+
+    def append(self, rows: np.ndarray, key: tuple | None = None) -> None:
+        rows = np.ascontiguousarray(rows, dtype=np.uint64)
+        if rows.ndim != 2 or rows.shape[1] != 2:
+            raise ValueError(f"mapping rows must have shape (n, 2), got {rows.shape}")
+        n = len(rows)
+        if not n:
+            return
+        if key is None:
+            key = (len(self._segments),)
+        self._segments.append((key, self.nrows, n))
+        self._handle.write(rows.data)
+        self.nrows += n
+
+    def _ordered_ranges(self) -> list[tuple[int, int]]:
+        ranges: list[tuple[int, int]] = []
+        for _, start, n in sorted(self._segments, key=lambda segment: segment[0]):
+            if ranges and ranges[-1][1] == start:
+                ranges[-1] = (ranges[-1][0], start + n)
+            else:
+                ranges.append((start, start + n))
+        return ranges
+
+    def save(self, path: Path, *, compress: bool) -> Path:
+        self._handle.close()
+        with NpyWriter(
+            path, dtype=np.uint64, shape=(self.nrows, 2), compress=compress
+        ) as writer:
+            if self.nrows:
+                rows = np.memmap(
+                    self._path, dtype=np.uint64, mode="r", shape=(self.nrows, 2)
+                )
+                try:
+                    for start, stop in self._ordered_ranges():
+                        for chunk_start in range(start, stop, _SPOOL_READ_ROWS):
+                            chunk_stop = min(chunk_start + _SPOOL_READ_ROWS, stop)
+                            writer.write(rows[chunk_start:chunk_stop])
+                finally:
+                    del rows
+            return writer.path
+
+    def close(self) -> None:
+        with contextlib.suppress(Exception):
+            self._handle.close()
+        shutil.rmtree(self._dir, ignore_errors=True)
+
+    def __enter__(self) -> "_MapSpool":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.close()
 
 
 def _row_tuple(row: np.ndarray) -> tuple[int, int, int]:
@@ -607,10 +682,12 @@ def write_identity_pose_dir(
 def build_mapping(
     entries: list[FileIndexEntry],
     global_lookup: dict[PoseKey, tuple[int, np.ndarray]],
+    spool: _MapSpool,
     *,
     readahead: int = 20,
     desc: str = "Build mapping",
-) -> np.ndarray:
+) -> None:
+    """Append the (source_id, dest_id) rows of ``entries`` to ``spool``, in output order."""
     if readahead < 0:
         raise ValueError("--readahead must be non-negative")
     relevant_per_entry: list[list[tuple[int, tuple[int, np.ndarray]]]] = []
@@ -629,7 +706,6 @@ def build_mapping(
             return [entries[idx].path]
         return []
 
-    chunks: list[np.ndarray] = []
     with _PrefetchingLoader(
         refholder_paths,
         len(entries),
@@ -662,12 +738,29 @@ def build_mapping(
                     dest_ids = (
                         np.uint64(dest_start) + idx_dest.astype(np.uint64, copy=False)
                     )
-                    chunks.append(np.column_stack((source_ids, dest_ids)).astype(np.uint64, copy=False))
+                    spool.append(np.column_stack((source_ids, dest_ids)))
             finally:
                 loader.advance(i)
-    if not chunks:
-        return np.empty((0, 2), dtype=np.uint64)
-    return np.concatenate(chunks, axis=0)
+
+
+def _write_mapping(
+    output_dir: Path,
+    name: str,
+    entries: list[FileIndexEntry],
+    global_lookup: dict[PoseKey, tuple[int, np.ndarray]],
+    *,
+    readahead: int,
+    compress: bool,
+) -> int:
+    """Build one mapping on scratch disk and publish it; returns its row count.
+
+    Done one mapping at a time, so scratch holds at most one mapping's raw rows.
+    """
+    with _MapSpool() as spool:
+        build_mapping(entries, global_lookup, spool, readahead=readahead)
+        print(f"Writing {name}...", file=sys.stderr)
+        spool.save(output_dir / name, compress=compress)
+        return spool.nrows
 
 
 def _run_single_identity_filter(
@@ -693,7 +786,45 @@ def _run_single_identity_filter(
     # are released one at a time; aggregation is limited to one spatial bucket at once.
     groups_by_bucket = _index_by_bucket(entries)
     identity: dict[PoseKey, np.ndarray] = {}
-    mapping_parts: list[tuple[int, int, np.ndarray]] = []
+    # Rows are produced bucket by bucket but published in (file order, offset index)
+    # order; the spool keys each segment so it can reorder them on disk.
+    with _MapSpool() as spool:
+        map1_rows = _single_identity_pass(
+            groups_by_bucket, identity, spool, output_dir,
+            bucket_size=bucket_size,
+            max_poses_per_file=max_poses_per_file,
+            compress=compress,
+        )
+    total_identity = int(sum(len(keys) for keys in identity.values()))
+
+    manifest = {
+        "pose_dir_1": str(pose_dir),
+        "single_input": True,
+        "bucket_size": bucket_size,
+        "input_poses_1": input_poses,
+        "kept_poses_1": input_poses,
+        "common_buckets": len({entry.M for entry in entries if entry.nP}),
+        "common_mini_buckets": len(identity),
+        "identity_poses": total_identity,
+        "map_1_rows": map1_rows,
+    }
+    (output_dir / "identity-filter.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+    )
+    return manifest
+
+
+def _single_identity_pass(
+    groups_by_bucket: dict[tuple[int, int, int], list[FileIndexEntry]],
+    identity: dict[PoseKey, np.ndarray],
+    spool: _MapSpool,
+    output_dir: Path,
+    *,
+    bucket_size: int,
+    max_poses_per_file: int,
+    compress: bool,
+) -> int:
+    """Fill ``identity``, write the pose dir and map-1; returns the map-1 row count."""
     destination_start = 0
     for M in sorted(groups_by_bucket):
         offset_records: dict[
@@ -735,8 +866,8 @@ def _run_single_identity_filter(
                         source_ids[row_order],
                         np.uint64(destination_start) + key_indices[row_order].astype(np.uint64),
                     )
-                ).astype(np.uint64, copy=False)
-                mapping_parts.append((entry.order, offset_index, rows))
+                )
+                spool.append(rows, key=(entry.order, offset_index))
             destination_start += len(unique_keys)
 
     total_identity = int(sum(len(keys) for keys in identity.values()))
@@ -749,29 +880,9 @@ def _run_single_identity_filter(
         max_poses_per_file=max_poses_per_file,
         compress=compress,
     )
-    mapping_parts.sort(key=lambda part: (part[0], part[1]))
-    map1 = (
-        np.concatenate([part[2] for part in mapping_parts], axis=0)
-        if mapping_parts
-        else np.empty((0, 2), dtype=np.uint64)
-    )
-    save_npy(output_dir / "map-1.npy", map1, compress=compress)
-
-    manifest = {
-        "pose_dir_1": str(pose_dir),
-        "single_input": True,
-        "bucket_size": bucket_size,
-        "input_poses_1": input_poses,
-        "kept_poses_1": input_poses,
-        "common_buckets": len({entry.M for entry in entries if entry.nP}),
-        "common_mini_buckets": len(identity),
-        "identity_poses": total_identity,
-        "map_1_rows": int(len(map1)),
-    }
-    (output_dir / "identity-filter.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n"
-    )
-    return manifest
+    print("Writing map-1.npy...", file=sys.stderr)
+    spool.save(output_dir / "map-1.npy", compress=compress)
+    return spool.nrows
 
 
 def run_identity_filter(
@@ -862,16 +973,18 @@ def run_identity_filter(
         max_poses_per_file=max_poses_per_file,
         compress=compress,
     )
-    print("Building mapping array 1...", file=sys.stderr)
-    map1 = build_mapping(kept1, global_lookup, readahead=readahead)
-    print(f"Number of mapping rows for pose directory 1: {len(map1)}", file=sys.stderr)
-    print("Building mapping array 2...", file=sys.stderr)
-    map2 = build_mapping(kept2, global_lookup, readahead=readahead)
-    print(f"Number of mapping rows for pose directory 2: {len(map2)}", file=sys.stderr)
     # (source_id, dest_id) pairs, largely ascending: zstd shrinks them by an order of
     # magnitude, and at 16 bytes per row they otherwise dwarf the pose dir they map.
-    save_npy(output_dir / "map-1.npy", map1, compress=compress)
-    save_npy(output_dir / "map-2.npy", map2, compress=compress)
+    print("Building mapping array 1...", file=sys.stderr)
+    map1_rows = _write_mapping(
+        output_dir, "map-1.npy", kept1, global_lookup, readahead=readahead, compress=compress
+    )
+    print(f"Number of mapping rows for pose directory 1: {map1_rows}", file=sys.stderr)
+    print("Building mapping array 2...", file=sys.stderr)
+    map2_rows = _write_mapping(
+        output_dir, "map-2.npy", kept2, global_lookup, readahead=readahead, compress=compress
+    )
+    print(f"Number of mapping rows for pose directory 2: {map2_rows}", file=sys.stderr)
 
     manifest = {
         "pose_dir_1": str(pose_dir1),
@@ -884,8 +997,8 @@ def run_identity_filter(
         "common_buckets": len(common_buckets),
         "common_mini_buckets": common_mini_buckets,
         "identity_poses": total_identity_poses,
-        "map_1_rows": int(len(map1)),
-        "map_2_rows": int(len(map2)),
+        "map_1_rows": map1_rows,
+        "map_2_rows": map2_rows,
     }
     (output_dir / "identity-filter.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n"
