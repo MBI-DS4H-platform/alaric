@@ -270,7 +270,9 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
                 "epsilon": q(p["epsilon"]),
                 "cascade_json": q(cascade_json),
                 "min_cascade": q(p["min_cascade"]),
-                "nprocs": q(p.get("nprocs", 1)),
+                # Unspecified: omit the flag so the job resolves default_nprocs()
+                # (ALARIC_NPROCS, then the SLURM allocation) where it runs.
+                "nprocs_args": f"--nprocs {q(p['nprocs'])}" if "nprocs" in p else "",
                 "chunk_poses": q(p.get("chunk_poses", 10000)),
                 "output_path": shell_path(output_dir),
                 # Per-chunk cascade records of the chunk deployers (see energy_filter_chunk.py).

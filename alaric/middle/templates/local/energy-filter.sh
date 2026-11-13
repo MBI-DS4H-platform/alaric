@@ -11,6 +11,6 @@
   --cascade {{ cascade_json }} \
   --min-cascade {{ min_cascade }} \
   {{ exclude_args }} \
-  --nprocs {{ nprocs }} \
+  {{ nprocs_args }} \
   --chunk-poses {{ chunk_poses }} \
   --output {{ output_path }}

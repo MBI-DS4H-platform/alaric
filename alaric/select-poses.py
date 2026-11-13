@@ -241,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Selected {stats.kept_poses:,} pose(s)", flush=True)
     print(f"Wrote {stats.shards} unorganized shard(s)", flush=True)
 
-    organize_pose_dir(out_dir, compress=bool(args.compress))
+    organize_pose_dir(out_dir, compress=bool(args.compress), nprocs=int(args.nprocs))
 
     if not input_was_mask:
         target = args.order_array or (out_dir / "order-array.npy")

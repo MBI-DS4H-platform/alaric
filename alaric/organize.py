@@ -1300,7 +1300,7 @@ def organize_pose_dir(
     capacity: int = 2_000_000_000,
     max_poses_per_file: int = 100_000_000,
     chunk_poses: int = 1_000_000,
-    nprocs: int = default_nprocs(),
+    nprocs: int | None = None,
     compress: bool = False,
     local_tempdir: bool = False,
     local_stagedir: bool = False,
@@ -1308,6 +1308,8 @@ def organize_pose_dir(
     order_array_path: str | Path | None = None,
 ) -> np.ndarray | None:
     """Organize a pose directory and optionally return/write row-order mapping."""
+    if nprocs is None:
+        nprocs = default_nprocs()
     if capacity <= 0:
         raise ValueError("--capacity must be positive")
     if max_poses_per_file <= 0 or max_poses_per_file > MAX_NP:

@@ -23,6 +23,7 @@ for _path in (str(_ALARIC), str(_ROOT), str(_ATTRACT_UTIL), str(_ATTRACT)):
         sys.path.insert(0, _path)
 
 from energy_filter import _validate_minimum, _validate_steps  # noqa: E402
+from nprocs import default_nprocs  # noqa: E402
 
 
 def _prepare_minfor_inputs(pose_dir, protein_pdb, sequence, exclude, work, *, pose_range=None, pose_indices=None):
@@ -221,10 +222,12 @@ def run_energy_filter(
     min_cascade: int = 1000,
     exclude: list[str] | None = None,
     output_dir: str | Path,
-    nprocs: int = 1,
+    nprocs: int | None = None,
     chunk_poses: int = 10_000,
 ) -> dict[str, Any]:
     """Run compiled minfor filters and retain passing poses in original order."""
+    if nprocs is None:
+        nprocs = default_nprocs()
     pose_dir, protein_pdb, output_dir = Path(pose_dir), Path(protein_pdb), Path(output_dir)
     threshold, steps, minimum, exclude = _validate_settings(
         threshold, epsilon, cascade, min_cascade, exclude, nprocs, chunk_poses
@@ -257,7 +260,8 @@ def add_filter_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentPa
     parser.add_argument("--cascade", required=True, help="JSON list of grid steps")
     parser.add_argument("--min-cascade", required=True, type=int)
     parser.add_argument("--pdb-exclude", action="extend", nargs="+", default=[])
-    parser.add_argument("--nprocs", type=int, default=1)
+    # Non-load-bearing (selection workers only); unspecified follows default_nprocs().
+    parser.add_argument("--nprocs", type=int, default=default_nprocs())
     parser.add_argument("--chunk-poses", type=int, default=10_000)
     return parser
 

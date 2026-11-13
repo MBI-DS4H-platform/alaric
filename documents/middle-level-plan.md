@@ -328,7 +328,9 @@ Remote strategy (anchor/grow producers):
    the shared FS.
 
 **Worker counts honor the SLURM CPU allocation, not the node.** Actions that default their
-worker count (`anchor --nprocs`, `rmsd --nprocs`, `organize --nprocs`, and the pose-index
+worker count (`anchor --nprocs`, `rmsd --nprocs`, `organize --nprocs`, `select-poses
+--nprocs` and `energy-filter --nprocs` -- the latter is only emitted into the generated
+script when the action sets `nprocs` -- and the pose-index
 thread pool in `middle/checksum.py`) resolve it through `alaric/nprocs.py:default_nprocs()`,
 which checks in order:
 

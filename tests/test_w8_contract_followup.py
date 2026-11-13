@@ -16,8 +16,14 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "alaric"), str(ROOT / "tests")]
 
+@pytest.mark.parametrize("nprocs", [2, None])
 @pytest.mark.parametrize("deployer", ["local", "local-chunk", "remote", "remote-chunk"])
-def test_energy_filter_backend_context_renders_real_deployed_template(tmp_path, deployer):
+def test_energy_filter_backend_context_renders_real_deployed_template(
+    tmp_path, deployer, nprocs, monkeypatch
+):
+    # Unspecified nprocs must not be pinned in the script: the job resolves it through
+    # default_nprocs() (ALARIC_NPROCS first) on the node where it runs.
+    monkeypatch.setenv("ALARIC_NPROCS", "7")
     from alaric.energy_filter_action import build_parser
     from alaric.middle.backend import template_context
     from alaric.middle.deploy import ORGANIZE_DELIM, render_action_template
@@ -29,12 +35,16 @@ def test_energy_filter_backend_context_renders_real_deployed_template(tmp_path, 
     (source_dir / "sigil.txt").write_text("source-pose-sigil\n")
     source = ResolvedAction("frag3-bestfit", source_dir, "anchor-refe",
                             {"fragment": 3, "sequence": "GU"}, {})
-    action = ResolvedAction("frag3-energy-range-2", tmp_path / "filter", "energy-filter", {
+    params = {
         "input": source, "__protein": "range-2-aa.pdb", "protein": "range-2",
         "fragment": 3, "sequence": "GU", "exclude": ["1b7f"],
         "threshold": -2.0, "epsilon": 15, "cascade": [], "min_cascade": 0,
-        "nprocs": 2, "chunk_poses": 999,
-    }, {})
+        "chunk_poses": 999,
+    }
+    if nprocs is not None:
+        params["nprocs"] = nprocs
+    action = ResolvedAction("frag3-energy-range-2", tmp_path / "filter", "energy-filter",
+                            params, {})
     arguments = dict(alaric_dir=str(ROOT / "alaric"), output_dir="../CACHE/results/filtered",
                      location="local")
     context = template_context(action, **arguments)
@@ -79,7 +89,8 @@ def test_energy_filter_backend_context_renders_real_deployed_template(tmp_path, 
         assert args.pose_dir.as_posix() == "../CACHE/results/source-pose-sigil"
         assert args.pdb_exclude == ["1b7f"]
         assert args.chunk_poses == 999
-    assert parsed[-1].nprocs == 2
+    assert ("--nprocs" in script) == (nprocs is not None)
+    assert parsed[-1].nprocs == (7 if nprocs is None else nprocs)
     if deployer.startswith("remote"):
         assert script.count('export TMPDIR="${ALARIC_REMOTE_SCRATCH_DIR:-') == (2 if chunked else 1)
 
