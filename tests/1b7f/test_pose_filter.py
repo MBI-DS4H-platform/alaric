@@ -222,3 +222,54 @@ def test_select_with_a_boolean_mask_needs_no_order_array(pool, tmp_path):
     assert not list(out_dir.glob("order-array.npy*"))
     assert not list(out_dir.glob("provenance.npy*"))
     assert _identities(out_dir) == [input_ids[i] for i in np.flatnonzero(mask)]
+
+
+def test_select_mask_can_write_source_provenance_for_filter_actions(pool, tmp_path):
+    pose_dir, input_ids = pool
+    mask = np.zeros(len(input_ids), dtype=bool)
+    mask[::5] = True
+    np.save(tmp_path / "mask.npy", mask)
+    out_dir = tmp_path / "out"
+
+    _run(
+        "select-poses.py",
+        str(pose_dir),
+        str(tmp_path / "mask.npy"),
+        str(out_dir),
+        "--force",
+        "--compress",
+        "--provenance",
+        "--nprocs",
+        "3",
+        "--chunk-poses",
+        "7",
+    )
+
+    kept = np.flatnonzero(mask)
+    assert load_npy(out_dir / "provenance.npy.zst").tolist() == kept.tolist()
+    assert _identities(out_dir) == [input_ids[i] for i in kept]
+
+
+def test_select_index_provenance_is_source_ids_not_request_tags(pool, tmp_path):
+    pose_dir, input_ids = pool
+    request = np.array([7, 1, 7, 3, 0], dtype=np.uint32)
+    np.save(tmp_path / "select.npy", request)
+    out_dir = tmp_path / "out"
+
+    _run(
+        "select-poses.py",
+        str(pose_dir),
+        str(tmp_path / "select.npy"),
+        str(out_dir),
+        "--force",
+        "--compress",
+        "--provenance",
+    )
+
+    order = load_npy(out_dir / "order-array.npy.zst")
+    provenance = load_npy(out_dir / "provenance.npy.zst")
+    out_ids = _identities(out_dir)
+    assert provenance.tolist() == sorted(request.tolist())
+    assert sorted(order.tolist()) == list(range(len(request)))
+    for output_position, request_position in enumerate(order.tolist()):
+        assert out_ids[output_position] == input_ids[int(request[request_position])]

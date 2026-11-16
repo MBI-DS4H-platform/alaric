@@ -37,6 +37,8 @@ ACTION_SCHEMAS: dict[str, set[str]] = {
     "grow": {"action", "type", "input", "restrict_input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
     "grow-test": {"action", "type", "input", "restrict_input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd", "conformer"},
     "score": {"action", "type", "input", "sequence", "exclude", "protein", "nb_kernel"},
+    "score_add": {"action", "type", "score_input1", "score_input2"},
+    "filter": {"action", "type", "input", "score_input", "threshold", "mask_input", "mask"},
     "energy-filter": {"action", "type", "input", "fragment", "sequence", "exclude", "protein", "threshold", "epsilon", "cascade", "min_cascade"},
     "rmsd": {"action", "type", "input", "fragment", "exclude", "reference"},
     "mask": {"action", "type", "input", "score_input", "threshold"},
@@ -52,6 +54,8 @@ REQUIRED: dict[str, set[str]] = {
     "grow": {"input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd"},
     "grow-test": {"input", "fragment", "sequence", "exclude", "direction", "crmsd", "ovrmsd", "conformer"},
     "score": {"input", "sequence", "exclude", "protein"},
+    "score_add": {"score_input1", "score_input2"},
+    "filter": {"input"},
     "energy-filter": {"input", "fragment", "sequence", "exclude", "protein", "threshold", "epsilon", "cascade", "min_cascade"},
     "rmsd": {"input", "fragment", "exclude"},
     "mask": {"input", "score_input", "threshold"},
@@ -67,6 +71,8 @@ DEPENDENCY_FIELDS: dict[str, dict[str, str]] = {
     "grow": {"input": POSE, "restrict_input": POSE},
     "grow-test": {"input": POSE, "restrict_input": POSE},
     "score": {"input": POSE},
+    "score_add": {"score_input1": SCORE, "score_input2": SCORE},
+    "filter": {"input": POSE, "score_input": SCORE, "mask_input": MASK},
     "energy-filter": {"input": POSE},
     "rmsd": {"input": POSE},
     "mask": {"input": POSE, "score_input": SCORE},
@@ -82,6 +88,8 @@ OUTPUT_KIND = {
     "grow": POSE,
     "grow-test": POSE,
     "score": SCORE,
+    "score_add": SCORE,
+    "filter": POSE,
     "energy-filter": POSE,
     "rmsd": SCORE,
     "mask": MASK,
@@ -190,6 +198,33 @@ def normalize_action(name: str, path: Path, data: dict[str, Any]) -> ActionSpec:
         selector = data["mask"]
         if type(selector) is not int or selector not in {1, 2}:
             raise SchemaError(f"{path}: mask must be the integer 1 or 2")
+    if action == "filter":
+        score_fields = {"score_input", "threshold"}
+        has_score_fields = bool(score_fields & set(data))
+        has_score_route = score_fields <= set(data)
+        has_mask_route = "mask_input" in data
+        if has_score_route == has_mask_route or has_score_fields != has_score_route:
+            raise SchemaError(
+                f"{path}: filter requires either score_input+threshold or mask_input"
+            )
+        if has_score_route:
+            threshold = data["threshold"]
+            if threshold == "auto":
+                raise SchemaError(
+                    f"{path}: filter threshold:auto is unavailable with the current "
+                    "constraints schema; provide an explicit numeric threshold"
+                )
+            if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
+                raise SchemaError(f"{path}: filter threshold must be a finite number")
+            if not math.isfinite(float(threshold)):
+                raise SchemaError(f"{path}: filter threshold must be a finite number")
+            data["threshold"] = float(threshold)
+        if "mask" in data:
+            if not has_mask_route:
+                raise SchemaError(f"{path}: filter.mask requires mask_input")
+            mask = data["mask"]
+            if type(mask) is not int or mask not in {1, 2}:
+                raise SchemaError(f"{path}: filter.mask must be 1 or 2")
     if action == "energy-filter":
         protein = data.get("protein")
         if not isinstance(protein, str) or re.fullmatch(r"range-\d+", protein) is None:

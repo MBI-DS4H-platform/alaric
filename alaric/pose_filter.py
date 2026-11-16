@@ -1,4 +1,4 @@
-"""Stream an organized pose dir through an index or mask selector.
+"""Stream an organized pose dir through a score threshold, index, or mask selector.
 
 Scale is the whole design. A pool holds tens of gigaposes with a per-pose mask array to
 match -- 15 gigaposes is a 15 GB boolean mask -- so nothing here may build a
@@ -138,6 +138,25 @@ def open_range_source(path: str | Path, stack: contextlib.ExitStack):
     if not is_compressed(resolved):
         return resolved
     return stack.enter_context(open_npy_mmap(resolved))
+
+
+class ScoreThresholdSelector:
+    """Keep poses whose score is below a threshold."""
+
+    tagged = False
+
+    def __init__(self, scores, threshold: float) -> None:
+        self._source = _RangeSource(scores)
+        if not np.issubdtype(self._source.dtype, np.number):
+            raise ValueError(f"{self._source.name}: score array must be numeric")
+        self.threshold = float(threshold)
+
+    def __len__(self) -> int:
+        return len(self._source)
+
+    def kept(self, start: int, stop: int) -> tuple[np.ndarray, np.ndarray | None]:
+        scores = self._source.read(start, stop)
+        return np.flatnonzero(scores < self.threshold), None
 
 
 class BoolMaskSelector:

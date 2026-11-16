@@ -88,12 +88,48 @@ class ActionGraph:
 
     def _cross_validate(self, resolved: ResolvedAction) -> None:
         p = resolved.params
-        if resolved.action == "mask":
+        if resolved.action == "score_add":
+            a = scored_pose_input(p["score_input1"])
+            b = scored_pose_input(p["score_input2"])
+            if a.name != b.name:
+                raise GraphError(
+                    f"{resolved.name}: score_add inputs must score the same pose input"
+                )
+        elif resolved.action == "mask":
             score_input = p["score_input"]
             if not isinstance(score_input, ResolvedAction):
                 raise GraphError(f"{resolved.name}: unresolved score_input")
             if scored_pose_input(score_input).name != p["input"].name:
                 raise GraphError(f"{resolved.name}: mask.score_input.input must equal mask.input")
+        elif resolved.action == "filter":
+            if "score_input" in p:
+                score_input = p["score_input"]
+                if not isinstance(score_input, ResolvedAction):
+                    raise GraphError(f"{resolved.name}: unresolved score_input")
+                if scored_pose_input(score_input).name != p["input"].name:
+                    raise GraphError(f"{resolved.name}: filter score route input mismatch")
+            if "mask_input" in p:
+                mask_input = p["mask_input"]
+                if not isinstance(mask_input, ResolvedAction):
+                    raise GraphError(f"{resolved.name}: unresolved mask_input")
+                if mask_input.action == "mask-common-conformer":
+                    mask_number = p.get("mask")
+                    if mask_number not in {1, 2}:
+                        raise GraphError(
+                            f"{resolved.name}: filter for mask-common-conformer requires mask: 1 or mask: 2"
+                        )
+                    if mask_input.params[f"input{mask_number}"].name != p["input"].name:
+                        raise GraphError(
+                            f"{resolved.name}: filter.mask must select the mask for filter.input"
+                        )
+                else:
+                    if "mask" in p:
+                        raise GraphError(
+                            f"{resolved.name}: filter.mask is only valid for mask-common-conformer"
+                        )
+                    source = mask_input.params.get("input")
+                    if not isinstance(source, ResolvedAction) or source.name != p["input"].name:
+                        raise GraphError(f"{resolved.name}: filter mask route input mismatch")
         elif resolved.action == "identity":
             input2 = p.get("input2")
             if isinstance(input2, ResolvedAction):
@@ -165,4 +201,6 @@ def scored_pose_input(score: ResolvedAction) -> ResolvedAction:
         dep = score.params.get("input")
         if isinstance(dep, ResolvedAction):
             return dep
+    if score.action == "score_add":
+        return scored_pose_input(score.params["score_input1"])
     raise GraphError(f"{score.name}: cannot resolve underlying scored pose input")

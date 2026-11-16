@@ -256,6 +256,30 @@ def template_context(action: ResolvedAction, *, alaric_dir: str, output_dir: str
                 "score_concat_command": score_concat_command(alaric_dir, output_dir, chunks_dir, location),
             }
         )
+    elif action.action == "score_add":
+        context.update(
+            {
+                "score_input1_path": shell_path(result_file(p["score_input1"], location)),
+                "score_input2_path": shell_path(result_file(p["score_input2"], location)),
+                "score_output_path": shell_path(f"{output_dir}/score.npy"),
+            }
+        )
+    elif action.action == "filter":
+        context["input_result_path"] = shell_path(dep_result_path(p["input"], location))
+        context["filter_mode"] = "mask" if "mask_input" in p else "score"
+        if "mask_input" in p:
+            mask_input = p["mask_input"]
+            if mask_input.action == "mask-common-conformer":
+                mask_path = f"{dep_result_path(mask_input, location)}/mask{p['mask']}.npy"
+                context["mask_input_path"] = shell_path(mask_path)
+            else:
+                context["mask_input_path"] = shell_path(result_file(mask_input, location))
+            context["score_input_path"] = '""'
+            context["threshold"] = '""'
+        else:
+            context["score_input_path"] = shell_path(result_file(p["score_input"], location))
+            context["threshold"] = q(p["threshold"])
+            context["mask_input_path"] = '""'
     elif action.action == "energy-filter":
         cascade_json = json.dumps(p["cascade"], separators=(",", ":"))
         context.update(

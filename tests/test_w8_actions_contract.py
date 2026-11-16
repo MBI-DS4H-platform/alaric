@@ -179,12 +179,23 @@ def test_auto_malformed_defaults_are_errors(tmp_path, text):
         runtime().resolve_config('auto', 'auto', path)
 
 
-@pytest.mark.parametrize('action', ['filter','score_add'])
-def test_removed_actions_rejected(action,tmp_path):
+@pytest.mark.parametrize(('action','payload'), [
+    ('filter', {'action':'filter', 'input':'frag4-pose', 'score_input':'frag4-score', 'threshold':-1.25}),
+    ('score_add', {'action':'score_add', 'score_input1':'frag4-score', 'score_input2':'frag4-score'}),
+])
+def test_score_filter_actions_remain_supported(action,payload,tmp_path):
+    from alaric.middle.schema import normalize_action
+    assert normalize_action('frag4-restored', tmp_path, payload).action == action
+
+
+def test_filter_requires_an_explicit_finite_threshold_under_current_constraints(tmp_path):
     from alaric.middle.schema import normalize_action
     from alaric.middle.errors import SchemaError
-    with pytest.raises(SchemaError):
-        normalize_action('frag1-old', tmp_path, {'action':action})
+    with pytest.raises(SchemaError, match='threshold:auto is unavailable'):
+        normalize_action('frag4-filter', tmp_path, {
+            'action':'filter', 'input':'frag4-pose', 'score_input':'frag4-score',
+            'threshold':'auto',
+        })
 
 
 def test_score_action_is_restored_with_legacy_kernel_default(tmp_path):

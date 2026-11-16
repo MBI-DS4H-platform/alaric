@@ -192,6 +192,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--provenance",
+        action="store_true",
+        help="Write provenance.npy mapping each output pose to its input pose index.",
+    )
+    parser.add_argument(
         "--nprocs",
         type=int,
         default=default_nprocs(),
@@ -229,10 +234,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"Selecting from {nposes:,} pose(s)", flush=True)
 
+        # Keep source-pose provenance separate from the selector's request-position
+        # tags. organize consumes those tags to make an order array for index requests.
+        source_provenance = out_dir / ".selected-source-provenance.npy"
+
         stats = filter_pose_dir(
             pose_dir,
             out_dir,
             selector,
+            provenance_path=source_provenance if args.provenance else None,
             compress=bool(args.compress),
             nprocs=int(args.nprocs),
             chunk_poses=int(args.chunk_poses),
@@ -250,6 +260,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         if written is not None:
             print(f"Wrote order array: {written}", flush=True)
+    if args.provenance:
+        produced = find_npy(out_dir / ".selected-source-provenance.npy")
+        if produced is None:
+            raise RuntimeError("selection did not produce source-pose provenance")
+        target = compressed_path(out_dir / PROVENANCE_NAME) if args.compress else out_dir / PROVENANCE_NAME
+        shutil.move(str(produced), str(target))
+        print(f"Wrote provenance: {target}", flush=True)
     print(f"Done: {out_dir}", flush=True)
     return 0
 

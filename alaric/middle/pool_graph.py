@@ -97,7 +97,7 @@ def _pool_kind(action: ResolvedAction) -> str:
         return "anchor"
     if action.action in {"grow", "grow-test"}:
         return "grow"
-    if action.action in {"energy-filter", "apply-mask"}:
+    if action.action in {"filter", "energy-filter", "apply-mask"}:
         return "filter"
     if action.action == "identity":
         in1 = action.params.get("input1")
@@ -132,7 +132,7 @@ def _provenance_edges(action: ResolvedAction, fragment: int, frag_of: dict[str, 
             edges.append(
                 ProvEdge(restrict.name, "restrict", None, frag_of[restrict.name] != fragment)
             )
-    elif action.action in {"energy-filter", "apply-mask"}:
+    elif action.action in {"filter", "energy-filter", "apply-mask"}:
         src = dep("input")
         if src is not None:
             edges.append(
@@ -193,6 +193,12 @@ class PoolGraph:
                     "epsilon": action.params.get("epsilon"),
                     "cascade": action.params.get("cascade"),
                     "min_cascade": action.params.get("min_cascade"),
+                }
+            elif action.action == "filter":
+                score_input = action.params.get("score_input")
+                node.constraint = {
+                    "threshold": action.params.get("threshold"),
+                    "score_input": score_input.name if isinstance(score_input, ResolvedAction) else None,
                 }
             sigil = _read_sigil(action)
             if sigil:

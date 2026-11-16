@@ -1,5 +1,7 @@
-# Retired middle-action examples
+# Middle-action fixtures
 
-These archived project fragments document legacy `score`, `filter`, and `score_add` configurations. Standalone `score` has since been restored as a grid-score action; `filter` and `score_add` remain retired. `energy-filter` takes one protein range per action, with multiple ranges chained as successive AND filters. The `score_add` fixtures encoded a sum and had no separate per-range thresholds, so they are kept only as historical source. Tests for the retired score-threshold `filter-poses.py` utility are archived here too; `select-poses.py` remains for explicit mask/index selection.
+`score`, `filter`, and `score_add` are supported actions. `score` computes per-pose scores, `filter` selects poses from scores or an explicit mask/index array, and `score_add` combines score arrays. `energy-filter` provides a separate cascading energy-threshold action; it does not retire those actions.
 
-Current executable replacements use energy-filter fixtures in `tests/middle/test_pool_graph.py` and the W8 contract fixtures in `tests/fixtures/w8/`. The 1b7f anchor-refe directory retains its non-retired reference threshold YAMLs consumed by `tests/test_w2_contract.py`; it is no longer a runnable full project.
+The action configurations and generated graphs for `1b7f-anchor-refe`, `1b7f-gaussian-anchor-all-unbound`, and `1b7f-gaussian-anchor-nori-unbound` are restored to their original directories under `tests/`. The score-threshold and mask/index CLI tests are restored to `tests/1b7f/test_filter_zstd.py` and `tests/1b7f/test_pose_filter.py`, using the existing `.alaric` source link.
+
+The remaining project snapshots in this directory were moved here by the W8 change. Their location does not indicate that their actions are retired. Additional energy-filter fixtures live in `tests/middle/test_pool_graph.py` and `tests/fixtures/w8/`.

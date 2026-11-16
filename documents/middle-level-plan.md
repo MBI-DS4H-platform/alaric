@@ -1,6 +1,6 @@
 # Middle-Level Command Toolchain Handoff
 
-> **Historical.** The current action set and parameters are in `documents/middle-level.txt`. Standalone `score` has since been restored beside `energy-filter`; `filter` and `score_add` remain retired. `anchor` uses only precomputed Gaussian filters.
+> **Historical.** The current action set and parameters are in `documents/middle-level.txt`. `score`, `filter`, and `score_add` are supported actions alongside `energy-filter`. `anchor` uses only precomputed Gaussian filters.
 
 ## Summary
 Implement the middle level as a strict `alaric.yaml` action graph with deterministic `auto` resolution, content-addressed sigils, plain-bash deployers, and checksum-based local/remote result lifecycle. Use Seamless only for canonical JSON and byte/deepfolder checksums. No `seamless-run`, no Slurm, no automatizer logic.
@@ -78,9 +78,9 @@ Auto-resolution rules, field by field:
 - `angle:auto`:
   `DATA/anchor.yaml["angle"]`
 - `threshold:auto`:
-  The old score/filter `threshold:auto` route described here is retired. Schema-1
-  `constraints.json` contains fragment sequences and grow-pair thresholds only; it has no
-  score thresholds.
+  `mask.threshold:auto` and `filter.threshold:auto` are unavailable with the current
+  schema-1 `constraints.json`, which contains fragment sequences and grow-pair thresholds
+  but no score thresholds. Supply an explicit finite numeric threshold for either action.
 - `reference` in `rmsd` is not an `auto` field:
   default to `DATA/reference.pdb` when omitted; allow explicit override
 

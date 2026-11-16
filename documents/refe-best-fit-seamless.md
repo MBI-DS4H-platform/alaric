@@ -243,8 +243,11 @@ preparation fixes these points:
 - The middle layer additionally accepts `ovrmsd: -1` for `anchor-refe`. That is
   the export's sentinel for a disabled positive control. Such an action deploys
   but fails when it runs, and it does not stop the project's other actions.
-- Standalone `score` is available alongside `energy-filter` again. `score` writes
-  the historical 10/12 Å grid-score array; `filter` and `score_add` remain retired.
+- Standalone `score`, `filter`, and `score_add` are available alongside
+  `energy-filter`. `score` writes the historical 10/12 Å grid-score array;
+  `score_add` combines arrays for the same pose input, and `filter` applies an
+  explicit score threshold or a mask/index selector. `filter.threshold:auto` is
+  unavailable because the current constraints schema no longer stores score thresholds.
   `energy-filter` provides the range-specific filtering semantics: it scores one
   fragment against exactly one protein range and keeps poses with energy strictly
   below the threshold. Several ranges are chained as successive AND filters and

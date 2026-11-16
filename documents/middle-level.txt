@@ -90,6 +90,16 @@ nb_kernel: compiled (default) or jax
 Local and remote chunk deployers split the input into global, 1-based pose ranges and
 concatenate the chunk arrays in input order. The final score array remains float32.
 
+## score_add
+
+Adds two per-pose score arrays element by element and writes the result as
+`score.npy`. Both score actions must score the same pose input; this includes
+`score` and `rmsd` results. The score arrays must be one-dimensional, real-valued,
+and the same length. Inputs may be uncompressed or zstd-compressed NumPy arrays.
+
+score_input1: name of a scoring action dir
+score_input2: name of a scoring action dir over the same pose input
+
 
 ## energy-filter
 
@@ -140,6 +150,29 @@ input: name of action dir
 score_input: name of scoring action dir
 threshold: numeric cutoff for the selected score array (`threshold:auto` is unsupported)
 The score_input.input must be equal to the input
+
+## filter
+
+Writes a filtered, organized pose directory with `provenance.npy` mapping every
+output pose back to its source pose. Exactly one selector route is required:
+
+- `score_input` plus an explicit numeric `threshold` keeps scores strictly below
+  that threshold. The score action must score the filter's `input` pose pool.
+- `mask_input` selects the supplied boolean mask or zero-based index array. A
+  `mask` action supplies `mask.npy`; a `mask-common-conformer` action supplies
+  `mask1.npy` and `mask2.npy`, selected with `mask: 1` or `mask: 2`.
+
+The current schema-1 `constraints.json` contains fragment sequences and grow-pair
+thresholds, not score thresholds. Therefore `filter.threshold` must be explicit;
+the historical `threshold:auto` score lookup cannot be resolved from current project
+metadata. `filter` is non-chunked; `local-chunk` and `remote-chunk` run its regular
+single-script backend.
+
+input: name of a pose action dir
+score_input: name of a scoring action dir (score route)
+threshold: finite numeric score cutoff (score route)
+mask_input: name of a mask-producing action dir (mask route)
+mask: 1 or 2, required only for a `mask-common-conformer` input
 
 
 ## grow

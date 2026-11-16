@@ -1,4 +1,4 @@
 # Reference-only fixture directory
 
-This is not a runnable middle-level project. Its retired `score`, `filter`, and `score_add` action configs and generated graph were archived under `tests/legacy-middle-actions/`. Do not use the remaining files as an executable example. Current energy-filter examples live in `tests/middle/test_pool_graph.py` and `tests/fixtures/w8/`.
+This is a reference-only middle-level project snapshot. Its `score`, `filter`, and `score_add` actions are supported, but the archived configs and generated graph are not maintained as a runnable example. Current action and energy-filter tests live under `tests/middle/` and `tests/1b7f/`.
 
