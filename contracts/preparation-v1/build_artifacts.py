@@ -40,7 +40,7 @@ fit_echo = obj(dict(pdb_code=string, rna=row, resids=arr(residue)))
 energy_echo = obj(dict(best_fits=fit_echo, protein_ranges=arr(row, uniqueItems=True)))
 clip = envelope(dict(basis=basis, clip1={"type":"integer","minimum":0}, clip2={"type":"integer","minimum":0}))
 score_echo = obj(dict(bestfit_stackings=energy_echo, selected_keys=arr(string, uniqueItems=True), clip=clip))
-class_row = {"anyOf":[obj(dict(key=string,rrm={"enum":[50,60,70,80]})),obj(dict(key=string,rrm={"enum":[90,95]},tilt30=boolean,disp45=boolean))]}
+class_row = {"anyOf":[obj(dict(key=string,rrm={"enum":[50,60,70,80]},excluded=boolean),optional=("excluded",)),obj(dict(key=string,rrm={"enum":[90,95]},tilt30=boolean,disp45=boolean,excluded=boolean),optional=("excluded",))]}
 pair_fields = dict(down=positive_int, up=positive_int, sequence={"type":"string","pattern":"^[ACGU]{3}$"})
 base_fields = dict(fragment=positive_int, sequence={"type":"string","pattern":"^[ACGU]{2}$"})
 def thresholds(computed):

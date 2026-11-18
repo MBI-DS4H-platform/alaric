@@ -1906,6 +1906,9 @@
                           70,
                           80
                         ]
+                      },
+                      "excluded": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -1931,6 +1934,9 @@
                         "type": "boolean"
                       },
                       "disp45": {
+                        "type": "boolean"
+                      },
+                      "excluded": {
                         "type": "boolean"
                       }
                     },
@@ -3890,6 +3896,9 @@
                               70,
                               80
                             ]
+                          },
+                          "excluded": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
@@ -3915,6 +3924,9 @@
                             "type": "boolean"
                           },
                           "disp45": {
+                            "type": "boolean"
+                          },
+                          "excluded": {
                             "type": "boolean"
                           }
                         },
