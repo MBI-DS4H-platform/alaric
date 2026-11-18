@@ -895,7 +895,9 @@
                   "up",
                   "sequence",
                   "ovrmsd",
-                  "crmsd"
+                  "crmsd",
+                  "ovrmsd_raw",
+                  "crmsd_raw"
                 ],
                 "additionalProperties": false
               }

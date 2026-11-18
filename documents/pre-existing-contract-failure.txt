@@ -1,0 +1,40 @@
+Pre-existing shared contract check failure
+Recorded: 2026-11-16
+
+Resolved: 2026-11-19
+The recorded failure still reproduced before this fix. The schema generator
+constructed the pair's required-field list before adding ovrmsd_raw and
+crmsd_raw. Both raw pair fields are now required in S9, and regression
+fixtures cover every required raw pair/base RMSD field.
+
+The full run then exposed stale threshold checks in both test validators:
+legacy S11 bases were misclassified, and RMSD/completeness consumers still
+read bases although S11 now contains pairs only. These checks now follow the
+current contract. The runner's inventory assertions also now account for
+the removed T23 and S20 entries.
+
+Verification: the reproduction command below now passes all 266 shared
+cases in Python and TypeScript with exact agreement, JSON round trips,
+golden reference metadata, and active inventory checks. No scientific
+calculations or application-consumer acceptance checks were run.
+
+Original report follows (historical):
+
+Reproduce from /home/agent/alaric:
+  conda run --live-stream -n preparic python tests/contracts/run_contract_checks.py
+
+The runner stops at fixture "computed-raw-required" (boundary S9):
+  validate.ContractError: fixture computed-raw-required:
+  {'valid': True} != {'error': 'required'}
+
+The fixture expects a missing required field to be rejected, but the schema
+validator accepts the payload. The fixture is in contracts/preparation-v1/
+fixtures.json; its source is build_artifacts.py, near line 183.
+
+Baseline verification: running the same fixtures against schemas.json read
+from git HEAD, without the stage-6 exclusion schema changes, produced the
+identical failure. This failure therefore predates those changes.
+
+The 17 contract fixtures affected by the stage-6 schema changes passed when
+run separately. The full contract runner remains blocked by the failure above;
+later fixtures have not all been verified by that run. No fix was attempted.

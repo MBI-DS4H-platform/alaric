@@ -1815,6 +1815,55 @@
       }
     },
     {
+      "id": "threshold-pairs-only-valid",
+      "operation": "rmsd",
+      "payload": {
+        "schema": 1,
+        "basis": {
+          "pdbcode": "1b7f",
+          "rna": {
+            "chain": "R",
+            "start": 101,
+            "end": 106
+          }
+        },
+        "active": true,
+        "pairs": [
+          {
+            "down": 1,
+            "up": 2,
+            "sequence": "ACG",
+            "ovrmsd": null,
+            "crmsd": null
+          },
+          {
+            "down": 2,
+            "up": 3,
+            "sequence": "CGU",
+            "ovrmsd": null,
+            "crmsd": null
+          },
+          {
+            "down": 3,
+            "up": 4,
+            "sequence": "GUA",
+            "ovrmsd": null,
+            "crmsd": null
+          },
+          {
+            "down": 4,
+            "up": 5,
+            "sequence": "UAC",
+            "ovrmsd": null,
+            "crmsd": null
+          }
+        ]
+      },
+      "expected": {
+        "valid": true
+      }
+    },
+    {
       "id": "computed-raw-required",
       "operation": "schema",
       "payload": {
@@ -1910,6 +1959,414 @@
             "nuc2_ovrmsd": "0.13",
             "nuc1_ovrmsd_raw": 0.123,
             "nuc2_ovrmsd_raw": 0.123
+          },
+          {
+            "fragment": 2,
+            "sequence": "CG",
+            "nuc1_ovrmsd": "0.13",
+            "nuc2_ovrmsd": "0.13",
+            "nuc1_ovrmsd_raw": 0.123,
+            "nuc2_ovrmsd_raw": 0.123
+          },
+          {
+            "fragment": 3,
+            "sequence": "GU",
+            "nuc1_ovrmsd": "0.13",
+            "nuc2_ovrmsd": "0.13",
+            "nuc1_ovrmsd_raw": 0.123,
+            "nuc2_ovrmsd_raw": 0.123
+          },
+          {
+            "fragment": 4,
+            "sequence": "UA",
+            "nuc1_ovrmsd": "0.13",
+            "nuc2_ovrmsd": "0.13",
+            "nuc1_ovrmsd_raw": 0.123,
+            "nuc2_ovrmsd_raw": 0.123
+          },
+          {
+            "fragment": 5,
+            "sequence": "AC",
+            "nuc1_ovrmsd": "0.13",
+            "nuc2_ovrmsd": "0.13",
+            "nuc1_ovrmsd_raw": 0.123,
+            "nuc2_ovrmsd_raw": 0.123
+          }
+        ]
+      },
+      "expected": {
+        "error": "required"
+      },
+      "boundary": "S9"
+    },
+    {
+      "id": "computed-crmsd_raw-required",
+      "operation": "schema",
+      "payload": {
+        "schema": 1,
+        "echo": {
+          "pdb_code": "1b7f",
+          "rna": {
+            "chain": "R",
+            "start": 101,
+            "end": 106
+          },
+          "resids": [
+            {
+              "chain": "R",
+              "resid": 101,
+              "insertion_code": "",
+              "base": "A"
+            },
+            {
+              "chain": "R",
+              "resid": 102,
+              "insertion_code": "",
+              "base": "C"
+            },
+            {
+              "chain": "R",
+              "resid": 103,
+              "insertion_code": "",
+              "base": "G"
+            },
+            {
+              "chain": "R",
+              "resid": 104,
+              "insertion_code": "",
+              "base": "U"
+            },
+            {
+              "chain": "R",
+              "resid": 105,
+              "insertion_code": "",
+              "base": "A"
+            },
+            {
+              "chain": "R",
+              "resid": 106,
+              "insertion_code": "",
+              "base": "C"
+            }
+          ]
+        },
+        "pairs": [
+          {
+            "down": 1,
+            "up": 2,
+            "sequence": "ACG",
+            "ovrmsd": "0.13",
+            "crmsd": "0.13",
+            "ovrmsd_raw": 0.123
+          },
+          {
+            "down": 2,
+            "up": 3,
+            "sequence": "CGU",
+            "ovrmsd": "0.13",
+            "crmsd": "0.13",
+            "ovrmsd_raw": 0.123,
+            "crmsd_raw": 0.123
+          },
+          {
+            "down": 3,
+            "up": 4,
+            "sequence": "GUA",
+            "ovrmsd": "0.13",
+            "crmsd": "0.13",
+            "ovrmsd_raw": 0.123,
+            "crmsd_raw": 0.123
+          },
+          {
+            "down": 4,
+            "up": 5,
+            "sequence": "UAC",
+            "ovrmsd": "0.13",
+            "crmsd": "0.13",
+            "ovrmsd_raw": 0.123,
+            "crmsd_raw": 0.123
+          }
+        ],
+        "bases": [
+          {
+            "fragment": 1,
+            "sequence": "AC",
+            "nuc1_ovrmsd": "0.13",
+            "nuc2_ovrmsd": "0.13",
+            "nuc1_ovrmsd_raw": 0.123,
+            "nuc2_ovrmsd_raw": 0.123
+          },
+          {
+            "fragment": 2,
+            "sequence": "CG",
+            "nuc1_ovrmsd": "0.13",
+            "nuc2_ovrmsd": "0.13",
+            "nuc1_ovrmsd_raw": 0.123,
+            "nuc2_ovrmsd_raw": 0.123
+          },
+          {
+            "fragment": 3,
+            "sequence": "GU",
+            "nuc1_ovrmsd": "0.13",
+            "nuc2_ovrmsd": "0.13",
+            "nuc1_ovrmsd_raw": 0.123,
+            "nuc2_ovrmsd_raw": 0.123
+          },
+          {
+            "fragment": 4,
+            "sequence": "UA",
+            "nuc1_ovrmsd": "0.13",
+            "nuc2_ovrmsd": "0.13",
+            "nuc1_ovrmsd_raw": 0.123,
+            "nuc2_ovrmsd_raw": 0.123
+          },
+          {
+            "fragment": 5,
+            "sequence": "AC",
+            "nuc1_ovrmsd": "0.13",
+            "nuc2_ovrmsd": "0.13",
+            "nuc1_ovrmsd_raw": 0.123,
+            "nuc2_ovrmsd_raw": 0.123
+          }
+        ]
+      },
+      "expected": {
+        "error": "required"
+      },
+      "boundary": "S9"
+    },
+    {
+      "id": "computed-nuc1_ovrmsd_raw-required",
+      "operation": "schema",
+      "payload": {
+        "schema": 1,
+        "echo": {
+          "pdb_code": "1b7f",
+          "rna": {
+            "chain": "R",
+            "start": 101,
+            "end": 106
+          },
+          "resids": [
+            {
+              "chain": "R",
+              "resid": 101,
+              "insertion_code": "",
+              "base": "A"
+            },
+            {
+              "chain": "R",
+              "resid": 102,
+              "insertion_code": "",
+              "base": "C"
+            },
+            {
+              "chain": "R",
+              "resid": 103,
+              "insertion_code": "",
+              "base": "G"
+            },
+            {
+              "chain": "R",
+              "resid": 104,
+              "insertion_code": "",
+              "base": "U"
+            },
+            {
+              "chain": "R",
+              "resid": 105,
+              "insertion_code": "",
+              "base": "A"
+            },
+            {
+              "chain": "R",
+              "resid": 106,
+              "insertion_code": "",
+              "base": "C"
+            }
+          ]
+        },
+        "pairs": [
+          {
+            "down": 1,
+            "up": 2,
+            "sequence": "ACG",
+            "ovrmsd": "0.13",
+            "crmsd": "0.13",
+            "ovrmsd_raw": 0.123,
+            "crmsd_raw": 0.123
+          },
+          {
+            "down": 2,
+            "up": 3,
+            "sequence": "CGU",
+            "ovrmsd": "0.13",
+            "crmsd": "0.13",
+            "ovrmsd_raw": 0.123,
+            "crmsd_raw": 0.123
+          },
+          {
+            "down": 3,
+            "up": 4,
+            "sequence": "GUA",
+            "ovrmsd": "0.13",
+            "crmsd": "0.13",
+            "ovrmsd_raw": 0.123,
+            "crmsd_raw": 0.123
+          },
+          {
+            "down": 4,
+            "up": 5,
+            "sequence": "UAC",
+            "ovrmsd": "0.13",
+            "crmsd": "0.13",
+            "ovrmsd_raw": 0.123,
+            "crmsd_raw": 0.123
+          }
+        ],
+        "bases": [
+          {
+            "fragment": 1,
+            "sequence": "AC",
+            "nuc1_ovrmsd": "0.13",
+            "nuc2_ovrmsd": "0.13",
+            "nuc2_ovrmsd_raw": 0.123
+          },
+          {
+            "fragment": 2,
+            "sequence": "CG",
+            "nuc1_ovrmsd": "0.13",
+            "nuc2_ovrmsd": "0.13",
+            "nuc1_ovrmsd_raw": 0.123,
+            "nuc2_ovrmsd_raw": 0.123
+          },
+          {
+            "fragment": 3,
+            "sequence": "GU",
+            "nuc1_ovrmsd": "0.13",
+            "nuc2_ovrmsd": "0.13",
+            "nuc1_ovrmsd_raw": 0.123,
+            "nuc2_ovrmsd_raw": 0.123
+          },
+          {
+            "fragment": 4,
+            "sequence": "UA",
+            "nuc1_ovrmsd": "0.13",
+            "nuc2_ovrmsd": "0.13",
+            "nuc1_ovrmsd_raw": 0.123,
+            "nuc2_ovrmsd_raw": 0.123
+          },
+          {
+            "fragment": 5,
+            "sequence": "AC",
+            "nuc1_ovrmsd": "0.13",
+            "nuc2_ovrmsd": "0.13",
+            "nuc1_ovrmsd_raw": 0.123,
+            "nuc2_ovrmsd_raw": 0.123
+          }
+        ]
+      },
+      "expected": {
+        "error": "required"
+      },
+      "boundary": "S9"
+    },
+    {
+      "id": "computed-nuc2_ovrmsd_raw-required",
+      "operation": "schema",
+      "payload": {
+        "schema": 1,
+        "echo": {
+          "pdb_code": "1b7f",
+          "rna": {
+            "chain": "R",
+            "start": 101,
+            "end": 106
+          },
+          "resids": [
+            {
+              "chain": "R",
+              "resid": 101,
+              "insertion_code": "",
+              "base": "A"
+            },
+            {
+              "chain": "R",
+              "resid": 102,
+              "insertion_code": "",
+              "base": "C"
+            },
+            {
+              "chain": "R",
+              "resid": 103,
+              "insertion_code": "",
+              "base": "G"
+            },
+            {
+              "chain": "R",
+              "resid": 104,
+              "insertion_code": "",
+              "base": "U"
+            },
+            {
+              "chain": "R",
+              "resid": 105,
+              "insertion_code": "",
+              "base": "A"
+            },
+            {
+              "chain": "R",
+              "resid": 106,
+              "insertion_code": "",
+              "base": "C"
+            }
+          ]
+        },
+        "pairs": [
+          {
+            "down": 1,
+            "up": 2,
+            "sequence": "ACG",
+            "ovrmsd": "0.13",
+            "crmsd": "0.13",
+            "ovrmsd_raw": 0.123,
+            "crmsd_raw": 0.123
+          },
+          {
+            "down": 2,
+            "up": 3,
+            "sequence": "CGU",
+            "ovrmsd": "0.13",
+            "crmsd": "0.13",
+            "ovrmsd_raw": 0.123,
+            "crmsd_raw": 0.123
+          },
+          {
+            "down": 3,
+            "up": 4,
+            "sequence": "GUA",
+            "ovrmsd": "0.13",
+            "crmsd": "0.13",
+            "ovrmsd_raw": 0.123,
+            "crmsd_raw": 0.123
+          },
+          {
+            "down": 4,
+            "up": 5,
+            "sequence": "UAC",
+            "ovrmsd": "0.13",
+            "crmsd": "0.13",
+            "ovrmsd_raw": 0.123,
+            "crmsd_raw": 0.123
+          }
+        ],
+        "bases": [
+          {
+            "fragment": 1,
+            "sequence": "AC",
+            "nuc1_ovrmsd": "0.13",
+            "nuc2_ovrmsd": "0.13",
+            "nuc1_ovrmsd_raw": 0.123
           },
           {
             "fragment": 2,

@@ -158,6 +158,8 @@ def execute(case, definitions):
             return dict(value=None,diagnostic='legacy')
         if 'schema' not in parsed:
             return dict(value=None,diagnostic='unsupported')
+        if 'bases' in parsed:
+            return dict(value=None,diagnostic='legacy')
         try:
             validate_boundary(parsed,'S11',definitions)
         except ContractError:
@@ -189,8 +191,8 @@ def execute(case, definitions):
     elif op=='range-gate':
         return {'allowed':not value['has_unobserved']}
     elif op=='rmsd':
-        for row in value['bases']:
-            for key in ('nuc1_ovrmsd','nuc2_ovrmsd'):
+        for row in value['pairs']:
+            for key in ('ovrmsd','crmsd'):
                 require(row[key] is None or float(row[key])>0,'positive')
     elif op=='type-energy':
         return {'value':type_energy(value)}
@@ -222,13 +224,9 @@ def execute(case, definitions):
         return {'complete':True}
     elif op=='threshold-complete':
         kept=case['kept']
-        wanted_bases=[b['number'] for b in case['fragment_map']['fragments'] if b['number'] in kept]
         wanted_pairs=[(p['down'],p['up']) for p in case['fragment_map']['adjacent_pairs'] if p['down'] in kept and p['up'] in kept]
-        bases=[b for b in value['bases'] if b['fragment'] in kept]
         pairs=[p for p in value['pairs'] if p['down'] in kept and p['up'] in kept]
-        complete=sorted(b['fragment'] for b in bases)==sorted(wanted_bases)
-        complete=complete and sorted((p['down'],p['up']) for p in pairs)==sorted(wanted_pairs)
-        complete=complete and all(b['nuc1_ovrmsd'] is not None and b['nuc2_ovrmsd'] is not None for b in bases)
+        complete=sorted((p['down'],p['up']) for p in pairs)==sorted(wanted_pairs)
         complete=complete and all(p['ovrmsd'] is not None and p['crmsd'] is not None for p in pairs)
         return {'complete':complete}
     elif op=='gate':

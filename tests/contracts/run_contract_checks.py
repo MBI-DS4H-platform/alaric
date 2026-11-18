@@ -58,8 +58,8 @@ def main():
         if case['operation']=='schema' and case['boundary']=='S25' and case['expected']=={'valid':True} and case['payload']:
             assert case['payload']['legal_filter_names']==list(model['thresholds'])
     inventory=json.loads((ARTIFACTS/'inventory.json').read_text())
-    assert len(inventory['active_transformers'])==28 and 'T17' not in inventory['active_transformers']
-    assert len(inventory['active_shares'])==24 and 'S16' not in inventory['active_shares']
+    assert set(inventory['active_transformers'])=={'T'+str(i) for i in range(29) if i not in (17,23)}
+    assert set(inventory['active_shares'])=={'S'+str(i) for i in range(1,26) if i not in (16,20)}
     assert set(inventory['active_shares'])==set(k for k in inventory['schemas'] if k.startswith('S'))|set(inventory['non_enveloped_shares'])
     print(f"PASS: {len(ids)} shared cases in Python + TypeScript; exact agreement; JSON round trips; golden reference metadata; active inventory")
     print('No scientific calculations, caches, services, real application consumers or future step acceptance executed.')

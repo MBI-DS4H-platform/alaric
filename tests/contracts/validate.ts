@@ -99,6 +99,7 @@ function execute(c: Json,defs: Json): Json {
       if('schema' in parsed && parsed.schema!==1) return {value:null,diagnostic:'unsupported'};
       if(!('basis' in parsed)) return {value:null,diagnostic:'legacy'};
       if(!('schema' in parsed)) return {value:null,diagnostic:'unsupported'};
+      if('bases' in parsed) return {value:null,diagnostic:'legacy'};
       try { validateBoundary(parsed,'S11',defs); } catch(e) { if (!(e instanceof ContractError)) throw e; return {value:null,diagnostic:'malformed'}; }
       return {value:parsed,diagnostic:null};
     }
@@ -121,7 +122,7 @@ function execute(c: Json,defs: Json): Json {
       need(c.legal_names.includes(value.expected.filter_name),'filter-name');
       need(value.candidates.every((x: Json)=>c.legal_names.includes(x.score_cutoff)),'filter-name'); break;
     case 'range-gate': return {allowed:!value.has_unobserved};
-    case 'rmsd': for(const row of value.bases) for(const key of ['nuc1_ovrmsd','nuc2_ovrmsd']) need(row[key]===null || Number(row[key])>0,'positive'); break;
+    case 'rmsd': for(const row of value.pairs) for(const key of ['ovrmsd','crmsd']) need(row[key]===null || Number(row[key])>0,'positive'); break;
     case 'type-energy': return {value:typeEnergy(value)};
     case 'energy-copy': {
       need(c.fresh,'stale'); need(c.confirmed || !value.ranges.some((r: Json)=>Object.values(r.values).some(v=>v!==null)),'confirmation');
@@ -141,11 +142,9 @@ function execute(c: Json,defs: Json): Json {
       return {complete:true};
     }
     case 'threshold-complete': {
-      const wantedBases=c.fragment_map.fragments.filter((b: Json)=>c.kept.includes(b.number)).map((b: Json)=>b.number).sort();
       const wantedPairs=c.fragment_map.adjacent_pairs.filter((p: Json)=>c.kept.includes(p.down) && c.kept.includes(p.up)).map((p: Json)=>[p.down,p.up]).sort();
-      const bases=value.bases.filter((b: Json)=>c.kept.includes(b.fragment));
       const pairs=value.pairs.filter((p: Json)=>c.kept.includes(p.down) && c.kept.includes(p.up));
-      return {complete:equal(bases.map((b: Json)=>b.fragment).sort(),wantedBases) && equal(pairs.map((p: Json)=>[p.down,p.up]).sort(),wantedPairs) && bases.every((b: Json)=>b.nuc1_ovrmsd!==null && b.nuc2_ovrmsd!==null) && pairs.every((p: Json)=>p.ovrmsd!==null && p.crmsd!==null)};
+      return {complete:equal(pairs.map((p: Json)=>[p.down,p.up]).sort(),wantedPairs) && pairs.every((p: Json)=>p.ovrmsd!==null && p.crmsd!==null)};
     }
     case 'gate': return {allowed:Object.values(value.checks).every(Boolean) && value.validator_status!=='failed'};
     case 'proceed': return {allowed:!(['red','amber'].includes(value.state) || value.energy>=Number(value.threshold)) || value.confirmed};

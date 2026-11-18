@@ -46,9 +46,10 @@ base_fields = dict(fragment=positive_int, sequence={"type":"string","pattern":"^
 def thresholds(computed):
     value = rmsd if computed else nullable(rmsd)
     pair = dict(pair_fields, ovrmsd=value, crmsd=value)
-    result = dict(pairs=arr(obj(pair)))
     if computed:
         pair.update(ovrmsd_raw=number, crmsd_raw=number)
+    result = dict(pairs=arr(obj(pair)))
+    if computed:
         base = dict(base_fields, nuc1_ovrmsd=value, nuc2_ovrmsd=value)
         base.update(nuc1_ovrmsd_raw=number, nuc2_ovrmsd_raw=number)
         result['bases'] = arr(obj(base))
@@ -179,8 +180,12 @@ if __name__ == '__main__':
     shape('threshold-too-many-decimals','S11',bad,'pattern')
     bad=copy.deepcopy(tedit); bad['pairs'][0]['ovrmsd']='0'
     case('threshold-zero-rejected','rmsd',bad,{'error':'pattern'})
+    case('threshold-pairs-only-valid','rmsd',tedit,{'valid':True})
     bad=copy.deepcopy(computed); del bad['pairs'][0]['ovrmsd_raw']
     shape('computed-raw-required','S9',bad,'required')
+    for collection, field in [('pairs', 'crmsd_raw'), ('bases', 'nuc1_ovrmsd_raw'), ('bases', 'nuc2_ovrmsd_raw')]:
+        bad=copy.deepcopy(computed); del bad[collection][0][field]
+        shape('computed-'+field+'-required','S9',bad,'required')
     for token in ['activation_token','parent_token','validation_receipt','model_identity']:
         bad=dict(tedit,**{token:'rejected-extension'})
         shape('reject-'+token,'S11',bad,'additional')
