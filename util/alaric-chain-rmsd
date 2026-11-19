@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Installed via setuptools script-files, so chain_rmsd.py is copied beside
+# this launcher in the environment's bin/ directory.
+PYTHON="${PYTHON:-python}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+exec "${PYTHON}" "${SCRIPT_DIR}/chain_rmsd.py" "$@"

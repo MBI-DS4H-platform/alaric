@@ -19,7 +19,14 @@ dependencies = [
 include = ["alaric*"]
 
 [tool.setuptools]
-script-files = ["util/alaric-count-poses", "util/alaric-copy", "util/alaric-rmsd"]
+script-files = [
+    "util/alaric-count-poses",
+    "util/alaric-copy",
+    "util/alaric-rmsd",
+    "util/alaric-chain-rmsd",
+    "util/chain_rmsd.py",
+    "util/alaric-write-pdb",
+]
 
 [project.scripts]
 alaric-sigil = "alaric.middle.sigil:main"

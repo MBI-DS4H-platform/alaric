@@ -5,6 +5,7 @@ Author: Sjoerd de Vries
 This file is part of the Nefertiti project.
 """
 
+import argparse
 from typing import List
 
 import numpy as np
@@ -179,15 +180,24 @@ def build_pdb_fragment_backbone(
     return atoms
 
 
-if __name__ == "__main__":
-    import sys
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="alaric-write-pdb",
+        description="Convert an Alaric atom-array .npy file to PDB format.",
+    )
+    parser.add_argument("npy_file", help="Input atom-array .npy file.")
+    parser.add_argument("outfile", help="Output PDB file.")
+    args = parser.parse_args(argv)
 
-    npy_file = sys.argv[1]
-    outfile = sys.argv[2]
-    struc = np.load(npy_file)
+    struc = np.load(args.npy_file)
     if struc.ndim > 1:
         pdb_data = write_multi_pdb(struc)
     else:
         pdb_data = write_pdb(struc, ter=True)
-    with open(outfile, "w") as f:
+    with open(args.outfile, "w") as f:
         f.write(pdb_data)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

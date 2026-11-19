@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# write_pdb.py is part of the installed alaric package. Find it through the
+# active Python environment rather than relying on the checkout's location.
+PYTHON="${PYTHON:-python}"
+ALARIC_DIR="$(${PYTHON} -c 'import os, alaric; print(os.path.dirname(os.path.abspath(alaric.__file__)))')"
+
+exec "${PYTHON}" "${ALARIC_DIR}/write_pdb.py" "$@"
