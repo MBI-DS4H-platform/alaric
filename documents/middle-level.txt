@@ -261,6 +261,9 @@ It is calculated as follows:
    File parameters (PDB files directly read from DATA at runtime) are split:
    - The filename goes in a parameter that has the parameter name prepended by double underscore
    - The normal parameter name has the filename replaced by the Seamless checksum (SHA-256)4
+   Values that are only extracted from a DATA file (energy-filter threshold, cascade and min_cascade
+   when auto) are not file parameters. The extracted value goes into the parameters, as if it had been
+   given explicitly, and the file is not checksummed. An explicit and an auto value give the same sigil.
 2. Dependencies (inputs) are removed. The result is organized as Seamless JSON (sorted keys, two spaces), without double underscore parameters.
    The Seamless checksum  is computed on this. The first ten characters are the first part of the sigil.
 3. If there are no dependencies, the second part of the sigil is "null".

@@ -418,8 +418,10 @@ def resolve_action(
                 )
             except (OSError, ValueError, KeyError) as exc:
                 raise ResolveError(f"{spec.name}: {exc}") from exc
+            # Provenance only (the "__" prefix keeps it out of the sigil). The file is NOT
+            # added to file_fields: the sigil holds the extracted value, not the whole file,
+            # and the generated scripts pass the value on the command line.
             p["__threshold_file"] = threshold_path.name
-            files["energy-thresholds"] = threshold_path
         if p.get("cascade") == "auto" or p.get("min_cascade") == "auto":
             defaults_path = project.data_dir / "score-filter.yaml"
             try:
@@ -428,8 +430,8 @@ def resolve_action(
                 )
             except (OSError, ValueError) as exc:
                 raise ResolveError(f"{spec.name}: {exc}") from exc
+            # Provenance only, as for the threshold: values go in the sigil, not the file.
             p["__score_filter_file"] = defaults_path.name
-            files["score-filter"] = defaults_path
     return ResolvedAction(spec.name, spec.path, action, p, files)
 
 

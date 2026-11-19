@@ -144,6 +144,11 @@ def normalize_action(name: str, path: Path, data: dict[str, Any]) -> ActionSpec:
     if missing:
         raise SchemaError(f"{path}: missing keys for {action}: {', '.join(sorted(missing))}")
 
+    # An explicit sequence is recorded in the same form as one resolved from `auto`
+    # (constraints.json, the input action): stripped and upper case.
+    if isinstance(data.get("sequence"), str) and data["sequence"] != "auto":
+        data["sequence"] = data["sequence"].strip().upper()
+
     if action in {"anchor", "anchor-test", "anchor-refe"}:
         nuc = str(data.get("nucleotide")).lower()
         if nuc not in {"first", "second"}:
@@ -185,6 +190,21 @@ def normalize_action(name: str, path: Path, data: dict[str, Any]) -> ActionSpec:
             data["direction"] = "backward"
         else:
             raise SchemaError(f"{path}: direction must be fwd/forward/bwd/backward/auto")
+    if action in {"grow", "grow-test"}:
+        # Same form as crmsd/ovrmsd resolved from `auto` (float of a two-decimal Decimal).
+        for key in ("crmsd", "ovrmsd"):
+            if data[key] == "auto":
+                continue
+            value = data[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+                raise SchemaError(f"{path}: {key} must be a finite number or auto")
+            try:
+                number = float(value)
+            except ValueError as exc:
+                raise SchemaError(f"{path}: {key} must be a finite number or auto") from exc
+            if not math.isfinite(number):
+                raise SchemaError(f"{path}: {key} must be a finite number or auto")
+            data[key] = number
     if action == "grow-test":
         conformer = int(data["conformer"])
         if conformer <= 0:
