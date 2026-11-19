@@ -44,7 +44,7 @@ import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from .errors import PoolGraphError
 from .graph import ActionGraph
@@ -149,12 +149,69 @@ def _provenance_edges(action: ResolvedAction, fragment: int, frag_of: dict[str, 
     return edges
 
 
-def _read_sigil(action: ResolvedAction) -> str | None:
-    sigil_path = action.path / "sigil.txt"
+def _read_sigil(action_dir: Path) -> str | None:
+    sigil_path = action_dir / "sigil.txt"
     if sigil_path.is_file():
         text = sigil_path.read_text().strip()
         return text or None
     return None
+
+
+def refresh_pool_results(data: dict[str, Any], project: Project) -> bool:
+    """Record newly available results and return whether the graph changed.
+
+    Refuses a graph whose recorded sigil no longer matches the action's ``sigil.txt``:
+    the action has changed since the graph was made, and the result under the old
+    sigil, which may still be in the cache, is not the action's result any more.
+    An action dir without ``sigil.txt`` is not checked.
+    """
+    changed = False
+    for name, pool in data["pools"].items():
+        recorded = pool.get("sigil")
+        current = _read_sigil(project.root / name)
+        if recorded and current and current != recorded:
+            raise PoolGraphError(
+                f"{name}: sigil.txt is {current}, but the pool graph has {recorded}. "
+                f"The action has changed since the graph was made; make a new graph "
+                f"with alaric-pool-graph"
+            )
+        if pool.get("materialized"):
+            continue
+        result_dir = pool.get("result_dir")
+        sigil = pool.get("sigil")
+        if not result_dir:
+            sigil = sigil or current
+            if not sigil:
+                continue
+            result_dir = str((project.results_dir / sigil).relative_to(project.root))
+        if not (project.root / result_dir).is_dir():
+            continue
+        if not pool.get("result_dir"):
+            pool.update(sigil=sigil, result_dir=result_dir)
+        pool["materialized"] = True
+        changed = True
+    return changed
+
+
+def _groups(names: Iterable[str], pairs: Iterable[tuple[str, str]]) -> list[set[str]]:
+    """Connected groups of ``names`` (union-find); pairs naming an outsider are ignored."""
+    parent: dict[str, str] = {n: n for n in names}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for a, b in pairs:
+        if a in parent and b in parent:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+    groups: dict[str, set[str]] = {}
+    for n in parent:
+        groups.setdefault(find(n), set()).add(n)
+    return list(groups.values())
 
 
 class PoolGraph:
@@ -201,7 +258,7 @@ class PoolGraph:
                     "threshold": action.params.get("threshold"),
                     "score_input": score_input.name if isinstance(score_input, ResolvedAction) else None,
                 }
-            sigil = _read_sigil(action)
+            sigil = _read_sigil(action.path)
             if sigil:
                 node.sigil = sigil
                 result_dir = self.project.results_dir / sigil
@@ -213,6 +270,7 @@ class PoolGraph:
 
         self.selected: list[str] = list(select or [])
         self.dropped: dict[str, str] = {}  # pool -> why it left consideration
+        self.orphaned: set[str] = set()  # pools that lost a parent edge to a dropped pool
         self.representatives: dict[int, str] = {}
         self.skipped: dict[int, str] = {}
         overrides = self._apply_selection()
@@ -287,8 +345,11 @@ class PoolGraph:
             del self.pools[name]
         # edges into a dropped pool go with it; the pools they belonged to survive,
         # because a pool's poses are real whether or not its provenance is in view.
-        for node in self.pools.values():
-            node.parents = [e for e in node.parents if e.parent not in drop]
+        for name, node in self.pools.items():
+            kept = [e for e in node.parents if e.parent not in drop]
+            if len(kept) != len(node.parents):
+                self.orphaned.add(name)
+            node.parents = kept
         if drop:
             self._index_fragments()
         return overrides
@@ -329,28 +390,24 @@ class PoolGraph:
     def _components(self, fragment: int) -> list[set[str]]:
         """Connected components of fragment pools under within-fragment edges."""
         names = self.pools_by_fragment.get(fragment, [])
-        parent: dict[str, str] = {n: n for n in names}
+        return _groups(names, ((n, e.parent) for n in names for e in self._within_parents(n)))
 
-        def find(x: str) -> str:
-            while parent[x] != x:
-                parent[x] = parent[parent[x]]
-                x = parent[x]
-            return x
+    def _connected(self, names: list[str]) -> bool:
+        """Whether ``names`` lie in one connected part of the whole pool graph.
 
-        def union(a: str, b: str) -> None:
-            ra, rb = find(a), find(b)
-            if ra != rb:
-                parent[ra] = rb
+        Every edge counts, in either direction, across fragments too. Two pools of
+        one fragment in different parts come from separate stretches, or from
+        separate protein ranges in unfixed mode, not from one stretch that visits
+        the fragment twice.
+        """
+        parts = _groups(
+            self.pools, ((n, e.parent) for n, node in self.pools.items() for e in node.parents)
+        )
+        return any(set(names) <= part for part in parts)
 
-        nameset = set(names)
-        for n in names:
-            for e in self._within_parents(n):
-                if e.parent in nameset:
-                    union(n, e.parent)
-        groups: dict[str, set[str]] = {}
-        for n in names:
-            groups.setdefault(find(n), set()).add(n)
-        return list(groups.values())
+    def _lineage(self, pool: str) -> set[str]:
+        """The pools of ``pool``'s fragment connected to it by within-fragment edges."""
+        return next(c for c in self._components(self.pools[pool].fragment) if pool in c)
 
     def _sinks(self, fragment: int) -> set[str]:
         """Fragment pools that no other fragment pool derives from."""
@@ -379,9 +436,19 @@ class PoolGraph:
                 self.skipped[fragment] = self._skip_reason(fragment)
                 continue
             if len(relevant_sinks) > 1:
-                raise PoolGraphError(
+                lineages = (
                     f"fragment {fragment} has multiple chain lineages "
-                    f"({', '.join(relevant_sinks)}); the representative is ambiguous. "
+                    f"({', '.join(relevant_sinks)})"
+                )
+                if not self._connected(relevant_sinks):
+                    raise PoolGraphError(
+                        f"{lineages} in parts of the run that are not connected to each "
+                        f"other, such as two protein ranges in unfixed mode, or two "
+                        f"stretches that are not merged yet. Use --target to make a "
+                        f"separate graph for each part"
+                    )
+                raise PoolGraphError(
+                    f"{lineages}; the representative is ambiguous. "
                     f"Use --select to name the one to represent this fragment"
                 )
             self.representatives[fragment] = relevant_sinks[0]
@@ -414,11 +481,24 @@ class PoolGraph:
         for lower, upper in zip(order, order[1:]):
             if frozenset((lower, upper)) in linked:
                 continue
-            raise PoolGraphError(
+            gap = (
                 f"no grow joins {lower} (frag{self.pools[lower].fragment}) to "
                 f"{upper} (frag{self.pools[upper].fragment}), so the chain has a gap. "
-                f"{upper} was grown from a lineage that --select dropped; either "
-                f"--select a different pool, or use --target to leave {upper} and "
+            )
+            # The side whose lineage lost a parent edge to --select, if either did.
+            cut = next(
+                (rep for rep in (upper, lower) if self._lineage(rep) & self.orphaned), None
+            )
+            if cut is None:
+                raise PoolGraphError(
+                    gap + "The run has stretches that are not joined yet, such as two "
+                    "anchor gens without the merge gen between them. Use --target to "
+                    "make a separate graph for each stretch, or add the actions that "
+                    "join them"
+                )
+            raise PoolGraphError(
+                gap + f"{cut} was grown from a lineage that --select dropped; either "
+                f"--select a different pool, or use --target to leave {cut} and "
                 f"everything grown from it out of the graph"
             )
 

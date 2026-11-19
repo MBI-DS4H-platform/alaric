@@ -4,6 +4,9 @@ A *chain* is one pose per representative fragment, consistent with the grow
 provenance recorded in the pool graph. This module operates on the pools listed
 under ``representatives`` in the JSON, in fragment order.
 
+Before counting or building chains, the CLI updates the graph JSON with sigils
+and result directories that have become available since it was generated.
+
 Counting mode (``--count``):
   1. Connect consecutive representatives by composing their provenance arrays
      into per-pose edges (a chain builder's bipartite layers).
@@ -57,7 +60,8 @@ from poses import (  # noqa: E402
     write_arc_file,
 )
 
-from .errors import MiddleError  # noqa: E402
+from .errors import MiddleError, PoolGraphError  # noqa: E402
+from .pool_graph import refresh_pool_results  # noqa: E402
 from .project import Project  # noqa: E402
 from .propagate_provenance import prop_map_name, prop_provenance_name  # noqa: E402
 from .resolve import resolve_exclude, resolve_sequence  # noqa: E402
@@ -226,7 +230,7 @@ class ChainGraph:
     def _pool_dir(self, pool: str) -> Path:
         rel = self.pools[pool].get("result_dir")
         if not rel:
-            raise ChainError(f"pool {pool!r} has no result_dir (run alaric-sigil first)")
+            raise ChainError(f"pool {pool!r} has no result_dir (generate its sigil and materialize its result)")
         return self.project_root / rel
 
     def _result_dir(self, pool: str) -> Path:
@@ -998,7 +1002,9 @@ def main(argv: list[str] | None = None) -> int:
         prog="alaric-chain",
         description="Build chains from a pose-pool graph JSON.",
     )
-    parser.add_argument("graph_json", help="JSON produced by alaric-pool-graph")
+    parser.add_argument(
+        "graph_json", help="JSON produced by alaric-pool-graph, updated as results become available."
+    )
     parser.add_argument("--count", action="store_true", help="Counting mode.")
     parser.add_argument(
         "-o",
@@ -1026,8 +1032,22 @@ def main(argv: list[str] | None = None) -> int:
     if not args.count and not args.output_dir:
         parser.error("build mode requires --output-dir (or use --count)")
 
-    data = json.loads(Path(args.graph_json).read_text())
+    graph_json = Path(args.graph_json).resolve()
+    data = json.loads(graph_json.read_text())
     project_root = Path(args.project_root) if args.project_root else Path(data["project"])
+
+    try:
+        if refresh_pool_results(data, Project(project_root)):
+            with tempfile.TemporaryDirectory(dir=graph_json.parent) as temp_dir:
+                updated = Path(temp_dir) / graph_json.name
+                updated.write_text(json.dumps(data, indent=2) + "\n")
+                shutil.copymode(graph_json, updated)
+                updated.replace(graph_json)
+    except OSError as exc:
+        parser.exit(2, f"error: could not refresh pool graph {graph_json}: {exc}\n")
+    except PoolGraphError as exc:
+        parser.exit(2, f"error: {exc}\n")
+
     graph = ChainGraph(data, project_root)
 
     try:
@@ -1040,7 +1060,7 @@ def main(argv: list[str] | None = None) -> int:
                 graph,
                 selected,
                 output_dir,
-                graph_json=Path(args.graph_json).resolve(),
+                graph_json=graph_json,
                 max_chain_rows=args.max_chains,
             )
             try:

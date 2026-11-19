@@ -1,24 +1,42 @@
 #!/usr/bin/env bash
+# alaric-copy DIR [DIR ...]
+#
+# Copy action dirs into the current directory, under their own names. Only alaric.yaml
+# is copied, so an action dir taken from another run leaves that run's sigil.txt,
+# result.txt, results link and scripts behind.
+#
+# Everything is checked before anything is copied: if one DIR fails, nothing is copied.
 set -euo pipefail
 
-if [[ $# -ne 1 ]]; then
-    echo "Usage: alaric-copy DIR" >&2
+if [[ $# -lt 1 ]]; then
+    echo "Usage: alaric-copy DIR [DIR ...]" >&2
     exit 2
 fi
 
-DIR=$1
-LEAF=$(basename -- "$DIR")
-A=$DIR/alaric.yaml
+LEAVES=()
+for DIR in "$@"; do
+    LEAF=$(basename -- "$DIR")
+    A=$DIR/alaric.yaml
+    if [[ ! -f $A ]]; then
+        echo "alaric-copy: source file does not exist: $A" >&2
+        exit 1
+    fi
+    if [[ -e $LEAF ]]; then
+        echo "alaric-copy: destination already exists: $LEAF" >&2
+        exit 1
+    fi
+    # No associative arrays: they need bash 4, and macOS ships bash 3.2.
+    for SEEN in ${LEAVES[@]+"${LEAVES[@]}"}; do
+        if [[ $SEEN == "$LEAF" ]]; then
+            echo "alaric-copy: two sources have the same name: $LEAF" >&2
+            exit 1
+        fi
+    done
+    LEAVES+=("$LEAF")
+done
 
-if [[ -e $LEAF ]]; then
-    echo "alaric-copy: destination already exists: $LEAF" >&2
-    exit 1
-fi
-
-if [[ ! -f $A ]]; then
-    echo "alaric-copy: source file does not exist: $A" >&2
-    exit 1
-fi
-
-mkdir -- "$LEAF"
-cp -- "$A" "$LEAF/"
+for DIR in "$@"; do
+    LEAF=$(basename -- "$DIR")
+    mkdir -- "$LEAF"
+    cp -- "$DIR/alaric.yaml" "$LEAF/"
+done

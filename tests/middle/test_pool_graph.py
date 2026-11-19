@@ -282,6 +282,51 @@ def test_target_is_the_other_remedy_for_a_gap(tmp_path):
     assert graph.dropped == {}
 
 
+# -- which remedy the errors point at: --select or --target ---------------
+
+
+def test_gap_from_select_names_the_cut_lineage(tmp_path):
+    _two_lineage_project(tmp_path, downstream="filter")
+    with pytest.raises(PoolGraphError) as exc:
+        PoolGraph(Project(tmp_path), select=["frag5-fwd"])
+    assert "frag6-fwd-filter was grown from a lineage that --select dropped" in str(exc.value)
+
+
+def test_gap_between_unjoined_stretches_points_at_target(tmp_path):
+    """Two anchors, each grown one step, with nothing joining fragment 5 to 6."""
+    _data(tmp_path)
+    _mk(tmp_path, "frag4-anchor", _anchor(4))
+    _mk(tmp_path, "frag5-fwd", _grow("frag4-anchor", 5))
+    _mk(tmp_path, "frag6-anchor", _anchor(6))
+    _mk(tmp_path, "frag7-fwd", _grow("frag6-anchor", 7))
+    with pytest.raises(PoolGraphError) as exc:
+        PoolGraph(Project(tmp_path))
+    message = str(exc.value)
+    assert "no grow joins frag5-fwd (frag5) to frag6-anchor (frag6)" in message
+    assert "not joined yet" in message
+    assert "--target" in message
+    assert "--select" not in message
+
+
+def test_ambiguity_in_unconnected_parts_points_at_target(tmp_path):
+    """frag5 is reached by a grow from frag4 and by its own anchor, which is never merged
+    with it: the two lineages are separate stretches, not one stretch visiting frag5 twice."""
+    _two_lineage_project(tmp_path, downstream=None)
+    with pytest.raises(PoolGraphError) as exc:
+        PoolGraph(Project(tmp_path))
+    message = str(exc.value)
+    assert "multiple chain lineages (frag5-anchor, frag5-fwd)" in message
+    assert "not connected" in message
+    assert "--target" in message
+    assert "--select" not in message
+
+
+def test_ambiguity_in_one_connected_part_points_at_select(tmp_path):
+    _roundtrip_project(tmp_path)
+    with pytest.raises(PoolGraphError, match="Use --select"):
+        PoolGraph(Project(tmp_path))
+
+
 # -- selection validation and provenance ----------------------------------
 
 

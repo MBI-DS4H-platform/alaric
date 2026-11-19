@@ -33,6 +33,7 @@ from alaric.middle.chain import (  # noqa: E402
     build_and_write_chains,
     build_chains,
     count_chains,
+    main as chain_main,
     resolve_selection,
     write_chain_outputs,
 )
@@ -131,6 +132,77 @@ def test_basic_count(tmp_path):
     assert res.kept == [2, 2, 2]      # A1 and B0 are dead ends, pruned; C1/C2 dedup
     assert res.unique == [2, 2, 2]
     assert res.total_chains == 2      # A0-B1-C0, A2-B2-C1/C2
+
+
+def test_cli_refreshes_saved_pool_graph_as_results_appear(tmp_path, capsys):
+    _basic_project(tmp_path)
+    graph_path = tmp_path / "graph.json"
+    data = json.loads(graph_path.read_text())
+    project_root = tmp_path / "run"
+    results = project_root / "CACHE" / "results"
+    results.mkdir(parents=True)
+    for name, pool in data["pools"].items():
+        sigil = f"{name}-sigil"
+        pool.update(sigil=sigil, result_dir=f"CACHE/results/{sigil}", materialized=False)
+    for name in ("r1", "r3"):
+        data["pools"][name].update(sigil=None, result_dir=None)
+        (project_root / name).mkdir()
+        (project_root / name / "sigil.txt").write_text(f"{name}-sigil\n")
+    graph_path.write_text(json.dumps(data))
+
+    (tmp_path / "r1").rename(results / "r1-sigil")
+    (tmp_path / "r2").rename(results / "r2-sigil")
+
+    args = [str(graph_path), "--project-root", str(project_root)]
+    assert chain_main([*args, "--count", "--target", "r1", "r2"]) == 0
+    assert "total chains: 3" in capsys.readouterr().out
+    data["pools"]["r1"].update(
+        sigil="r1-sigil", result_dir="CACHE/results/r1-sigil", materialized=True
+    )
+    data["pools"]["r2"]["materialized"] = True
+    assert json.loads(graph_path.read_text()) == data
+
+    (tmp_path / "r3").rename(results / "r3-sigil")
+    output_dir = tmp_path / "out"
+    assert chain_main([*args, "-o", str(output_dir)]) == 0
+    assert (output_dir / CHAINS_FILE).read_text() == "r1\tr2\tr3\n1\t1\t1\n2\t2\t2\n"
+    data["pools"]["r3"].update(
+        sigil="r3-sigil", result_dir="CACHE/results/r3-sigil", materialized=True
+    )
+    assert json.loads(graph_path.read_text()) == data
+
+    last_modified = graph_path.stat().st_mtime_ns
+    assert chain_main([*args, "--count"]) == 0
+    assert graph_path.stat().st_mtime_ns == last_modified
+
+
+@pytest.mark.parametrize("materialized", [False, True])
+def test_cli_refuses_a_pool_graph_whose_sigil_changed(tmp_path, capsys, materialized):
+    """An action edited after the graph was made must not be served its old result."""
+    _basic_project(tmp_path)
+    graph_path = tmp_path / "graph.json"
+    data = json.loads(graph_path.read_text())
+    project_root = tmp_path / "run"
+    results = project_root / "CACHE" / "results"
+    results.mkdir(parents=True)
+    for name, pool in data["pools"].items():
+        sigil = f"{name}-sigil"
+        pool.update(sigil=sigil, result_dir=f"CACHE/results/{sigil}", materialized=materialized)
+        # The old results are all still in the cache.
+        (tmp_path / name).rename(results / sigil)
+        (project_root / name).mkdir()
+        (project_root / name / "sigil.txt").write_text(f"{sigil}\n")
+    (project_root / "r2" / "sigil.txt").write_text("r2-edited\n")
+    graph_path.write_text(json.dumps(data))
+    before = graph_path.read_text()
+
+    with pytest.raises(SystemExit) as exc:
+        chain_main([str(graph_path), "--project-root", str(project_root), "--count"])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "r2: sigil.txt is r2-edited, but the pool graph has r2-sigil" in err
+    assert "make a new graph" in err
+    assert graph_path.read_text() == before
 
 
 def _read_ids(pose_dir: Path) -> list[tuple[int, int, int, int, int]]:
