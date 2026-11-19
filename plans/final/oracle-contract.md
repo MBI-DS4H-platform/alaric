@@ -469,6 +469,7 @@ Pending wording:
 - **P1.2** The project never proceeds with a code and a structure that disagree. The entry id read from the stored structure must equal the code.
   - If two tabs commit different codes at once, the code decides: the losing tab loads the winner's structure.
 - **P1.3** The exclude code is derived from the code (G5).
+- **P1.4** Changing the biological assembly clears the browser's stage 2 rows. Continue 1→2 rereads the stored range marker. If the user switched back to its assembly, Continue opens the saved rows without writing the marker. If no matching marker exists, Continue saves fresh default rows for the selected assembly. An inactive marker restored this way is activated by Save ranges in stage 2.
 - **Gate 1→2:**
   - a code is set;
   - this tab shows its structure;

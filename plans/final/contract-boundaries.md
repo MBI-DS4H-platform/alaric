@@ -407,6 +407,7 @@ The results of the validators T10, T19 and T27 are not shared. Both export trans
 
 ### 8.5 Writes that span several cells
 Each key is written separately, and the writes are not atomic. With markers and bases (§8.1), only one user action writes two edit cells: a new PDB code writes S3 and S1, only once the CIF download has succeeded, under the arbiter rule (§8.6.1). Every other action writes one cell:
+- a stage 1 assembly change writes S2 only. The browser discards its stage 2 rows. Continue 1→2 rereads S4 and writes defaults only when S4 has no matching rows;
 - a stage 3 change writes S8 only. S14 and S18 are inactive at stage 3, so they need no reset;
 - a change of PDB code or range 1 makes S11 and S12 stale through their bases instead of resetting them. Continue 3→4 resets a stale S12 to `{0,0}` and starts a stale S11 as a skeleton. It minimally clamps an S12 only when a selected anchor has no kept candidate (D2 as amended);
 - Back writes one marker, with `active: false`;

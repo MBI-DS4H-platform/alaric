@@ -182,7 +182,7 @@ Example: a tab that slept during stage 2 wakes up, and its queued `ranges` PUT l
 ## 4. Transitions
 
 ### 4.1 Common rules
-- **One marker write per transition.** The clicking tab applies it optimistically, so its stage changes at once. Other tabs follow when the `update` arrives. On a 409 the tab adopts the server value and tells the user.
+- **One marker write per shared transition.** The clicking tab applies it optimistically, so its stage changes at once. Other tabs follow when the `update` arrives. On a 409 the tab adopts the server value and tells the user. Restoring saved ranges after an assembly change can open stage 2 locally without a shared transition (§4.2).
 - **Continue is disabled unless its gate holds** in this tab's snapshot. There is no "armed" Continue that fires later.
 - **A write belongs to the stage it was issued in.** A deferred write is dropped if, when it is about to be sent:
   - the derived stage has changed;
@@ -205,7 +205,8 @@ Per-ligand `error` entries in S13 do not block Continue: Recompute stops at thos
 - **Gate:** S1 is non-empty; this tab shows the structure for S1; S21 = S1.
 - **Input absent or computing:** "uploading structure…".
 - **Input failed:** S21 ≠ S1 once settled: banner (§7.1, last row).
-- **Writes:** S4 := `{basis:{pdbcode,biounit}, active, rows}`.
+- **Assembly change in stage 1:** When the change takes effect, the browser discards its stage 2 rows. The assembly change writes S2 only. After an assembly change, Continue reads S4 from the server. If its basis matches the selected PDB code and assembly, the browser opens stage 2 with the saved rows and makes no S4 write. If the saved marker is inactive, the range editor is local until Save ranges activates it. Backend range computations and stage 3 still require active S4. A freshly loaded tab ignores S4 rows whose basis differs from the current selection. Back followed by Continue without changing the assembly reactivates matching rows as usual.
+- **Writes:** S4 := `{basis:{pdbcode,biounit}, active, rows}` when entering with defaults or reactivating matching rows after Back without an assembly change.
 - **Cascade:** T0 → S5 → T1 → S6 → T2, T3, T4 → S7. Once B4 exists: T6 → T24 → S22. T3 also feeds T25 → S23. Group B stays gated (§5.3).
 
 **2→3**
