@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -626,6 +627,9 @@ def main(argv: list[str] | None = None) -> int:
         graph = build_pool_graph(args.project_root, args.targets, args.select)
     except PoolGraphError as exc:
         parser.exit(2, f"error: {exc}\n")
+    print("Representatives:", file=sys.stderr)
+    for _fragment, pool in sorted(graph.representatives.items()):
+        print(pool, file=sys.stderr)
     if args.format == "dot":
         text = graph.to_dot() + "\n"
     else:
@@ -634,8 +638,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.output:
         Path(args.output).write_text(text)
     else:
-        import sys
-
         sys.stdout.write(text)
     return 0
 
