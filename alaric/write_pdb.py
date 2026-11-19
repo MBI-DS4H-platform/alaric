@@ -11,7 +11,6 @@ import numpy as np
 
 import parse_pdb
 
-
 code = {
     "ALA": "A",
     "CYS": "C",
@@ -186,6 +185,9 @@ if __name__ == "__main__":
     npy_file = sys.argv[1]
     outfile = sys.argv[2]
     struc = np.load(npy_file)
-    pdb_data = write_pdb(struc, ter=True)
+    if struc.ndim > 1:
+        pdb_data = write_multi_pdb(struc)
+    else:
+        pdb_data = write_pdb(struc, ter=True)
     with open(outfile, "w") as f:
         f.write(pdb_data)
