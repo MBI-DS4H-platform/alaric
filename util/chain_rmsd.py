@@ -22,12 +22,17 @@ import tempfile
 
 import numpy as np
 
-_ROOT = Path(__file__).resolve().parents[1]
-_ALARIC_DIR = _ROOT / "alaric"
+# Installed, this file is copied into the environment's bin/ directory, away from the
+# checkout, so find the alaric package by importing it. Only a checkout that is not
+# installed needs the repository root on the path for that.
+try:
+    import alaric
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    import alaric
+_ALARIC_DIR = Path(alaric.__file__).resolve().parent
 if str(_ALARIC_DIR) not in sys.path:
     sys.path.insert(0, str(_ALARIC_DIR))
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
 
 from parse_pdb import parse_pdb  # noqa: E402
 from poses import DEFAULT_POSE_CHUNK_SIZE, PoseReader  # noqa: E402

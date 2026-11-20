@@ -50,6 +50,7 @@ import numpy as np
 from ..npy_io import find_npy, load_npy, save_npy
 from ..poses import PoseReader
 from .errors import MiddleError
+from .deploy import remote_project_dir
 
 
 PROVENANCE = "provenance.npy"
@@ -321,7 +322,10 @@ def _write_remote_script(representative: str, plans: list[tuple[list[Path], int]
         raise PropagationError(
             "ALARIC_REMOTE_HOST and ALARIC_REMOTE_DEPLOYMENT_DIR are required for remote propagation"
         )
-    project = os.environ.get("ALARIC_PROJECT", "PROJECT").strip("/") or "PROJECT"
+    try:
+        destination = remote_project_dir(deploy_root)
+    except MiddleError as exc:
+        raise PropagationError(str(exc)) from None
     script = Path.cwd() / f"propagate-provenance-{representative}.sh"
     # One command per lineage: a reconnected representative propagates each of its
     # grow routes into its own file, and both are needed to chain through it.
@@ -334,7 +338,6 @@ def _write_remote_script(representative: str, plans: list[tuple[list[Path], int]
     ]
     script.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + "\n".join(commands) + "\n")
     os.chmod(script, 0o755)
-    destination = f"{deploy_root.rstrip('/')}/{project}"
     subprocess.run(["ssh", host, "mkdir", "-p", destination], check=True)
     subprocess.run(["scp", str(script), f"{host}:{destination}/"], check=True)
     return script

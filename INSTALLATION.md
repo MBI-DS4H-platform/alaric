@@ -71,8 +71,7 @@ pip install -e .
 You can check that the command-line entry points are available with:
 
 ```bash
-alaric-chain --help
-alaric-deploy --help
+alaric-sigil --help
 ```
 
 ## 6. Repeat the installation on the remote machine
@@ -203,5 +202,5 @@ In a fresh shell:
 
 ```bash
 conda activate alaric
-alaric-chain --help
+alaric-sigil --help
 ```

@@ -17,6 +17,10 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 include = ["alaric*"]
+# alaric/util -> ../util and util/alaric -> ../alaric link to each other. Both are
+# used at run time, but package discovery would follow them in a loop
+# (alaric.util.alaric.util...) until the path gets too long.
+exclude = ["alaric.util.*"]
 
 [tool.setuptools]
 script-files = [

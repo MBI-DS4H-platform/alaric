@@ -188,6 +188,51 @@ def test_remote_graph_mode_writes_one_command_per_route(tmp_path: Path, monkeypa
     ]
 
 
+@pytest.mark.parametrize(
+    ("project", "destination"),
+    [
+        (None, "/remote/deploy/PROJECT"),
+        ("run-a/", "/remote/deploy/run-a"),
+        ("/elsewhere/run-a", "/elsewhere/run-a"),
+    ],
+)
+def test_remote_graph_mode_uploads_where_deploy_lists_the_actions(
+    tmp_path: Path, monkeypatch, project, destination
+) -> None:
+    """ALARIC_PROJECT means the same here as for alaric-deploy: absolute paths stay absolute."""
+    graph = _reconnect_project(tmp_path)
+    monkeypatch.chdir(tmp_path / "project")
+    monkeypatch.setenv("ALARIC_REMOTE_HOST", "remote")
+    monkeypatch.setenv("ALARIC_REMOTE_RESULT_DIR", "/remote/results")
+    monkeypatch.setenv("ALARIC_REMOTE_DEPLOYMENT_DIR", "/remote/deploy/")
+    if project is None:
+        monkeypatch.delenv("ALARIC_PROJECT", raising=False)
+    else:
+        monkeypatch.setenv("ALARIC_PROJECT", project)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(module.subprocess, "run", lambda args, **kwargs: calls.append(args))
+
+    graph_mode(graph, "rep", "remote", [])
+
+    assert calls == [
+        ["ssh", "remote", "mkdir", "-p", destination],
+        ["scp", str(tmp_path / "project" / "propagate-provenance-rep.sh"), f"remote:{destination}/"],
+    ]
+
+
+def test_remote_graph_mode_refuses_an_empty_project(tmp_path: Path, monkeypatch) -> None:
+    graph = _reconnect_project(tmp_path)
+    monkeypatch.chdir(tmp_path / "project")
+    monkeypatch.setenv("ALARIC_REMOTE_HOST", "remote")
+    monkeypatch.setenv("ALARIC_REMOTE_RESULT_DIR", "/remote/results")
+    monkeypatch.setenv("ALARIC_REMOTE_DEPLOYMENT_DIR", "/remote/deploy")
+    monkeypatch.setenv("ALARIC_PROJECT", "/")
+    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: pytest.fail("ran"))
+
+    with pytest.raises(module.PropagationError, match="ALARIC_PROJECT must not be empty"):
+        graph_mode(graph, "rep", "remote", [])
+
+
 def test_a_representative_without_grow_lineage_writes_nothing(tmp_path: Path, capsys) -> None:
     data = _reconnect_graph()
     for pool in ("fwd", "bwd"):

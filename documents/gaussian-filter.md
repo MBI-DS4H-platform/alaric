@@ -249,7 +249,7 @@ the JSON:
 **Using a filter in a project.** In the anchor action of `alaric.yaml`:
 
 ```yaml
-precomputed_filter_name: gaussian
+precomputed_filter_name: gaussian-rrm   # the only accepted value
 precomputed_filter_threshold: rrm95       # any of the 12 names
 ```
 

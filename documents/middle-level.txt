@@ -294,29 +294,49 @@ run.sh will invoke ./check.sh.
 ## Remote deployment
 
 Remote deployment requires four env variables:
-    ALARIC_REMOTE_HOST: remote server SSH host to scp to
-    ALARIC_REMOTE_DEPLOYMENT_DIR: the direction of the host to scp the run.sh and the files to
+    ALARIC_REMOTE_HOST: remote server SSH host to ssh/scp/rsync to
+    ALARIC_REMOTE_DEPLOYMENT_DIR: the directory on the host that receives the scripts and the DATA files
     ALARIC_REMOTE_ALARIC_DIR: the location of ALARIC_DIR on the remote server
-    ALARIC_REMOTE_RESULT_DIR: where the remote host run.sh will write to 
-These four env vars should be constant (i.e. in .bashrc).
-A fifth one is convenient:  ALARIC_REMOTE_PROJECT_DIR
+    ALARIC_REMOTE_RESULT_DIR: where the remote scripts write the results to
+Two more are optional:
+    ALARIC_PROJECT: the dir that lists the deployed action dirs by name (see below).
+        Relative to ALARIC_REMOTE_DEPLOYMENT_DIR, unless absolute. Default: PROJECT. Must not be empty.
+    ALARIC_REMOTE_SCRATCH_DIR: node-local scratch space on the remote server. Default: $TMPDIR, else /tmp.
+These env vars are defined on the deployer side (i.e. in the local .bashrc), not on the remote server.
+ALARIC_REMOTE_DEPLOYMENT_DIR, ALARIC_REMOTE_ALARIC_DIR, ALARIC_REMOTE_RESULT_DIR and ALARIC_REMOTE_SCRATCH_DIR
+are baked into the generated scripts.
 
-First, DATA file parameters are copied to ALARIC_REMOTE_DEPLOYMENT_DIR/DATA/<checksum>.
-Then, a deployment dir ALARIC_REMOTE_DEPLOYMENT_DIR/[SIGIL] is created.
-If ALARIC_REMOTE_PROJECT_DIR exists, ALARIC_REMOTE_PROJECT_DIR/[action dir name] is created and symlinked to the previous dir.
-Within this dir, run.sh is written with parameters inserted. This goes slightly different from local deployment:
-Action dir input parameters are symlinked to ALARIC_REMOTE_RESULT_DIR/[input action dir sigil] 
-DATA file parameters are hardlinked to ../DATA/<checksum> as the specified filename (e.g. ./reference.pdb)
-Output (pose dir, or e.g. score.npy inside the output dir) goes to ALARIC_REMOTE_RESULT_DIR/[SIGIL]/
+A deployment dir ALARIC_REMOTE_DEPLOYMENT_DIR/SIGIL/[SIGIL] is created.
+ALARIC_PROJECT/[action dir name] is created as a relative symlink to it. A later deployment of an action dir
+with the same name, from any run, replaces the symlink.
+The deployment dir gets a symlink results -> ALARIC_REMOTE_RESULT_DIR/[SIGIL].
+run.sh and check.sh (or the chunk scripts) are copied into the deployment dir.
+They are written with parameters inserted. This goes slightly different from local deployment:
+The scripts cd to ALARIC_REMOTE_DEPLOYMENT_DIR/SIGIL/[SIGIL] (not to the dir of $0, which SLURM moves).
+Action dir input parameters are inserted as ALARIC_REMOTE_RESULT_DIR/[input action dir sigil]
+DATA file parameters are inserted as ./[filename] (e.g. ./reference.pdb). Each DATA file is uploaded to
+ALARIC_REMOTE_DEPLOYMENT_DIR/DATA/<checksum> unless already present there (this store is shared by all
+deployments), and hardlinked from there into the deployment dir under its filename.
 The Alaric dir is inserted from ALARIC_REMOTE_ALARIC_DIR
-The check.sh is written as well.
+Output (pose dir, or e.g. score.npy inside the output dir) is built under ALARIC_REMOTE_RESULT_DIR/[SIGIL].partial/
+and renamed to ALARIC_REMOTE_RESULT_DIR/[SIGIL]/ when complete.
+run.sh first removes both of them: a remote result that already exists for the sigil is computed again.
+Pre-checking only looks at the local ./CACHE/checksum/[SIGIL]. To reuse an existing remote result,
+run alaric-result-check before alaric-deploy.
+check.sh checks that ALARIC_REMOTE_RESULT_DIR/[input action dir sigil] exists for every input action dir.
 
 ## Chunk deployment
 
-Chunk deployers generate N=1..nchunks chunkN.sh scripts. For grow.py, they generate an organize.sh script.
+Chunk deployers generate N=1..nchunks chunkN.sh scripts, and an organize.sh script that combines the chunk output
+(organize for anchor/grow, concatenation for score, combining the separately filtered chunks for energy-filter)
+and writes the result checksum.
 Chunkable actions: anchor, anchor-test, anchor-refe, grow, grow-test, score and energy-filter;
 any other action deploys its non-chunk run.sh under a chunk deployer.
-For local deployment, they generate a run.sh that calls all chunkN.sh and then the organize.sh in tandem.
+The chunkN.sh scripts are independent: they can run in any order, or in parallel. organize.sh runs after all of them.
+Both chunk deployers also generate a run.sh that clears the output, and then calls all chunkN.sh and then organize.sh in tandem.
+Remotely, run.sh keeps the intermediate chunk output on node-local scratch (ALARIC_REMOTE_SCRATCH_DIR);
+chunkN.sh scripts that are submitted separately write it to ALARIC_REMOTE_RESULT_DIR, which must be shared between nodes.
+There is no resume: a chunkN.sh that is run again after a crash adds its output a second time.
 In the templates, non-load-bearing parameters are present in commented-out form.
 In general, compression is always enabled: poses (grow/anchor/organize/identity),
 the per-pose index arrays that travel with them (provenance.npy.zst, map-*.npy.zst,
@@ -333,18 +353,22 @@ Remove results from ./CACHE/results/[SIGIL]/* . If --all, also remove result.txt
 
 # alaric-result-check
 
-Optionally takes an action dir (current directory is default). Must contain a sigil. Must not contain result.txt
-If run.sh defined: checks ./CACHE/checksum/[SIGIL] and copies the checksum into result.txt if exists.
-Otherwise: checks the remote result directory and copies the checksum into result.txt and ./CACHE/checksum/[SIGIL]
+Optionally takes an action dir (current directory is default). Must contain a sigil.
+If ./CACHE/checksum/[SIGIL] exists: copies it into result.txt.
+Otherwise: reads the checksum of the remote result in ALARIC_REMOTE_RESULT_DIR and writes it into result.txt
+and ./CACHE/checksum/[SIGIL].
+If result.txt already exists, checks that it matches instead.
+Then, if ./CACHE/results/[SIGIL] exists, links it as results in the action dir (as run.sh does).
 
 # alaric-result-download
 
 Optionally takes an action dir (current directory is default). Must contain a sigil. ./CACHE/results/[SIGIL] must not exist.
-Checks the remote result directory and copies the checksum into result.txt and ./CACHE/checksum/[SIGIL]
-(if those exists, check that they match). Downloads the result into ./CACHE/results/[SIGIL]/*.
+Downloads the result from ALARIC_REMOTE_RESULT_DIR/[SIGIL] into ./CACHE/results/[SIGIL].partial,
+renames it to ./CACHE/results/[SIGIL], and then runs alaric-result-check.
 
 # alaric-result-upload
 
-Optionally takes an action dir (current directory is default). Must contain a sigil. 
+Optionally takes an action dir (current directory is default). Must contain a sigil.
 result.txt, ./CACHE/checksum/[SIGIL] and ./CACHE/results/[SIGIL] must exist.
-Checks the remote result directory and copies the checksum and the results. 
+Uploads the results to ALARIC_REMOTE_RESULT_DIR/[SIGIL].partial and the checksum to [SIGIL].partial.CHECKSUM,
+then renames both to replace any existing ALARIC_REMOTE_RESULT_DIR/[SIGIL] and [SIGIL].CHECKSUM.

@@ -28,15 +28,19 @@ myproject/
 Preparic downloads a ZIP with one top-level `alaric_project/` directory. It
 contains `DATA/`, the kept reference and best-fit fragment PDBs, a schema-1
 manifest, and nested generator folders. A generator folder is a catalogue
-choice, not an action directory in the project root. Alaric's loader therefore
-ignores it until its action directories are moved beside `DATA/`.
+choice, not an action directory in the project root, so Alaric's loader ignores
+it. Keep `alaric_project/` unchanged and do not run Alaric inside it.
 
-Choose a compatible set of anchor, grow and merge generators for one run, then
-move the selected `gen-*/*` action directories into the project root. Fixed and
+Each run is its own project directory, with `DATA` symlinked to
+`alaric_project/DATA` and `CACHE` symlinked to a cache shared by all runs (see
+`documents/sigils.md`). Choose a compatible set of anchor, grow and merge
+generators for the run, then copy the selected `gen-*/*` action
+directories into the run directory with `alaric-copy` (it copies only
+`alaric.yaml`). Fixed and
 unfixed layouts are alternatives. Gaussian-anchor and reference-anchor trees
 are alternatives for each anchor run; merge folders identify the source tree
 when their inputs differ. Pool names may collide between alternative gens, so
-do not move conflicting choices into the same run. Common-conformer generators
+do not copy conflicting choices into the same run; make separate runs for them. Common-conformer generators
 read plain pools and write distinct filtered pools; choosing them is optional.
 The manifest records each generator's final pools and external inputs to help
 with selection. The exporter does not assemble the run, choose a merge point,
@@ -57,7 +61,7 @@ Pool dirs hold `poses-N.arc.zst`, plus `provenance.npy.zst` (grow, energy-filter
 4. `alaric-result-check|download|upload|clean` move or free bulk data. The checksum is the durable identity, so data is re-fetchable.
 
 ## Downstream
-`alaric-pool-graph` (graph JSON, `--select` for twice-visited fragments), `alaric-propagate-provenance`, then `alaric-chain --count | -o DIR` (`chains.txt`, `chains.json`, per-fragment pose dirs), `alaric-chain-focus`, `alaric-chain-coordinates`. `alaric-copy`, `alaric-count-poses` and `alaric-rmsd` are helpers (`alaric-rmsd POOL_DIR` writes `rmsd.txt`, or `rmsd.npy` above 100k poses, into the pool dir, taking `DATA/reference.pdb`, `DATA/pdbcode.txt` and the `frag<N>` path component as inputs).
+`alaric-pool-graph` (graph JSON, `--select` for twice-visited fragments; see `documents/pool-graph.md`), `alaric-propagate-provenance`, then `alaric-chain --count | -o DIR` (`chains.txt`, `chains.json`, per-fragment pose dirs), `alaric-chain-focus`, `alaric-chain-coordinates`. `alaric-copy`, `alaric-count-poses` and `alaric-rmsd` are helpers (`alaric-rmsd POOL_DIR` writes `rmsd.txt`, or `rmsd.npy` above 100k poses, into the pool dir, taking `DATA/reference.pdb`, `DATA/pdbcode.txt` and the `frag<N>` path component as inputs).
 
 ## Seamless and best-fit
 - The project cache is Alaric's own sigil/checksum scheme. Seamless only computes checksums and canonical JSON; there is no `seamless-run` in project actions.

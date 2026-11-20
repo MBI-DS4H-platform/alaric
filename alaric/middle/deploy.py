@@ -606,6 +606,20 @@ def _clear_stale_scripts(action_dir: Path) -> None:
             old.unlink()
 
 
+def remote_project_dir(deploy_root: str) -> str:
+    """The remote directory that lists the deployed actions by name.
+
+    ``ALARIC_PROJECT`` (default ``PROJECT``) is taken relative to the deployment dir,
+    unless it is an absolute path.
+    """
+    project_value = os.environ.get("ALARIC_PROJECT", "PROJECT").rstrip("/")
+    if not project_value:
+        raise MiddleError("ALARIC_PROJECT must not be empty")
+    if project_value.startswith("/"):
+        return project_value
+    return f"{deploy_root.rstrip('/')}/{project_value}"
+
+
 def _remote_push(*, host: str, action, sigil: str, files: dict[str, str], file_fields: dict[str, Path]) -> None:
     """Ship the generated scripts and DATA file params to the remote.
 
@@ -617,11 +631,8 @@ def _remote_push(*, host: str, action, sigil: str, files: dict[str, str], file_f
     """
     deploy_root = os.environ["ALARIC_REMOTE_DEPLOYMENT_DIR"].rstrip("/")
     result_root = os.environ["ALARIC_REMOTE_RESULT_DIR"].rstrip("/")
-    project_value = os.environ.get("ALARIC_PROJECT", "PROJECT").rstrip("/")
-    if not project_value:
-        raise MiddleError("ALARIC_PROJECT must not be empty")
     dest = f"{deploy_root}/SIGIL/{sigil}"
-    project_dir = project_value if project_value.startswith("/") else f"{deploy_root}/{project_value}"
+    project_dir = remote_project_dir(deploy_root)
     project_link_target = posixpath.relpath(dest, project_dir)
     global_data = f"{deploy_root}/DATA"
 
