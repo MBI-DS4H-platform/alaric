@@ -32,7 +32,7 @@ The workflow has five steps, each described in a section below:
 4. Calculate fragment RMSDs against the reference structure.
 5. Build chains: make the pool graph, then build the chains and analyse them.
 
-[The whole picture](#the-whole-picture), between steps 4 and 5, shows how the
+[The whole picture](#alaric-the-whole-picture), between steps 4 and 5, shows how the
 steps fit together.
 
 ## Installation
@@ -303,7 +303,7 @@ cluster nodes, use the other deployers in
   that can run in parallel, for example as separate cluster jobs;
 - `alaric-deploy remote` and `remote-chunk` copy the scripts to a remote
   cluster, where you submit them. The results stay on the cluster until you
-  download them (see [The whole picture](#the-whole-picture)).
+  download them (see [The whole picture](#alaric-the-whole-picture)).
 
 The deployer only changes where and how a result is computed, not the result.
 A result computed with one deployer is reused by all the others.
@@ -340,7 +340,7 @@ python -c 'import numpy as np; r = np.load("frag3/results/rmsd.npy"); print(r.mi
 Comparing these numbers along a gen shows which step loses the near-native
 poses.
 
-## The whole picture
+## Alaric: the whole picture
 
 Steps 2 to 4 are not done once. You go through them again for each gen that
 you add to a run. In full, the workflow is:
@@ -356,6 +356,8 @@ you add to a run. In full, the workflow is:
 5. **Run** the action with `run.sh`, which runs `check.sh` first.
 6. **Download** the result with `alaric-result-download`, if the action ran on
    a remote cluster ([documents/deployment.md](documents/deployment.md)).
+   ***This is normally only done for final fragment pools `fragX`,
+ which are up to nine orders of magnitude smaller than intermediate pools like `fragX-anchor-raw`.***
 7. **Calculate RMSDs** with `alaric-rmsd` (step 4).
 
 **Only `check.sh` requires that the input pools are physically present**, on
