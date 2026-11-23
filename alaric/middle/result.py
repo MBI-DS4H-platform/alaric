@@ -10,6 +10,10 @@ from .errors import ResultError
 from .project import Project
 
 
+# Build the full file list first so the total byte count stays fixed.
+_RSYNC_PROGRESS_ARGS = ("--no-inc-recursive", "--info=name0,progress2")
+
+
 def _sigil(action_dir: Path) -> str:
     path = action_dir / "sigil.txt"
     if not path.is_file():
@@ -147,6 +151,8 @@ def _download(action_dir: str | Path, *, provenance_only: bool = False) -> None:
                 "--exclude=*",
             ]
         )
+    else:
+        command.extend(_RSYNC_PROGRESS_ARGS)
     command.extend([f"{host}:{_remote_base(sigil)}/", str(tmp) + "/"])
     subprocess.run(command, check=True)
     if merge_into_existing:
@@ -184,7 +190,14 @@ def upload(action_dir: str | Path = ".") -> None:
     partial = remote + ".partial"
     subprocess.run(["ssh", host, f"rm -rf {partial} && mkdir -p {partial}"], check=True)
     subprocess.run(
-        ["rsync", "-a", "--partial", str(result) + "/", f"{host}:{partial}/"],
+        [
+            "rsync",
+            "-a",
+            "--partial",
+            *_RSYNC_PROGRESS_ARGS,
+            str(result) + "/",
+            f"{host}:{partial}/",
+        ],
         check=True,
     )
     subprocess.run(["scp", str(checksum), f"{host}:{partial}.CHECKSUM"], check=True)
