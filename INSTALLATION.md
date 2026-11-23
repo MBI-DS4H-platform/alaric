@@ -53,19 +53,19 @@ conda activate alaric
 
 `attract-jax` must be installed before `alaric`.
 
-From the `alaric` repository root:
-
 ```bash
 pip install -e attract-jax
 ```
 
-## 5. Install `alaric`
+## 4. Install `alaric`
 
 With the same `alaric` conda environment active, install `alaric` in editable
-mode:
+mode.
+
+From the `alaric` repository root:
 
 ```bash
-pip install -e .
+pip install -e attract-jax -e .
 ```
 
 You can check that the command-line entry points are available with:
@@ -74,10 +74,12 @@ You can check that the command-line entry points are available with:
 alaric-sigil --help
 ```
 
-## 6. Repeat the installation on the remote machine
+## 5. Repeat the installation on the remote cluster
+
+*(optional)*
 
 If you use Alaric's remote execution or deployment workflow, repeat the same
-installation steps on the remote machine:
+installation steps on the remote cluster:
 
 ```bash
 ssh <REMOTE_HOST>
@@ -85,21 +87,24 @@ cd ~/alaric
 git submodule update --init --recursive attract-jax
 source ~/miniforge3/etc/profile.d/conda.sh
 conda activate alaric
-pip install -e attract-jax
-pip install -e .
+pip install -e attract-jax -e .
 ```
 
-The remote machine needs its own working checkout, Miniforge installation,
+The remote cluster needs its own working checkout, Miniforge installation,
 conda environment, and editable installs. Installing locally is not enough,
 because remote jobs execute in the remote filesystem and remote Python
 environment.
 
-## 7. Configure environment variables
+***Note: you must also repeat steps 7 and 8 for the remote cluster***
+
+## 6. Configure environment variables
 
 Set the local and remote paths used by Alaric. For example:
 
 ```bash
 export ALARIC_DIR=~/alaric/alaric
+export ALARIC_NPROCS=8
+# The following is only required if you did step 5.
 export ALARIC_REMOTE_HOST=mbi-frontend
 export ALARIC_REMOTE_DEPLOYMENT_DIR=/users/sdevries/alaric-deployment
 export ALARIC_REMOTE_ALARIC_DIR=/users/sdevries/alaric/alaric
@@ -109,13 +114,13 @@ export ALARIC_REMOTE_RESULT_DIR=/data3/sdevries/alaric-results
 Meaning:
 
 - `ALARIC_DIR`: local path to the `alaric/` Python package directory.
-- `ALARIC_REMOTE_HOST`: SSH host name for the remote machine.
+- `ALARIC_NPROCS`: the number of processes to use for various actions, notably `anchor` and `organize`. Only needed for older Python versions.
+- `ALARIC_REMOTE_HOST`: SSH host name for the remote cluster frontend.
 - `ALARIC_REMOTE_DEPLOYMENT_DIR`: remote directory where deployment files are
   written.
 - `ALARIC_REMOTE_ALARIC_DIR`: remote path to the `alaric/` Python package
   directory.
 - `ALARIC_REMOTE_RESULT_DIR`: remote directory where results are stored.
-- `ALARIC_NPROCS`: the number of processes to use for various actions, notably `anchor` and `organize`. Only needed for older Python versions.
 
 To make these settings persistent, add them to your shell startup file:
 
@@ -132,7 +137,7 @@ source ~/.bashrc
 If you use a different shell, put the same `export` commands in that shell's
 startup file.
 
-## 8. Configure the fragment library
+## 7. Configure the fragment library
 
 Alaric also reads fragment-library paths from:
 
@@ -180,7 +185,7 @@ This file must exist on any machine that runs Alaric code. If you use remote
 execution, create `~/.alaric/fraglib.yaml` on the remote machine too, with paths
 that are valid from the remote machine.
 
-## 9. Install the Gaussian stacking-filter caches
+## 8. Install the Gaussian stacking-filter caches
 
 The `anchor` action's precomputed filters, and Preparic's stage 6, read twelve
 caches under `precomputed-filters/gaussian/`. They are not in git. Build them
@@ -196,7 +201,7 @@ single-filter builds, `--decompress` and `--check`. Nothing generates the caches
 automatically: a missing or corrupt cache is reported as an installation error
 that names this command.
 
-## 10. Quick verification
+## 9. Quick verification
 
 In a fresh shell:
 
