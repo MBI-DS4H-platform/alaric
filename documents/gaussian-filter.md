@@ -227,8 +227,22 @@ python util/gaussian-precalc-all.py [--root R]
 python util/gaussian-precalc.py rrm95 --output precomputed-filters/gaussian/rrm95
 ```
 
-Add `--decompress` to either command to install `X.npy` instead of
-`X.npy.zst`. Both forms verify against the same JSON entry (§7).
+The all-filter command verifies each generated cache against
+`alaric/gaussian_stacking_filter.json` using the runtime verifier. Add
+`--decompress` to either command to install `X.npy` instead of `X.npy.zst`.
+Both forms verify against the same JSON entry (§7).
+
+If you want to adopt caches whose decompressed bytes differ on your machine,
+run:
+
+```bash
+python util/gaussian-precalc-all.py --rehash
+```
+
+This removes the old `manifest.json` files, rebuilds all 12 caches, and
+generates new manifests and runtime checksums. The spec's cache metadata and
+build environment are updated together after verification. Use `--root` to
+select the cache root and `--spec` to select the JSON to update.
 
 To check that this machine reproduces the committed caches without touching
 the installed ones:
@@ -347,8 +361,10 @@ byte-identical.
 
 The order of the first build:
 
-1. `python util/gaussian-precalc-all.py` builds the 12 caches. Each directory
-   gets a `manifest.json` whose digests are read back from the published files.
+1. When bootstrapping a new specification, build each of the 12 caches with
+   `python util/gaussian-precalc.py NAME --output precomputed-filters/gaussian/NAME`.
+   Each directory gets a `manifest.json` whose digests are read back from the
+   published files.
 2. `python util/gaussian-filter-json.py --root . --output alaric/gaussian_stacking_filter.json`
    assembles the JSON from the module constants, the goldens and the 12
    manifests. It reads three rows of
@@ -368,7 +384,7 @@ prefilter or the grid is a new filter set:
    `CUTOFFS` and `REPORT_COUNTS` from the new report, and the vendored report
    copy and `REPORT_SOURCE` with it.
 2. Bump `FILTER_SET_VERSION`.
-3. Rebuild all caches: `python util/gaussian-precalc-all.py`.
+3. Rebuild each cache with `util/gaussian-precalc.py` as in the bootstrap steps.
 4. Regenerate the JSON: `python util/gaussian-filter-json.py --root . --output alaric/gaussian_stacking_filter.json`.
 5. Add the new `filter_set_version → spec_digest` pair to `DIGESTS` in
    `tests/test_gaussian_spec_json.py`. Keep the old pairs.

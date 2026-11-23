@@ -1,7 +1,11 @@
+import json
+import runpy
+
 import numpy as np
 import pytest
 
-from gaussian_common import ROOT  # noqa: F401
+from gaussian_common import ROOT
+from alaric import gaussian_cache as gc
 from alaric import gaussian_filter as gf
 from alaric import gaussian_precalc as gp
 from alaric import npy_io
@@ -48,3 +52,56 @@ def test_build_twice_identical_npy_sha256(tmp_path):
     }
     for k, e in spec["thresholds"]["rrm50"]["precalc"]["files"].items():
         assert m1["files"][k]["npy_sha256"] == e["npy_sha256"]
+
+
+def test_all_generator_verifies_and_rehashes(tmp_path, monkeypatch):
+    script = runpy.run_path(str(ROOT / "util" / "gaussian-precalc-all.py"))
+    names = gf.all_names()[:2]
+    spec = gf.load_spec()
+    # Keep validation of the model against the full generator specification.
+    full_core = gf.build_spec_core()
+    monkeypatch.setattr(gf, "all_names", lambda: names)
+    monkeypatch.setattr(gf, "build_spec_core", lambda: full_core)
+
+    first = spec["thresholds"][names[0]]["precalc"]
+    first["files"]["rotations"].update(sha256="0" * 64, npy_sha256="0" * 64)
+    spec_path = tmp_path / "spec.json"
+    original = json.dumps(spec)
+    spec_path.write_text(original)
+    args = ["--root", str(tmp_path), "--spec", str(spec_path)]
+
+    with pytest.raises(
+        gc.GaussianCacheInstallationError, match="compressed file has the wrong content"
+    ) as cli:
+        script["main"](args)
+    with pytest.raises(gc.GaussianCacheInstallationError) as runtime:
+        gc.verify_filter_cache(spec, names[0], tmp_path)
+    assert str(cli.value) == str(runtime.value)
+    assert spec_path.read_text() == original
+
+    directories = [tmp_path / spec["thresholds"][name]["precalc"]["dir"] for name in names]
+    for directory in directories:
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "manifest.json").write_text("stale manifest")
+
+    build_filter = gp.build_filter
+    write_manifest = gp.write_manifest
+
+    def build(name):
+        assert all(not (directory / "manifest.json").exists() for directory in directories)
+        return build_filter(name)
+
+    def manifest(*args):
+        assert all((directory / "rotations.npy.zst").is_file() for directory in directories)
+        assert spec_path.read_text() == original
+        return write_manifest(*args)
+
+    monkeypatch.setattr(gp, "build_filter", build)
+    monkeypatch.setattr(gp, "write_manifest", manifest)
+    assert script["main"]([*args, "--rehash"]) == 0
+    refreshed = gf.load_spec(spec_path)
+    assert refreshed["spec_digest"] == spec["spec_digest"]
+    for name, directory in zip(names, directories):
+        assert len(gc.verify_filter_cache(refreshed, name, tmp_path)) == 4
+        manifest_files = json.loads((directory / "manifest.json").read_text())["files"]
+        assert refreshed["thresholds"][name]["precalc"]["files"] == manifest_files
