@@ -49,14 +49,6 @@ conda create -n alaric python=3.12 pip
 conda activate alaric
 ```
 
-## 4. Install `attract-jax` first
-
-`attract-jax` must be installed before `alaric`.
-
-```bash
-pip install -e attract-jax
-```
-
 ## 4. Install `alaric`
 
 With the same `alaric` conda environment active, install `alaric` in editable
